@@ -21,11 +21,18 @@
 
 ## 3. Vocabulaire
 
-- **Rôle** : un agent spécialisé (PM, architecte, dev, validateur), le « danseur ».
-- **Coordinateur** : l'agent qui enchaîne les rôles, répond à leurs questions et intègre leur travail, le « chorégraphe ».
-- **Chaîne** : la suite fixe des phases d'une issue.
-- **Axe** : un réglage de la chaîne (qui cadre, qui tamponne, comment ça tourne).
-- **Préréglage** (ou chorégraphie) : une combinaison nommée des axes, lancée par une commande.
+- **Rôle** : un agent spécialisé. Chacun a son équivalent ballet :
+  - **PM** = *Dramaturg* : l'argument, le périmètre fonctionnel ;
+  - **Architecte** = *Choreographer* : la partition, le plan technique ;
+  - **Dev** = *Dancer* : il exécute ;
+  - **Validateur** = *Critic* : il juge et rend un verdict.
+- **Director** : moi. Je tamponne et je reçois les escalades.
+- **Coordinateur** = *Conductor* : il enchaîne les rôles, répond à leurs questions et intègre leur travail. Il ne danse pas et ne compose pas.
+- **Chaîne** : la suite fixe des phases d'une issue, en deux boucles :
+  - **Workshop** : le cadrage (moi, le PM, l'architecte en conseil sans plan) ;
+  - **Rehearsal** : l'exécution (plan de l'architecte, dev, validateur), jusqu'à la **Premiere**, le merge sur `main`.
+- **Axes** (*Parameters*) : les réglages de la chaîne (qui cadre, qui tamponne, comment ça tourne).
+- **Préréglage** (*Piece*) : une combinaison nommée des axes, lancée par une commande. Le répertoire est la liste des Pieces.
 - **Profil projet** : la description d'un projet que Ballet lit au lieu de la deviner.
 - **Tampon** : la validation d'une phase, par un agent (auto) ou par moi (manuel).
 - **Escalade** : un agent qui s'arrête et me demande de décider.
@@ -37,6 +44,8 @@ Le thème du ballet reste dans la doc ; les noms de skills restent explicites.
 **Cadrage (PM) → Plan (architecte) → Code (dev) → Validation (validateur) → Merge sur `main`**
 
 Elle est toujours la même. Seuls les axes changent la façon dont elle tourne.
+
+Le cadrage est le **Workshop**. Le plan, le code et la validation forment la **Rehearsal**. Le merge est la **Premiere**. En Workshop, l'architecte peut être consulté, mais il ne rend son plan officiel qu'en Rehearsal.
 
 ## 5. Les rôles
 
@@ -199,7 +208,9 @@ Attendre mon tampon n'est jamais un échec : le coordinateur me prévient et att
 
 Un préréglage n'est pas un skill de plus : c'est un raccourci qui appelle le bon coordinateur avec ses paramètres. Toute autre combinaison reste possible sans rien écrire.
 
-Pendant le test, plan et validation sont en **manuel** partout ; une étape passe en auto quand le journal montre que mes tampons n'y changent plus rien.
+**Piece v0 : `hybrid-track`.** Je cadre avec le PM (Workshop), puis **je déclenche moi-même le coordinateur** (`/ballet:hybrid-track`) : ce geste est mon tampon de cadrage, rien ne part automatiquement à la fin du Workshop. Ensuite plan, code, validation et merge s'enchaînent en **auto**, sauf escalade. Le Conductor merge dès que le Critic rend `APPROVED` et que la politique est verte.
+
+On part en auto dès le début, pour mesurer la qualité du validateur grâce au journal (refus, allers-retours, builds rouges, merges à corriger après coup). Les garde-fous restent actifs : déclencheurs d'escalade, plafond d'allers-retours, politique déterministe. Des Pieces avec **tampon manuel** (plan, validation) viendront plus tard, au fil des besoins.
 
 ## 8. La communication entre agents
 
@@ -317,7 +328,7 @@ Pourquoi le home du projet : le PM et le coordinateur y voient le contexte sans 
 
 1. Installer Mistral Vibe. Vérifier, CLI par CLI (Claude, Grok, Mistral), qu'un worker Orca reçoit une spec, voit les skills du plugin et sait appeler `ask` et `worker_done`, sur une tâche bidon.
 2. Construire Ballet : règles communes, rôles, routage, modèle de profil, `init-project`, manifeste du plugin. Vérifier l'installation dans les trois CLI.
-3. `coordinator` séquentiel, cadrage interactif, plan et validation en manuel, avec le journal d'événements.
+3. `coordinator` séquentiel, cadrage interactif, plan et validation en auto (Piece v0 `hybrid-track`), avec le journal d'événements.
 4. Rejouer les mêmes issues avec un dev Claude puis un dev Mistral, et comparer.
 5. Cadrage auto (`auto-track`).
 6. Un projet multi-repos (specs + front + back), pour éprouver le profil.
