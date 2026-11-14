@@ -33,7 +33,7 @@
   - **Rehearsal** : l'exécution (plan de l'architecte, dev, validateur), jusqu'à la **Premiere**, le merge sur `main`.
 - **Axes** (*Parameters*) : les réglages de la chaîne (qui cadre, qui tamponne, comment ça tourne).
 - **Préréglage** (*Piece*) : une combinaison nommée des axes, lancée par une commande. Le répertoire est la liste des Pieces.
-- **Profil projet** : la description d'un projet que Ballet lit au lieu de la deviner.
+- **Profil projet** : la partie projet de `.ballet/config.toml` (repos, preuves, zones sensibles, seuils), que Ballet lit au lieu de la deviner. Le même fichier surcharge les défauts du plugin (routage, seuils).
 - **Tampon** : la validation d'une phase, par un agent (auto) ou par moi (manuel).
 - **Escalade** : un agent qui s'arrête et me demande de décider.
 
@@ -90,7 +90,7 @@ Une consigne ne suffit pas : un agent peut la lire et la transgresser quand mêm
 - **coordinateur** : ne touche pas au code ; il publie sur GitHub ce que les rôles lui rendent, et il intègre, toujours par le script GitHub (section 5.4).
 
 **Zones interdites à tous les rôles**, sauf tâche explicitement dédiée et validée par moi :
-- le harnais : `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/`, la configuration des CLI, Ballet lui-même ;
+- le harnais : `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/`, `.ballet/`, la configuration des CLI, Ballet lui-même ;
 - les zones sensibles déclarées dans le profil projet (contrat d'API, sécurité, décisions d'architecture…) ;
 - les fichiers de CI et les hooks git ;
 - l'historique git : pas de réécriture, pas de force push, pas de suppression de branche.
@@ -174,7 +174,7 @@ Toute phase en auto peut escalader vers moi. Les déclencheurs par défaut :
 - un build instable (vert puis rouge sans changement) ;
 - en parallèle, un conflit de merge que le dev n'a pas résolu proprement.
 
-La liste est commune ; les seuils et les zones sensibles vont dans le profil projet.
+La liste est commune ; les seuils et les zones sensibles vont dans `.ballet/config.toml`.
 
 **Ce que fait une escalade :**
 - en séquentiel, la chaîne attend mon tampon ;
@@ -226,7 +226,9 @@ On part en auto dès le début, pour mesurer la qualité du validateur grâce au
 ## 9. Les agents
 
 - Orca sait lancer, entre autres : `claude`, `grok`, `mistral-vibe`, `codex`, `opencode`, `gemini-cli`, `kimi`.
-- **Le routage par rôle** est un réglage de Ballet, surchargeable par le profil projet ; il ne vit jamais dans les rôles. Changer de modèle modifie une ligne.
+- **Le routage par rôle** associe à chaque rôle un **CLI** et un **modèle**. Il ne vit jamais dans les rôles.
+- **Les défauts** sont dans le `config.toml` du plugin. **Un projet les surcharge** dans `.ballet/config.toml` (section `[roles.<rôle>]`). Le Conductor fusionne clé par clé : ce qui n'est pas surchargé hérite. Changer de modèle modifie une ligne.
+- **Vérifié au lancement, sur la configuration fusionnée** : la règle « validateur ≠ dev » et la capacité du CLI à lancer le modèle demandé. Sinon le Conductor refuse de démarrer.
 - Intention de départ : architecte Claude, dev Mistral, validateur Grok ou Claude.
 - **Seule règle : validateur ≠ dev**, pour que leurs angles morts ne se recouvrent pas.
 - Le dev commence sur Claude comme référence ; les mêmes issues sont ensuite rejouées avec Mistral et comparées (refus du validateur, allers-retours, builds rouges).
@@ -243,8 +245,8 @@ On part en auto dès le début, pour mesurer la qualité du validateur grâce au
 - les skills de rôles : `pm`, `architect`, `dev`, `validator` ;
 - les coordinateurs : `coordinator`, puis `parallel-coordinator` ;
 - les préréglages ;
-- les réglages par défaut : routage des agents, déclencheurs d'escalade, plafonds ;
-- le modèle de profil projet et le skill d'amorçage `init-project` ;
+- les réglages par défaut (`config.toml`) : routage des agents (CLI et modèle par rôle), déclencheurs d'escalade, plafonds ;
+- le modèle de `.ballet/config.toml` et le skill d'amorçage `init-project` ;
 - le format du journal d'événements ;
 - la doc et les décisions de la méthode ;
 - le manifeste du plugin.
@@ -272,22 +274,28 @@ Un skill est chargé à la demande, selon sa description : rien ne garantit qu'u
 - `AGENTS.md` : les règles propres au domaine ;
 - `CLAUDE.md`, qui importe `AGENTS.md` ;
 - les skills propres au projet dans `.claude/skills/`, avec `.agents/skills` lié vers ce dossier pour Mistral Vibe (créé par `init-project`) ;
-- le profil projet ;
+- `.ballet/config.toml` : le profil du projet et ses surcharges des défauts ;
 - les issues et les plans.
 
 **Une règle du projet l'emporte sur une règle commune** (un projet client qui impose des PR plutôt que le trunk-based, par exemple).
 
-### 10.5 Le profil projet
+### 10.5 Le profil projet : `.ballet/config.toml`
 
-Il absorbe les structures différentes : un seul repo (front, back et specs ensemble) ou un repo de specs avec des repos séparés. Il contient :
+Il vit dans le **home du projet** (repo unique, ou repo de specs en multi-repos). C'est un fichier TOML, pas une section de `AGENTS.md` : des scripts déterministes le lisent (politique, GitHub), et les rôles n'y ont pas accès en écriture. Il absorbe les structures différentes : un seul repo (front, back et specs ensemble) ou un repo de specs avec des repos séparés. Il contient :
 - les repos et leurs chemins ;
 - où vivent les issues et les plans, et l'**espace specs** où écrit le PM (repo ou dossier) ;
 - la commande de preuve de chaque repo ;
-- l'ordre entre repos (par exemple le back avant le front, quand le front consomme un contrat généré par le back) ;
+- les repos, chacun nommé librement par le projet, avec ses dépendances (`needs`) : un repo peut en attendre d'autres (par exemple une passerelle qui consomme un contrat généré par un service) ;
 - la politique de merge (trunk-based ou PR) ;
 - les règles communes héritées ;
 - les zones sensibles et les seuils d'escalade ;
-- les surcharges de routage des agents.
+- les surcharges de routage des agents (section `[roles.<rôle>]`).
+
+Les défauts viennent du `config.toml` du plugin ; le fichier projet les surcharge clé par clé.
+
+- **Facultatif pour les surcharges** (routage, seuils) : sans fichier, les défauts du plugin s'appliquent.
+- **Obligatoire pour les champs projet** (repos, preuve) : sans eux, le Conductor refuse de démarrer et renvoie vers `/ballet:init-project`.
+- **Vérifié au lancement** : un cycle dans les `needs`, ou un `needs` qui pointe vers un repo inconnu, fait refuser le démarrage.
 
 ## 11. Lancer Ballet
 
@@ -361,3 +369,5 @@ Pourquoi le home du projet : le PM et le coordinateur y voient le contexte sans 
 - Le langage des scripts de politique et GitHub (shell ou autre), pour qu'ils tournent partout sans dépendance.
 - La source de vérité d'une issue : le brouillon dans l'espace specs, ou l'issue GitHub une fois publiée ? Et comment une modification faite d'un côté rejoint l'autre.
 - Comment priver un rôle de `gh` et du jeton GitHub quand Orca le lance (variables d'environnement, permissions du CLI).
+- Le sens de « validateur ≠ dev » avec des surcharges : un même CLI avec un modèle d'une autre famille suffit-il ?
+- Le schéma exact de `.ballet/config.toml` (champs, noms, valeurs permises).
