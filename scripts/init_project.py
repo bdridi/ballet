@@ -38,7 +38,11 @@ A rule written in this file wins over a common rule.
 
 ## Domain
 
-(to fill in: invariants, architecture decisions; the domain words live in the glossary of the specs space)
+(to fill in: invariants; the domain words live in the glossary of the specs space)
+
+## Technical rules
+
+(set by the Choreographer, after the Director's yes: conventions every Dancer follows, each pointing to its ADR when there is one)
 """
 
 

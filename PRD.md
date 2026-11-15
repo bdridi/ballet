@@ -100,7 +100,7 @@ En Workshop, le Choreographer peut être consulté, mais il ne rend son plan off
 ### 5.2 Les quatre rôles
 
 - **Dramaturg** : cadre le périmètre fonctionnel et rédige l'issue et les specs (dans des fichiers, jamais sur GitHub directement). Répond aux questions de produit. Écrit dans l'espace specs du projet, nulle part ailleurs. Il travaille en amont du Conductor (Workshop interactif) ou lancé par lui (Workshop auto ou discovery).
-- **Choreographer** : lit le code, fixe les choix techniques et rend le plan, une section par repo. Seul à écrire les ADR (dossier `[project] adr`) et les spikes (branches `spike/NN-slug`, jamais mergées). Pour le reste, lecture seule : c'est le Conductor qui écrit le plan dans l'issue.
+- **Choreographer** : lit le code, fixe les choix techniques et rend le plan, une section par repo. Seul à écrire les ADR (dossier `[project] adr`), les spikes (branches `spike/NN-slug`, jamais mergées) et les règles techniques du projet dans `AGENTS.md`. Pour le reste, lecture seule : c'est le Conductor qui écrit le plan dans l'issue.
 - **Dancer** : exécute sa section du plan en red → green → refactor, commite. Preuve : la commande de preuve de son repo est verte. Écrit dans le code de son repo.
 - **Critic** : relit le travail et rend un verdict. Lecture seule. Première ligne de sa réponse : `VERDICT: APPROVED`, `VERDICT: REJECTED` ou `VERDICT: ESCALATE`, puis les preuves et les points à corriger.
 
@@ -113,12 +113,12 @@ Une consigne ne suffit pas : un agent peut la lire et la transgresser quand mêm
 **Le périmètre est fixé par rôle, dans Ballet, jamais par tâche :**
 - **Dancer** : écrit dans le code de son repo, hors espace specs et hors zones interdites. Le plan ne restreint pas les fichiers qu'il touche ;
 - **Dramaturg** : écrit dans l'**espace specs** (brouillons d'issues, specs, glossaire, opportunités…), déclaré dans le profil projet : un repo de specs, ou un dossier dans un repo unique. Jamais dans le code ;
-- **Choreographer** : écrit seulement les ADR (dossier `[project] adr`, sur `main`) et les spikes (code jetable et compte rendu `spikes/NN-slug.md`, sur une branche `spike/NN-slug` jamais mergée). Il **rend** son plan ; c'est le Conductor qui l'écrit dans l'issue ;
+- **Choreographer** : écrit seulement les ADR (dossier `[project] adr`, sur `main`), les spikes (code jetable et compte rendu `spikes/NN-slug.md`, sur une branche `spike/NN-slug` jamais mergée) et `AGENTS.md`, pour y imposer une règle technique (ses sections projet, jamais le bloc Ballet). Il **rend** son plan ; c'est le Conductor qui l'écrit dans l'issue ;
 - **Critic** : lecture seule. Il **rend** son verdict ; c'est le Conductor qui l'écrit dans l'issue ;
 - **Conductor** : ne touche pas au code ; il publie sur GitHub ce que les rôles lui rendent, et il intègre, toujours par le script GitHub (section 5.4).
 
 **Zones interdites à tous les rôles**, sauf tâche explicitement dédiée et validée par le Director :
-- le harnais : `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/`, `.ballet/`, la configuration des CLI, Ballet lui-même ;
+- le harnais : `AGENTS.md` (sauf pour le Choreographer), `CLAUDE.md`, `.claude/`, `.agents/`, `.ballet/`, la configuration des CLI, Ballet lui-même ;
 - les ADR, sauf pour le Choreographer ;
 - les zones sensibles déclarées dans le profil projet (contrat d'API, sécurité…) ;
 - les fichiers de CI et les hooks git ;
@@ -128,7 +128,7 @@ Une consigne ne suffit pas : un agent peut la lire et la transgresser quand mêm
 
 **Couche 2 — les permissions du CLI, quand il en a.** Le worker est lancé avec les droits les plus étroits que son CLI sait imposer :
 - Critic en lecture seule (mode plan ou agent en lecture seule) ; comme il n'écrit rien, pas même l'issue, ce mode lui suffit ;
-- Choreographer limité aux ADR et à ses branches de spike ;
+- Choreographer limité aux ADR, à `AGENTS.md` et à ses branches de spike ;
 - Dramaturg limité à l'espace specs ;
 - Dancer limité à son repo, sans accès en dehors du dossier de travail.
 
@@ -139,7 +139,7 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
 - Le Conductor l'exécute après chaque rôle et **applique son résultat tel quel** : il ne l'interprète pas, ne le discute pas, ne passe pas outre.
 - Ce qu'il vérifie :
   - **Critic** : `HEAD` n'a pas bougé et l'arbre de travail est propre (`git status --porcelain` vide) ;
-  - **Choreographer** : sur `main`, tous les fichiers modifiés sont dans le dossier des ADR ; seules des branches `spike/*` ont été créées ; il est revenu sur `main` ; l'arbre de travail est propre ; pas de réécriture d'historique ;
+  - **Choreographer** : sur `main`, tous les fichiers modifiés sont dans le dossier des ADR ou sont `AGENTS.md` ; seules des branches `spike/*` ont été créées ; il est revenu sur `main` ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dramaturg** : tous les fichiers modifiés sont dans l'espace specs, aucun dans une zone interdite ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dancer** : aucun fichier modifié par ses commits n'est dans l'espace specs, dans le dossier des ADR ni dans une zone interdite ; l'arbre de travail est propre ; le nouveau `HEAD` descend de l'ancien (pas de réécriture d'historique) ; aucune branche ni aucun tag créé ou supprimé.
   - **tous les rôles** : l'état GitHub de l'issue (corps, libellés, commentaires, état) est identique avant et après leur passage.
