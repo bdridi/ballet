@@ -10,21 +10,28 @@
 - [x] Marketplace du plugin : chemin local pendant le test.
 - [x] Scripts : Python, dernière version, bibliothèque standard uniquement, style « histoire » (voir `AGENTS.md`).
 
-## Étape 1 — Spike de plomberie (PRD §15.1)
+## Étape 1 — Spike de plomberie (PRD §15.1) ✅
 
 But : vérifier que la méthode tient sur Orca avant de construire quoi que ce soit. Seule étape qui peut invalider le PRD.
+Résultat : `docs/ADR/0001-plomberie-orca-trois-cli.md` (branche `spike/01-plomberie`).
 
-- [ ] Installer Mistral Vibe.
-- [ ] Écrire une tâche bidon et un skill bidon dans un plugin local minimal.
-- [ ] Pour chaque CLI (Claude, Grok, Mistral Vibe), lancer un worker Orca qui :
-  - [ ] reçoit sa spec ;
-  - [ ] voit le skill du plugin ;
-  - [ ] pose une question avec `ask` et reçoit la réponse ;
-  - [ ] termine avec `worker_done`.
-- [ ] Vérifier par CLI les permissions imposables : lecture seule, limite au dossier de travail, privation de `gh` et du jeton GitHub.
-- [ ] Noter les résultats dans `spikes/01-plomberie.md` et répondre aux questions ouvertes concernées (PRD §17).
+- [x] Installer Mistral Vibe.
+- [x] Écrire une tâche bidon et un skill bidon (skill projet ; le plugin local est testé à l'étape 2).
+- [x] Pour chaque CLI (Claude, Grok, Mistral Vibe), un worker Orca :
+  - [x] reçoit sa spec ;
+  - [x] voit le skill (Claude et Vibe nativement ; Grok non, voir l'ADR) ;
+  - [x] pose une question avec `ask` et reçoit la réponse ;
+  - [x] termine avec `worker_done`.
+- [x] Permissions imposables : **reportées** au spike 1 bis (voir ci-dessous). En attendant, consignes dans la spec et vérification du diff par le Conductor.
+- [x] Résultats dans `spikes/01-plomberie.md` (sur la branche du spike).
 
 **Fini quand** : on sait, CLI par CLI, ce qui marche, et le PRD est corrigé si besoin.
+
+## Spike 1 bis — Permissions imposées (plus tard)
+
+- [ ] Grok : privation du jeton par l'environnement du lancement (limite d'usage gratuit atteinte au spike 1).
+- [ ] Grok : limite au dossier de travail (le bac à sable `--sandbox workspace` n'a rien bloqué sous `/tmp`).
+- [ ] Orca : le lancement d'un worker passe bien l'environnement purgé (`GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`).
 
 ## Étape 2 — Squelette du plugin
 

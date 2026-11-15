@@ -23,14 +23,13 @@ Le PRD suppose qu'un worker Orca lancé avec n'importe lequel des trois CLI reç
 1. La méthode du PRD tient pour Claude et Grok : on garde les workers Orca et la communication en étoile via `ask` / `worker_done`.
 2. Les trois CLI sont utilisables comme workers. Le Dancer démarre sur Claude (référence du PRD §9), puis Mistral à l'étape 4.
 3. Le lien `.agents/skills` → `.claude/skills` est retenu pour Vibe (vérifié).
-4. Pour les permissions, on compte sur les réglages du CLI **plus** la politique déterministe du Conductor, jamais sur les réglages seuls (déjà dit au PRD §6). Les règles de refus (`--deny`, `--disallowedTools`, `denylist`) priment sur les bacs à sable.
-5. Le Conductor lance chaque worker avec un environnement purgé (`GH_TOKEN`, `GITHUB_TOKEN` retirés, `GH_CONFIG_DIR` vide) sauf pour le rôle qui doit parler à GitHub, et applique le réglage de permission propre à son CLI.
-6. Jamais `--agent auto-approve` sur Vibe pour un rôle contraint : il écrase la config.
+4. **Permissions : on n'impose rien pour l'instant.** Les workers suivent des consignes dans leur spec (lecture seule, dossier de travail, pas de `gh`, pas de jeton) et le **Conductor vérifie le diff** de chaque worker avant d'aller plus loin. L'imposition par le CLI est reportée à un spike 1 bis (`TASKS.md`). Pistes déjà vérifiées pour ce spike : règles de refus (`--deny`, `--disallowedTools`, `denylist`) et environnement purgé (`GH_TOKEN`, `GITHUB_TOKEN` retirés, `GH_CONFIG_DIR` vide) ; détails dans `spikes/01-plomberie.md`.
+5. Si on impose Vibe plus tard : jamais `--agent auto-approve` pour un rôle contraint, il écrase la config.
 
 ## Conséquences
 
 - `init-project` doit pré-approuver le dossier de confiance de Vibe (et vérifier celui de Grok), sinon un worker non interactif reste bloqué.
 - Le Conductor doit traiter Vibe comme un worker en mode terminal (autre cycle de vie que Claude et Grok) et vérifier son lancement.
 - À l'étape 2, tester le skill via le plugin (le spike n'a testé que des skills projet) et l'approbation de dossier côté Grok.
-- À rejouer quand la limite Grok sera levée : privation du jeton par l'environnement, et limite au dossier avec un chemin hors `/tmp`.
+- Spike 1 bis : privation du jeton et limite au dossier pour Grok, passage de l'environnement par Orca.
 - Le PRD §17 est mis à jour sur : visibilité des skills par Vibe, lien `.agents/skills`, permissions par CLI (partielles).
