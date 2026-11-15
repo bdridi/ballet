@@ -1,0 +1,11 @@
+{
+  "name": "ballet-local",
+  "owner": { "name": "Bilel Dridi" },
+  "plugins": [
+    {
+      "name": "ballet",
+      "source": "./",
+      "description": "Ballet : agents de code en chaîne sur Orca."
+    }
+  ]
+}

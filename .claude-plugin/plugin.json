@@ -1,0 +1,6 @@
+{
+  "name": "ballet",
+  "version": "0.1.0",
+  "description": "Ballet : une méthode commune pour faire travailler des agents de code (Claude, Grok, Mistral Vibe) en chaîne sur Orca.",
+  "author": { "name": "Bilel Dridi" }
+}
