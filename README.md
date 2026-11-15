@@ -23,7 +23,7 @@ python3 <path-to-ballet>/scripts/reset_plugin.py
 What it does:
 
 - **Claude Code**: adds the local marketplace `ballet-local`, installs `ballet@ballet-local` (user scope), checks the installed copy, and writes the user skill `reset-ballet` in `~/.claude/skills/`.
-- **Mistral Vibe**: links `~/.vibe/plugins/ballet` to the clone, and `~/.vibe/skills` to `~/.claude/skills`, so that Vibe sees the same user skills as Claude (including `reset-ballet`). A non-empty `~/.vibe/skills` folder is never overwritten: merge it by hand.
+- **Mistral Vibe**: links `~/.vibe/plugins/ballet` to the clone. Vibe reads it directly, so there is nothing to refresh; the `reset-ballet` skill is Claude only (in Vibe, run the script).
 - **Grok**: updates the plugin, or installs it from the clone (`--trust`: Grok requires explicit consent; Ballet contains no hook and no MCP server).
 
 The first time Vibe runs in a project, it asks to trust the folder ("Trust this folder?"): accept, otherwise it loads neither `AGENTS.md` nor the project's skills.
@@ -66,7 +66,7 @@ Code is always in English. Specs are in English by default (`[project] specs_lan
 
 ## Update
 
-After a `git pull` (or a change) in the clone, run `/reset-ballet` in Claude or Vibe, or directly:
+After a `git pull` (or a change) in the clone, run `/reset-ballet` in Claude, or directly:
 
 ```sh
 python3 <path-to-ballet>/scripts/reset_plugin.py
@@ -82,8 +82,6 @@ rm -r ~/.claude/skills/reset-ballet
 grok plugin uninstall ballet
 rm ~/.vibe/plugins/ballet
 ```
-
-The `~/.vibe/skills` link to `~/.claude/skills` is kept: remove it by hand if you no longer want Vibe to share Claude's user skills.
 
 ## Developing Ballet
 

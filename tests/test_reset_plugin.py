@@ -57,30 +57,27 @@ class ResetPluginTest(unittest.TestCase):
 
     # --- vibe
 
-    def test_vibe_recoit_le_plugin_et_les_skills_user_par_des_liens(self):
+    def test_vibe_recoit_un_lien_vers_le_clone(self):
         self._only("vibe")
         reset_plugin.reset_plugin(self.clone)
         self.assertEqual((self.vibe / "plugins" / "ballet").resolve(), self.clone.resolve())
-        self.assertEqual((self.vibe / "skills").resolve(), self.claude_skills.resolve())
 
-    def test_des_liens_vibe_deja_bons_ne_sont_pas_refaits(self):
+    def test_un_lien_vibe_deja_bon_n_est_pas_refait(self):
         self._only("vibe")
         reset_plugin.reset_plugin(self.clone)
-        report = reset_plugin.reset_plugin(self.clone)
-        self.assertTrue(all("déjà" in line for line in report), report)
+        self.assertIn("déjà", reset_plugin.reset_plugin(self.clone)[0])
 
-    def test_un_dossier_vibe_skills_non_vide_n_est_jamais_ecrase(self):
+    def test_un_dossier_vibe_plugin_non_vide_n_est_jamais_ecrase(self):
         self._only("vibe")
-        self._write(self.vibe / "skills" / "mine" / "SKILL.md")
+        self._write(self.vibe / "plugins" / "ballet" / "mine.md")
         report = reset_plugin.reset_plugin(self.clone)
-        self.assertTrue((self.vibe / "skills" / "mine" / "SKILL.md").exists())
-        self.assertIn("✗ vibe : skills user", report[1])
+        self.assertTrue((self.vibe / "plugins" / "ballet" / "mine.md").exists())
+        self.assertTrue(report[0].startswith("✗ vibe"))
 
-    def test_un_dossier_vibe_skills_vide_est_remplace_par_le_lien(self):
+    def test_vibe_ne_recoit_pas_les_skills_user_de_claude(self):
         self._only("vibe")
-        (self.vibe / "skills").mkdir(parents=True)
         reset_plugin.reset_plugin(self.clone)
-        self.assertTrue((self.vibe / "skills").is_symlink())
+        self.assertFalse((self.vibe / "skills").exists())
 
     # --- grok
 

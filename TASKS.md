@@ -70,6 +70,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
   - [x] Plugin en anglais, specs en anglais par défaut (`[project] specs_language`), texte affiché cité dans la langue du produit (0.3.0).
   - [ ] Ajustements après les Workshops suivants.
   - [ ] Plus tard : parcours, flux et expérience (le `/storyboard` de flownest).
+  - [ ] Plus tard : partager les skills user de Claude avec Vibe (lien `~/.vibe/skills` → `~/.claude/skills`), une fois le ménage des skills user fait.
 - [ ] `choreographer` : rend un plan, une section par repo, en lecture seule.
 - [ ] `dancer` : exécute le plan en red → green → refactor, commite, preuve verte.
 - [ ] `critic` : rend un verdict au format `VERDICT: …`, en lecture seule.

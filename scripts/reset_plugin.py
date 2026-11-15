@@ -3,7 +3,7 @@
     python3 reset_plugin.py
 
 À lancer une première fois pour installer, puis après chaque évolution du plugin
-(ou `/reset-ballet`, le skill user qu'il pose). Claude travaille sur une copie du plugin
+(ou `/reset-ballet`, le skill user qu'il pose pour Claude). Claude travaille sur une copie du plugin
 (son cache), qu'il ne rafraîchit pas tant que la version ne change pas : on désinstalle
 et on réinstalle. Vibe lit le clone par un lien, Grok le lit en local.
 """
@@ -50,7 +50,6 @@ def reset_plugin(source):
         report.append(_write_reset_skill(source))
     if _installed("vibe") or VIBE_HOME.exists():
         report.append(_link_vibe_plugin(source))
-        report.append(_link_vibe_skills())
     if _installed("grok"):
         report.append(_reset_grok(source))
     return report
@@ -91,11 +90,6 @@ def _write_reset_skill(source):
 
 def _link_vibe_plugin(source):
     return _link(VIBE_HOME / "plugins" / PLUGIN, source, "vibe : plugin")
-
-
-def _link_vibe_skills():
-    """Vibe lit les skills user dans ~/.vibe/skills : on y montre ceux de Claude."""
-    return _link(VIBE_HOME / "skills", CLAUDE_SKILLS, "vibe : skills user")
 
 
 def _reset_grok(source):
