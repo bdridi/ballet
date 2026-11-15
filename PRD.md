@@ -308,7 +308,7 @@ Les défauts viennent du `config.toml` du plugin ; le fichier projet les surchar
 - **Obligatoire pour les champs projet** (repos, preuve) : sans eux, le Conductor refuse de démarrer et renvoie vers `/ballet:init-project`.
 - **Vérifié au lancement** : un cycle dans les `needs`, ou un `needs` qui pointe vers un repo inconnu, fait refuser le démarrage.
 
-**Structure proposée.** C'est une proposition : le schéma exact reste une question ouverte (section 17).
+**Structure.** Le schéma exact est fixé dans `docs/ADR/0003-*` (clé `model` facultative par rôle, en plus de `cli`).
 
 Les défauts du plugin (extrait) :
 
@@ -429,7 +429,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 
 ## 17. Questions ouvertes
 
-Tranchées par le spike 1 et l'étape 2 : voir `docs/ADR/0001-*` et `0002-*`.
+Tranchées par le spike 1 et l'étape 2 : voir `docs/ADR/0001-*` à `0003-*`.
 
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
@@ -440,5 +440,3 @@ Tranchées par le spike 1 et l'étape 2 : voir `docs/ADR/0001-*` et `0002-*`.
 - Quelles permissions chaque CLI sait réellement imposer à un worker lancé par Orca (lecture seule, limite au dossier de travail), et comment Orca les lui passe.
 - La source de vérité d'une issue : le brouillon dans l'espace specs, ou l'issue GitHub une fois publiée ? Et comment une modification faite d'un côté rejoint l'autre.
 - Comment priver un worker de `gh` et du jeton GitHub quand Orca le lance (variables d'environnement, permissions du CLI).
-- Le sens de « Critic ≠ Dancer » avec des surcharges : un même CLI avec un modèle d'une autre famille suffit-il ?
-- Le schéma exact de `.ballet/config.toml` (champs, noms, valeurs permises).

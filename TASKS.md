@@ -45,14 +45,17 @@ Résultat : `docs/ADR/0002-plugin-unique-trois-cli.md`.
 
 **Fini quand** : un seul plugin sert les trois CLI.
 
-## Étape 3 — La config
+## Étape 3 — La config ✅
 
-- [ ] `config.toml` par défaut du plugin (routage par rôle, plafonds, seuils).
-- [ ] Schéma de `.ballet/config.toml` (PRD §10.5), et réponse à la question « Critic ≠ Dancer avec surcharges ».
-- [ ] Script de config : lire, fusionner clé par clé, vérifier (champs projet obligatoires, Critic ≠ Dancer, cycles et repos inconnus dans `needs`).
-- [ ] Tests du script, sans agent.
-- [ ] `init-project` minimal qui génère `.ballet/config.toml`, `AGENTS.md`, `CLAUDE.md` et le lien `.agents/skills`.
-- [ ] Lancer `init-project` sur antimurphy.
+Résultat : `docs/ADR/0003-schema-config-et-critic-dancer.md`, `config.toml`, `scripts/ballet_config.py`, `scripts/init_project.py`, `skills/init-project/`, `tests/` (`python3 -m unittest discover -s tests`).
+
+- [x] `config.toml` par défaut du plugin (routage par rôle, plafonds, seuils).
+- [x] Schéma de `.ballet/config.toml` (PRD §10.5), et réponse à la question « Critic ≠ Dancer avec surcharges ».
+- [x] Script de config : lire, fusionner clé par clé, vérifier (champs projet obligatoires, Critic ≠ Dancer, cycles et repos inconnus dans `needs`).
+- [x] Tests du script, sans agent.
+- [x] `init-project` minimal qui génère `.ballet/config.toml`, `AGENTS.md`, `CLAUDE.md` et le lien `.agents/skills`.
+- [x] Lancer `init-project` sur antimurphy (fichiers créés, non commités ; la preuve y est un marqueur qui échoue).
+- [x] README utilisateur (installation par CLI).
 
 **Fini quand** : antimurphy a sa config, et le script refuse les configs invalides.
 

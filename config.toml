@@ -1,0 +1,24 @@
+# Défauts de Ballet. Un projet les surcharge clé par clé dans .ballet/config.toml.
+
+[project]
+merge = "trunk"                  # ou "pr"
+rules = []                       # règles communes appliquées (noms de skills), à choisir par le projet
+
+[roles.dramaturg]
+cli = "claude"
+
+[roles.choreographer]
+cli = "claude"
+
+[roles.dancer]
+cli = "claude"                   # référence de départ, puis Mistral (PRD §9)
+
+[roles.critic]
+cli = "grok"                     # Critic ≠ Dancer
+
+[policy]
+sensitive_zones = []             # globs, valables dans tous les repos
+
+[escalation]
+max_round_trips = 2              # allers-retours Dancer ↔ Critic
+max_diff_lines = 400             # taille de diff au-delà de laquelle on escalade
