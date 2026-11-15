@@ -1,9 +1,7 @@
-import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -63,25 +61,9 @@ class InitProjectTest(unittest.TestCase):
         self.init()
         self.assertEqual(self.init()["created"], [])
 
-    def test_pose_le_skill_reset_ballet_qui_lance_le_script_du_clone(self):
-        clone = Path(__file__).resolve().parent.parent
-        with mock.patch.object(init_project, "CLAUDE_MARKETPLACES", self.project / "absent.json"):
-            self.init()
-        skill = (self.project / ".claude" / "skills" / "reset-ballet" / "SKILL.md").read_text()
-        self.assertIn("name: reset-ballet", skill)
-        self.assertIn(str(clone / "scripts" / "reset_plugin.py"), skill)
-
-    def test_le_clone_est_pris_dans_la_marketplace_locale_plutot_que_dans_le_cache(self):
-        clone = Path(self._tmp.name) / "clone"
-        (clone / ".claude-plugin").mkdir(parents=True)
-        (clone / ".claude-plugin" / "plugin.json").write_text('{"name": "ballet"}')
-        registry = Path(self._tmp.name) / "known_marketplaces.json"
-        registry.write_text(json.dumps({"ballet-local": {"source": {"source": "directory", "path": str(clone)}}}))
-        with mock.patch.object(init_project, "CLAUDE_MARKETPLACES", registry):
-            self.init()
-        skill = (self.project / ".claude" / "skills" / "reset-ballet" / "SKILL.md").read_text()
-        self.assertIn(str(clone / "scripts" / "reset_plugin.py"), skill)
-
+    def test_ne_pose_aucun_skill_dans_le_projet(self):
+        self.init()
+        self.assertEqual([p.name for p in (self.project / ".claude" / "skills").iterdir()], [".gitkeep"])
 
 if __name__ == "__main__":
     unittest.main()

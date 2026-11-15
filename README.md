@@ -3,7 +3,7 @@
 A common method to make coding agents (Claude, Grok, Mistral Vibe) work as a chain, on Orca.
 Ballet is a plugin: install it once, and all your projects benefit.
 
-> Status: under construction (v0.3). Today the plugin provides the `dramaturg` skill, the common rules (`tdd`, `bdd`, `ddd`, `clean-code`), the specs space templates (`templates/`) and project bootstrapping (`init-project`). The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
+> Status: under construction (v0.3.1). Today the plugin provides the `dramaturg` skill, the common rules (`tdd`, `bdd`, `ddd`, `clean-code`), the specs space templates (`templates/`) and project bootstrapping (`init-project`). The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
 
 ## Requirements
 
@@ -14,35 +14,21 @@ Ballet is a plugin: install it once, and all your projects benefit.
 
 ## Installation
 
-Once per CLI you use.
-
-### Claude Code
+One command installs Ballet for every CLI found on the machine (Claude Code, Mistral Vibe, Grok):
 
 ```sh
-claude plugin marketplace add <path-to-ballet>
-claude plugin install ballet@ballet-local
+python3 <path-to-ballet>/scripts/reset_plugin.py
 ```
 
-To try it without installing: `claude --plugin-dir <path-to-ballet>`.
+What it does:
 
-### Mistral Vibe
+- **Claude Code**: adds the local marketplace `ballet-local`, installs `ballet@ballet-local` (user scope), checks the installed copy, and writes the user skill `reset-ballet` in `~/.claude/skills/`.
+- **Mistral Vibe**: links `~/.vibe/plugins/ballet` to the clone, and `~/.vibe/skills` to `~/.claude/skills`, so that Vibe sees the same user skills as Claude (including `reset-ballet`). A non-empty `~/.vibe/skills` folder is never overwritten: merge it by hand.
+- **Grok**: updates the plugin, or installs it from the clone (`--trust`: Grok requires explicit consent; Ballet contains no hook and no MCP server).
 
-Vibe has no install command: link the repo into its plugins folder.
+The first time Vibe runs in a project, it asks to trust the folder ("Trust this folder?"): accept, otherwise it loads neither `AGENTS.md` nor the project's skills.
 
-```sh
-mkdir -p ~/.vibe/plugins
-ln -s <path-to-ballet> ~/.vibe/plugins/ballet
-```
-
-The first time it runs in a project, Vibe asks to trust the folder ("Trust this folder?"): accept, otherwise it loads neither `AGENTS.md` nor the project's skills.
-
-### Grok
-
-```sh
-grok plugin install <path-to-ballet> --trust
-```
-
-(`--trust`: Grok requires explicit consent to install a plugin. Ballet contains no hook and no MCP server.)
+To try Claude without installing: `claude --plugin-dir <path-to-ballet>`.
 
 ## Check the installation
 
@@ -66,8 +52,7 @@ The skill asks for the specs space, the proof command (the one that says "it's g
 
 - `.ballet/config.toml`: the project profile (repos, proof, rules, specs language, routing overrides);
 - `AGENTS.md` and `CLAUDE.md` (which imports `AGENTS.md`), without overwriting your existing files;
-- `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills;
-- the project skill `reset-ballet`, which reinstalls the plugin from your clone (see *Update*).
+- `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills.
 
 To check the configuration by hand:
 
@@ -81,21 +66,24 @@ Code is always in English. Specs are in English by default (`[project] specs_lan
 
 ## Update
 
-After a `git pull` (or a change) in the clone, run `/reset-ballet` from a bootstrapped project, or directly:
+After a `git pull` (or a change) in the clone, run `/reset-ballet` in Claude or Vibe, or directly:
 
 ```sh
 python3 <path-to-ballet>/scripts/reset_plugin.py
 ```
 
-Claude works on a copy of the plugin, which it does not refresh while the version is unchanged: the script uninstalls it, reinstalls it and checks that the copy has every file of the clone. For Vibe, it relinks if needed; for Grok, it runs `grok plugin update`. Then restart open sessions.
+Claude works on a copy of the plugin, which it does not refresh while the version is unchanged: the script uninstalls it, reinstalls it and checks that the copy has every file of the clone. For Vibe, it relinks if needed; for Grok, it runs `grok plugin update`. It also rewrites the `reset-ballet` skill, which therefore never drifts. Then restart open sessions.
 
 ## Uninstall
 
 ```sh
 claude plugin uninstall ballet@ballet-local
+rm -r ~/.claude/skills/reset-ballet
 grok plugin uninstall ballet
 rm ~/.vibe/plugins/ballet
 ```
+
+The `~/.vibe/skills` link to `~/.claude/skills` is kept: remove it by hand if you no longer want Vibe to share Claude's user skills.
 
 ## Developing Ballet
 

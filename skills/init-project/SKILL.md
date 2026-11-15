@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: Bootstraps a project for Ballet (profile `.ballet/config.toml`, AGENTS.md, CLAUDE.md, `.agents/skills` link, `reset-ballet` skill). Use once, in a project's home folder, before running the chain, or when the Conductor refuses to start for lack of a profile.
+description: Bootstraps a project for Ballet (profile `.ballet/config.toml`, AGENTS.md, CLAUDE.md, `.agents/skills` link). Use once, in a project's home folder, before running the chain, or when the Conductor refuses to start for lack of a profile.
 ---
 
 # init-project
@@ -18,7 +18,7 @@ You bootstrap the current project, which must be its home folder (single repo, o
    ```
 
    Options: `--specs-language fr` (default: `en`), `--rules tdd,bdd` to choose the common rules (default: `tdd,bdd,ddd,clean-code`), `--repo <name>` to name the repo.
-3. Report to the Director what was created (including the project skill `reset-ballet`, which reinstalls the plugin from its clone after each change: `/reset-ballet`), what already existed (never modified), and the result of the check.
+3. Report to the Director what was created, what already existed (never modified), and the result of the check.
 4. If `AGENTS.md` already existed, offer to add the instruction to load the common rules (see the template in `scripts/init_project.py`) without overwriting it.
 
 This skill only handles a **single repo**: for a multi-repo project, then add one `[repos.<name>]` section per repo (`path`, `proof`, `needs`) to `.ballet/config.toml` by hand, and check:

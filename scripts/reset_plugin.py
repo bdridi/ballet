@@ -1,10 +1,11 @@
-"""Réinstalle le plugin Ballet depuis son clone, pour chaque CLI présent sur la machine.
+"""Installe ou réinstalle le plugin Ballet depuis son clone, pour chaque CLI présent sur la machine.
 
     python3 reset_plugin.py
 
-À lancer après chaque évolution du plugin. Claude travaille sur une copie du plugin
+À lancer une première fois pour installer, puis après chaque évolution du plugin
+(ou `/reset-ballet`, le skill user qu'il pose). Claude travaille sur une copie du plugin
 (son cache), qu'il ne rafraîchit pas tant que la version ne change pas : on désinstalle
-et on réinstalle. Vibe lit le clone par un lien, Grok le lit en local : on vérifie.
+et on réinstalle. Vibe lit le clone par un lien, Grok le lit en local.
 """
 
 import json
@@ -15,20 +16,43 @@ from pathlib import Path
 
 PLUGIN = "ballet"
 MARKETPLACE = "ballet-local"
-CLAUDE_HOME = Path.home() / ".claude" / "plugins"
-VIBE_PLUGINS = Path.home() / ".vibe" / "plugins"
+CLAUDE_PLUGINS = Path.home() / ".claude" / "plugins"
+CLAUDE_SKILLS = Path.home() / ".claude" / "skills"
+VIBE_HOME = Path.home() / ".vibe"
+
+RESET_SKILL = """\
+---
+name: reset-ballet
+description: Reinstalls the Ballet plugin from its clone, for Claude, Vibe and Grok. Run it after each change to the plugin, or when a ballet skill looks outdated.
+---
+
+# reset-ballet
+
+Run the script of the Ballet clone (never the one of an installed copy, which may be outdated):
+
+```sh
+python3 "{script}"
+```
+
+Report each line to the Director. Remind them to restart open sessions:
+they keep the plugin they loaded at startup.
+
+This skill is written by that script, at each run: do not edit it by hand.
+"""
 
 
 def reset_plugin(source):
-    """Remet chaque CLI installé sur le clone `source` ; renvoie une ligne de bilan par CLI."""
+    """Remet chaque CLI installé sur le clone `source` ; renvoie une ligne de bilan par étape."""
     source = Path(source).resolve()
     report = []
     if _installed("claude"):
         report.append(_reset_claude(source))
-    if _installed("vibe") or VIBE_PLUGINS.parent.exists():
-        report.append(_link_vibe(source))
+        report.append(_write_reset_skill(source))
+    if _installed("vibe") or VIBE_HOME.exists():
+        report.append(_link_vibe_plugin(source))
+        report.append(_link_vibe_skills())
     if _installed("grok"):
-        report.append(_update_grok())
+        report.append(_reset_grok(source))
     return report
 
 
@@ -58,25 +82,46 @@ def _reset_claude(source):
     return "✓ claude : réinstallé depuis le clone"
 
 
-def _link_vibe(source):
-    link = VIBE_PLUGINS / PLUGIN
-    if link.is_symlink() and link.resolve() == source:
-        return "✓ vibe : le lien pointe déjà vers le clone"
-    if link.exists() and not link.is_symlink():
-        return f"✗ vibe : {link} est un vrai dossier, pas un lien ; à retirer à la main"
-    link.unlink(missing_ok=True)
-    VIBE_PLUGINS.mkdir(parents=True, exist_ok=True)
-    link.symlink_to(source)
-    return "✓ vibe : lien refait vers le clone"
+def _write_reset_skill(source):
+    skill = CLAUDE_SKILLS / "reset-ballet" / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(RESET_SKILL.format(script=source / "scripts" / "reset_plugin.py"), encoding="utf-8")
+    return f"✓ skill user reset-ballet : {skill}"
 
 
-def _update_grok():
+def _link_vibe_plugin(source):
+    return _link(VIBE_HOME / "plugins" / PLUGIN, source, "vibe : plugin")
+
+
+def _link_vibe_skills():
+    """Vibe lit les skills user dans ~/.vibe/skills : on y montre ceux de Claude."""
+    return _link(VIBE_HOME / "skills", CLAUDE_SKILLS, "vibe : skills user")
+
+
+def _reset_grok(source):
     if _run("grok", "plugin", "update", PLUGIN):
         return "✓ grok : mis à jour"
-    return "✗ grok : la mise à jour a échoué (voir `grok plugin list`)"
+    if _run("grok", "plugin", "install", str(source), "--trust"):
+        return "✓ grok : installé depuis le clone"
+    return "✗ grok : ni mise à jour ni installation (voir `grok plugin list`)"
 
 
 # --- outils -----------------------------------------------------------------
+
+
+def _link(link, target, label):
+    """Fait de `link` un lien vers `target`, sans jamais écraser un dossier qui a du contenu."""
+    if link.is_symlink() and link.resolve() == target.resolve():
+        return f"✓ {label} : le lien pointe déjà vers {target}"
+    if link.is_dir() and not link.is_symlink():
+        if any(link.iterdir()):
+            return f"✗ {label} : {link} est un vrai dossier non vide ; à fusionner à la main"
+        link.rmdir()
+    link.unlink(missing_ok=True)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    target.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    return f"✓ {label} : lien {link} → {target}"
 
 
 def _missing_in_claude_copy(source):
@@ -96,7 +141,7 @@ def _delivered(source):
 
 
 def _claude_install_path():
-    registry = CLAUDE_HOME / "installed_plugins.json"
+    registry = CLAUDE_PLUGINS / "installed_plugins.json"
     if not registry.exists():
         return None
     installs = json.loads(registry.read_text()).get("plugins", {}).get(f"{PLUGIN}@{MARKETPLACE}", [])
