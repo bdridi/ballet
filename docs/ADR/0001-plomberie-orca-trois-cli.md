@@ -31,5 +31,5 @@ Le PRD suppose qu'un worker Orca lancé avec n'importe lequel des trois CLI reç
 - `init-project` doit pré-approuver le dossier de confiance de Vibe (et vérifier celui de Grok), sinon un worker non interactif reste bloqué.
 - Le Conductor doit traiter Vibe comme un worker en mode terminal (autre cycle de vie que Claude et Grok) et vérifier son lancement.
 - À l'étape 2, tester le skill via le plugin (le spike n'a testé que des skills projet) et l'approbation de dossier côté Grok.
-- Spike 1 bis : privation du jeton et limite au dossier pour Grok, passage de l'environnement par Orca.
+- Spike 1 bis : les deux trous de Grok, privation du jeton par l'environnement et limite au dossier de travail.
 - Le PRD §17 est mis à jour sur : visibilité des skills par Vibe, lien `.agents/skills`, permissions par CLI (partielles).

@@ -31,7 +31,6 @@ Résultat : `docs/ADR/0001-plomberie-orca-trois-cli.md` (branche `spike/01-plomb
 
 - [ ] Grok : privation du jeton par l'environnement du lancement (limite d'usage gratuit atteinte au spike 1).
 - [ ] Grok : limite au dossier de travail (le bac à sable `--sandbox workspace` n'a rien bloqué sous `/tmp`).
-- [ ] Orca : le lancement d'un worker passe bien l'environnement purgé (`GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`).
 
 ## Étape 2 — Squelette du plugin
 
