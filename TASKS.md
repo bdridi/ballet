@@ -72,6 +72,8 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
   - [ ] Plus tard : parcours, flux et expérience (le `/storyboard` de flownest).
   - [ ] Plus tard : partager les skills user de Claude avec Vibe (lien `~/.vibe/skills` → `~/.claude/skills`), une fois le ménage des skills user fait.
 - [ ] `choreographer` : rend un plan, une section par repo, en lecture seule.
+  - [x] Skill `choreographer` : interview technique, décisions explicites (le Dancer n'improvise pas), plan par repo, slices seulement si besoin (0.4.0).
+  - [ ] Plan réel de FEAT-001 sur antimurphy, et ajustements.
 - [ ] `dancer` : exécute le plan en red → green → refactor, commite, preuve verte.
 - [ ] `critic` : rend un verdict au format `VERDICT: …`, en lecture seule.
 - [ ] Les règles communes minimales chargées par chaque rôle (tdd, clean code, trunk-based).
@@ -90,6 +92,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 
 - [ ] Créer le remote GitHub d'antimurphy.
 - [ ] Skill `conductor` : publie l'issue, enchaîne Choreographer → Dancer → Critic.
+- [ ] Slices : publier une issue par slice, liée à l'issue parente ; enchaîner leurs Rehearsals dans l'ordre ; fermer la parente avec la dernière.
 - [ ] Politique après chaque rôle ; renvoi une fois, escalade à la deuxième violation.
 - [ ] Plafond de 2 allers-retours Dancer ↔ Critic.
 - [ ] Déclencheurs d'escalade mécaniques dès la v0 (l'auto en dépend) : taille de diff, zone sensible, test modifié ou supprimé, `VERDICT: ESCALATE`, seconde violation.

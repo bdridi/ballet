@@ -61,6 +61,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 - **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi, le signal de réussite, les règles métier transverses et les limites, sans critères.
 - **Feature** (`FEAT-NNN`) : un comportement visible, quatre critères Gherkin au plus, une issue.
 - **Issue draft** : l'issue écrite par le Dramaturg dans l'espace specs, que le Conductor publie ; le Choreographer y ajoute le plan.
+- **Slice** (`FEAT-NNN.K`) : une part d'une feature trop grosse pour une seule session du Dancer, proposée par le Choreographer seulement si besoin. Chaque slice est une Rehearsal complète (code, validation, preuve verte, merge sur `main`) et couvre des critères entiers, ou un prérequis technique de la suivante.
 - **Glossary** (`glossary.md`) : la langue du projet ; chaque terme avec son nom de code et son texte affiché.
 
 **Langues.** Le plugin (skills, modèles, règles, README) est en anglais ; le PRD, `TASKS.md` et les ADR restent en français tant que la méthode bouge. Le code est toujours en anglais. Les specs sont dans la langue `[project] specs_language` (anglais par défaut) ; le texte affiché par le produit reste dans la langue du produit, cité tel quel. La conversation avec le Director se fait dans sa langue.
