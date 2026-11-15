@@ -42,14 +42,15 @@ class ConfigTest(unittest.TestCase):
 
     def test_sans_fichier_projet_les_defauts_s_appliquent(self):
         config = ballet_config.effective_config(self.project)
-        self.assertEqual(config["roles"]["critic"]["cli"], "grok")
+        self.assertEqual(config["roles"]["critic"], {"cli": "claude", "model": "opus"})
+        self.assertEqual(config["roles"]["dancer"], {"cli": "claude", "model": "sonnet"})
         self.assertEqual(config["escalation"]["max_round_trips"], 2)
 
     def test_la_surcharge_remplace_une_cle_et_le_reste_herite(self):
-        self.write_project_config(VALID_PROJECT + '\n[roles.dancer]\ncli = "mistral-vibe"\n')
+        self.write_project_config(VALID_PROJECT + '\n[roles.dancer]\nmodel = "haiku"\n')
         config = ballet_config.effective_config(self.project)
-        self.assertEqual(config["roles"]["dancer"]["cli"], "mistral-vibe")
-        self.assertEqual(config["roles"]["critic"]["cli"], "grok")
+        self.assertEqual(config["roles"]["dancer"], {"cli": "claude", "model": "haiku"})
+        self.assertEqual(config["roles"]["critic"], {"cli": "claude", "model": "opus"})
         self.assertEqual(config["escalation"]["max_diff_lines"], 400)
 
     def test_toml_invalide_est_refuse(self):
@@ -100,9 +101,17 @@ class ConfigTest(unittest.TestCase):
 
     # --- rôles
 
-    def test_critic_et_dancer_sur_le_meme_cli_sont_refuses(self):
-        self.write_project_config(VALID_PROJECT + '\n[roles.dancer]\ncli = "grok"\n')
+    def test_les_defauts_respectent_critic_different_de_dancer(self):
+        self.write_project_config(VALID_PROJECT)
+        self.assertEqual(self.problems(), [])
+
+    def test_critic_et_dancer_sur_le_meme_modele_sont_refuses(self):
+        self.write_project_config(VALID_PROJECT + '\n[roles.dancer]\nmodel = "opus"\n')
         self.assertProblem("Critic ≠ Dancer")
+
+    def test_critic_et_dancer_sur_des_cli_differents_sont_acceptes(self):
+        self.write_project_config(VALID_PROJECT + '\n[roles.dancer]\ncli = "mistral-vibe"\nmodel = "devstral"\n')
+        self.assertEqual(self.problems(), [])
 
     def test_meme_cli_avec_deux_modeles_explicites_differents_est_accepte(self):
         self.write_project_config(
@@ -113,7 +122,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_meme_cli_avec_un_seul_modele_explicite_est_refuse(self):
         self.write_project_config(
-            VALID_PROJECT + '\n[roles.dancer]\ncli = "claude"\nmodel = "a"\n[roles.critic]\ncli = "claude"\n'
+            VALID_PROJECT + '\n[roles.dancer]\nmodel = "a"\n[roles.critic]\nmodel = ""\n'
         )
         self.assertProblem("Critic ≠ Dancer")
 

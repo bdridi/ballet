@@ -13,8 +13,8 @@
 | `[project] rules` | liste de noms de skills du plugin (un nom inconnu est refusé) | `[]` |
 | `[repos.<nom>] path`, `proof` | texte, **obligatoires** ; au moins un repo | — |
 | `[repos.<nom>] needs` | liste de repos déclarés ; pas de cycle | `[]` |
-| `[roles.<rôle>] cli` | rôle parmi `dramaturg`, `choreographer`, `dancer`, `critic` ; CLI parmi `claude`, `grok`, `mistral-vibe`, `codex`, `opencode`, `gemini-cli`, `kimi` | claude, claude, claude, grok |
-| `[roles.<rôle>] model` | texte, facultatif | absent |
+| `[roles.<rôle>] cli` | rôle parmi `dramaturg`, `choreographer`, `dancer`, `critic` ; CLI parmi `claude`, `grok`, `mistral-vibe`, `codex`, `opencode`, `gemini-cli`, `kimi` | tous `claude` |
+| `[roles.<rôle>] model` | texte, facultatif (alias du CLI, ex. `opus`, `sonnet`) | Choreographer et Critic `opus`, Dancer `sonnet`, Dramaturg absent (défaut du CLI) |
 | `[policy] sensitive_zones` | liste de globs | `[]` |
 | `[escalation] max_round_trips`, `max_diff_lines` | entiers positifs | 2, 400 |
 
@@ -27,6 +27,10 @@ Vérifiée sur la configuration fusionnée, par le script, avant tout lancement 
 - même CLI : accepté **seulement si les deux rôles ont un `model` explicite et différent**.
 
 Le script ne sait pas dire si deux modèles sont de « familles » différentes : il n'impose que la différence explicite. Si on veut interdire par exemple deux modèles d'une même famille, il faudra une table de familles (à décider quand le cas se présentera).
+
+## Routage par défaut (2026-11-15)
+
+Tous les rôles sur Claude pour commencer : Dancer en `sonnet`, Choreographer et Critic en `opus`. « Critic ≠ Dancer » est respecté par la différence de modèle. Mistral (Dancer) et Grok (Critic) reviennent par surcharge quand on rejouera les comparaisons (PRD §15, étape 4).
 
 ## Conséquences
 

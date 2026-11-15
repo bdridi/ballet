@@ -9,12 +9,15 @@ cli = "claude"
 
 [roles.choreographer]
 cli = "claude"
+model = "opus"
 
 [roles.dancer]
-cli = "claude"                   # référence de départ, puis Mistral (PRD §9)
+cli = "claude"
+model = "sonnet"                 # Critic ≠ Dancer : même CLI, modèles explicites différents
 
 [roles.critic]
-cli = "grok"                     # Critic ≠ Dancer
+cli = "claude"
+model = "opus"
 
 [policy]
 sensitive_zones = []             # globs, valables dans tous les repos

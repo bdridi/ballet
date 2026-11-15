@@ -241,7 +241,7 @@ On part en auto dès le début, pour mesurer la qualité du Critic grâce au jou
 - **Le routage par rôle** associe à chaque rôle un **CLI** et un **modèle**. Il ne vit jamais dans les rôles.
 - **Les défauts** sont dans le `config.toml` du plugin. **Un projet les surcharge** dans `.ballet/config.toml` (section `[roles.<rôle>]`, où `<rôle>` est le nom du skill : `dramaturg`, `choreographer`, `dancer`, `critic`). Le Conductor fusionne clé par clé : ce qui n'est pas surchargé hérite. Changer de modèle modifie une ligne.
 - **Vérifié au lancement, sur la configuration fusionnée** : la règle « Critic ≠ Dancer » et la capacité du CLI à lancer le modèle demandé. Sinon le Conductor refuse de démarrer.
-- Intention de départ : Choreographer Claude, Dancer Mistral, Critic Grok ou Claude.
+- Départ : tous les rôles sur Claude (Choreographer et Critic en Opus, Dancer en Sonnet). Cible : Dancer Mistral, Critic Grok ou Claude.
 - **Seule règle : Critic ≠ Dancer**, pour que leurs angles morts ne se recouvrent pas.
 - Le Dancer commence sur Claude comme référence ; les mêmes issues sont ensuite rejouées avec Mistral et comparées (refus du Critic, allers-retours, builds rouges).
 
@@ -320,12 +320,15 @@ cli = "claude"
 
 [roles.choreographer]
 cli = "claude"
+model = "opus"
 
 [roles.dancer]
-cli = "claude"            # référence de départ, puis Mistral (section 9)
+cli = "claude"
+model = "sonnet"          # référence de départ, puis Mistral (section 9)
 
 [roles.critic]
-cli = "grok"              # Critic ≠ Dancer
+cli = "claude"
+model = "opus"            # Critic ≠ Dancer : modèle différent
 
 [escalation]
 max_round_trips = 2       # allers-retours Dancer ↔ Critic
