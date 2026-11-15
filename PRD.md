@@ -429,11 +429,9 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 
 ## 17. Questions ouvertes
 
+Tranchées par le spike 1 et l'étape 2 : voir `docs/ADR/0001-*` et `0002-*`.
+
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
-- Les commandes exactes d'installation du plugin dans chaque CLI.
-- Claude Code accepte-t-il `/dramaturg` sans le préfixe `ballet:` quand il n'y a pas d'ambiguïté ?
-- Mistral Vibe voit-il les skills du plugin quand Orca le lance (dossier de confiance, chemin du plugin) ?
-- Le lien `.agents/skills` → `.claude/skills` suffit-il à Mistral Vibe ?
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
 - Les automations Orca suffisent-elles pour déclencher le Workshop discovery ?
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.

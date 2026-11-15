@@ -32,12 +32,16 @@ Résultat : `docs/ADR/0001-plomberie-orca-trois-cli.md` (branche `spike/01-plomb
 - [ ] Grok : privation du jeton par l'environnement du lancement (limite d'usage gratuit atteinte au spike 1).
 - [ ] Grok : limite au dossier de travail (le bac à sable `--sandbox workspace` n'a rien bloqué sous `/tmp`).
 
-## Étape 2 — Squelette du plugin
+## Étape 2 — Squelette du plugin ✅ (réserve : Grok)
 
-- [ ] Manifeste du plugin Ballet, installable depuis le chemin local.
-- [ ] Un skill `dramaturg` minimal (description : « PM… »).
-- [ ] Installation vérifiée dans les trois CLI : `/ballet:dramaturg` répond partout.
-- [ ] Trancher : `/dramaturg` sans préfixe est-il accepté ?
+Résultat : `docs/ADR/0002-plugin-unique-trois-cli.md`.
+
+- [x] Manifeste du plugin Ballet, installable depuis le chemin local (`.claude-plugin/plugin.json`, marketplace locale `ballet-local`).
+- [x] Un skill `dramaturg` minimal (description : « Dramaturg (PM)… »).
+- [x] Les règles communes en skills d'un fichier chacun : `tdd`, `bdd`, `ddd`, `clean-code` (trunk-based viendra avec la politique de merge).
+- [x] Installation vérifiée : Claude et Vibe répondent à `/ballet:dramaturg`. Grok : installé et plugin reconnu, appel du skill **non testé** (limite d'usage gratuit).
+- [x] `/dramaturg` sans préfixe : accepté par Claude et Vibe.
+- [ ] Grok : vérifier `/ballet:dramaturg` quand la limite est levée.
 
 **Fini quand** : un seul plugin sert les trois CLI.
 
