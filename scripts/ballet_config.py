@@ -89,6 +89,8 @@ def _project_problems(config):
         problems.append("[project] specs doit être un texte")
     if project.get("merge") not in MERGE_POLICIES:
         problems.append(f"[project] merge doit valoir {' ou '.join(MERGE_POLICIES)}")
+    if not isinstance(project.get("adr"), str) or not project.get("adr"):
+        problems.append("[project] adr doit être un chemin de dossier, ex. docs/ADR/")
     if not _is_language_code(project.get("specs_language")):
         problems.append("[project] specs_language doit être un code de langue, ex. en ou fr")
     return problems

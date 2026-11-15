@@ -10,6 +10,8 @@
 |---|---|---|
 | `[project] specs` | texte, **obligatoire** (espace du Dramaturg) | — |
 | `[project] merge` | `"trunk"` ou `"pr"` | `"trunk"` |
+| `[project] specs_language` | code de langue (`en`, `fr`…) ; langue des specs, le code reste en anglais | `"en"` |
+| `[project] adr` | texte, dossier des ADR, où seul le Choreographer écrit | `"docs/ADR/"` |
 | `[project] rules` | liste de noms de skills du plugin (un nom inconnu est refusé) | `[]` |
 | `[repos.<nom>] path`, `proof` | texte, **obligatoires** ; au moins un repo | — |
 | `[repos.<nom>] needs` | liste de repos déclarés ; pas de cycle | `[]` |

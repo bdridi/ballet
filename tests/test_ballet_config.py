@@ -79,6 +79,14 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT)
         self.assertEqual(ballet_config.effective_config(self.project)["project"]["specs_language"], "en")
 
+    def test_les_adr_sont_dans_docs_adr_par_defaut(self):
+        self.write_project_config(VALID_PROJECT)
+        self.assertEqual(ballet_config.effective_config(self.project)["project"]["adr"], "docs/ADR/")
+
+    def test_un_dossier_adr_vide_est_refuse(self):
+        self.write_project_config(VALID_PROJECT.replace('specs = "specs/"', 'specs = "specs/"\nadr = ""'))
+        self.assertProblem("[project] adr doit être un chemin")
+
     def test_une_langue_des_specs_qui_n_est_pas_un_code_est_refusee(self):
         self.write_project_config(VALID_PROJECT.replace('specs = "specs/"', 'specs = "specs/"\nspecs_language = "français"'))
         self.assertProblem("specs_language doit être un code de langue")

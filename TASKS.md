@@ -73,6 +73,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
   - [ ] Plus tard : partager les skills user de Claude avec Vibe (lien `~/.vibe/skills` → `~/.claude/skills`), une fois le ménage des skills user fait.
 - [ ] `choreographer` : rend un plan, une section par repo, en lecture seule.
   - [x] Skill `choreographer` : interview technique, décisions explicites (le Dancer n'improvise pas), plan par repo, slices seulement si besoin (0.4.0).
+  - [x] Seul le Choreographer écrit les ADR (`[project] adr`) et les spikes (branches `spike/NN-slug`, jamais mergées) ; modèles `adr.md` et `spike.md` (0.4.1).
   - [ ] Plan réel de FEAT-001 sur antimurphy, et ajustements.
 - [ ] `dancer` : exécute le plan en red → green → refactor, commite, preuve verte.
 - [ ] `critic` : rend un verdict au format `VERDICT: …`, en lecture seule.
@@ -82,7 +83,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 
 ## Étape 5 — Les scripts déterministes
 
-- [ ] Script de politique : état git avant et après, zones interdites, périmètre par rôle, état GitHub de l'issue inchangé.
+- [ ] Script de politique : état git avant et après, zones interdites, périmètre par rôle (dont ADR et branches `spike/*` réservés au Choreographer), état GitHub de l'issue inchangé.
 - [ ] Script GitHub : la liste fermée d'opérations (PRD §5.4), chaque appel journalisé.
 - [ ] Tests sur des repos jouets.
 
