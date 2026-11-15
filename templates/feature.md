@@ -1,29 +1,29 @@
-# FEAT-NNN — Nom de la feature
+# FEAT-NNN — Feature name
 
-- **Statut** : draft | ready
-- **Capability** : CAP-NNN
-- **Répond à** : OPP-NNN (facultatif)
-- **Dépend de** : FEAT-NNN (facultatif)
+- **Status**: draft | ready
+- **Capability**: CAP-NNN
+- **Answers**: OPP-NNN (optional)
+- **Depends on**: FEAT-NNN (optional)
 
-## Problème
+## Problem
 
-Pour qui, et ce que ça coûte aujourd'hui. Une ou deux phrases reprises de l'opportunité ou de la capability.
+For whom, and what it costs today. One or two sentences taken from the opportunity or the capability.
 
-## Proposition
+## Proposal
 
-Ce que le produit saura faire, à gros grain. Une feature `draft` peut s'arrêter ici.
+What the product will do, coarse-grained. A `draft` feature may stop here.
 
-## Parcours
+## Journey
 
-Ce que la personne voit et fait, étape par étape, en langage métier : état vide, chargement, erreur. Absent si la feature n'a pas d'écran.
+What the person sees and does, step by step, in business language: empty state, loading, error. Product copy is quoted verbatim, in the product's language. Absent if the feature has no screen.
 
-## Règles
+## Rules
 
-Invariants, refus et cas limites tranchés pendant le Workshop.
+Invariants, refusals and edge cases settled during the Workshop. The capability's rules are not copied here: they become criteria.
 
-## Critères d'acceptation
+## Acceptance criteria
 
-Quatre au plus : au-delà, la feature est trop grosse et se recoupe. Des scénarios vérifiables, tagués `@FEAT-NNN-C1` : le même tag se retrouve sur les tests qui les couvrent. On ne renumérote jamais, on ajoute à la fin. L'avancement ne s'écrit pas ici.
+Four at most: beyond that, the feature is too big and gets re-cut. Checkable scenarios, tagged `@FEAT-NNN-C1`: the same tag appears on the tests that cover them. Never renumber, append at the end. Progress is not written here.
 
 ```gherkin
 @FEAT-NNN-C1
@@ -33,10 +33,10 @@ Scenario: alice …
   Then …
 ```
 
-## Hors périmètre
+## Out of scope
 
-Obligatoire : ce que la feature ne fait pas, et où c'est traité le cas échéant.
+Mandatory: what the feature does not do, and where it is handled, if anywhere.
 
-## Questions ouvertes
+## Open questions
 
 - [ ] …

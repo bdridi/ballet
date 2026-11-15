@@ -1,13 +1,19 @@
 ---
 name: ddd
-description: Règle commune DDD. À charger pour nommer et structurer le code selon le domaine métier (langage commun, invariants, limites de contexte).
+description: Common DDD rule. Load it to name and structure code after the business domain (ubiquitous language, invariants, bounded contexts).
 ---
 
 # DDD
 
-- Utilise le langage du domaine dans les specs, les tests et le code. Le glossaire du projet fait foi.
-- **Langue.** Specs, critères et produit dans la langue du produit ; code en anglais. Le glossaire de l'espace specs est l'unique table de correspondance : un terme y entre avec son nom métier et son nom de code en même temps, et le code n'emploie aucun nom de domaine qui n'y figure pas. Un renommage se fait d'abord dans le glossaire, puis dans le code.
-- Les scénarios Gherkin restent dans la langue du produit : un critère se vérifie en regardant le produit, qui affiche ses textes dans sa langue. Le lien entre un critère et son test passe par le tag (`@FEAT-NNN-Cn`), jamais par le texte du scénario : on ne traduit aucune phrase Gherkin dans le code.
-- Les invariants du domaine vivent dans le modèle, pas dans les couches techniques.
-- Une notion métier a un seul nom et un seul endroit où elle est définie.
-- Respecte les limites de contexte : pas de fuite d'un modèle dans un autre.
+- Use the domain language in the specs, the tests and the code. The project glossary is the authority.
+- Domain invariants live in the model, not in the technical layers.
+- A business notion has one name and one place where it is defined.
+- Respect bounded contexts: no model leaks into another.
+
+## Language
+
+- **Code is in English.** Always.
+- **Specs are in the specs language**: `[project] specs_language` in `.ballet/config.toml`, English by default. In English, a domain term and its code name are the same word: nothing to translate.
+- **Product copy stays in the product's language.** A criterion is checked by looking at the product, which displays its text in its own language: Gherkin quotes that text verbatim (`Then she sees « Voir ma trajectoire »`). The link between a criterion and its test is the tag (`@FEAT-NNN-Cn`), never the text of the scenario.
+- **The glossary is the only mapping.** A term enters it with its definition, its code name and its UI wording at the same time. The code uses no domain name that is not in it. A renaming happens in the glossary first, then in the code.
+- A notion with no equivalent in English (a local legal status, a national savings product) keeps its original name, as a loanword, in the glossary and in the code.

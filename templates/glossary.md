@@ -1,12 +1,16 @@
-# Glossaire
+# Glossary
 
-La langue commune du projet : celle des specs, des issues et du code. Un mot qui n'est pas ici n'existe pas encore : on le nomme et on le définit ici avant qu'une feature, un plan ou du code s'en serve.
+The common language of the project: that of the specs, the issues and the code. A word that is not here does not exist yet: name it and define it here before a feature, a plan or code uses it.
 
-Chaque terme a son nom métier (dans la langue du produit) et son nom dans le code (en anglais), écrits en même temps : la colonne « Dans le code » est obligatoire. Le code n'emploie aucun nom de domaine absent d'ici ; un renommage se fait ici d'abord, puis dans le code (règle `ballet:ddd`).
+Each term enters with its definition, its code name and its UI wording, all at once (rule `ballet:ddd`):
+- **In code**: mandatory. The name in the code, in English; the same word as the term when the specs are in English.
+- **UI wording**: how the product displays it, in the product's language; empty if the term never appears on screen.
 
-Un mot, un sens par contexte. Deux mots pour une même chose, ou un mot pour deux choses, est un défaut du modèle : on le corrige ici, puis dans le code.
+The code uses no domain name that is absent from here; a renaming happens here first, then in the code.
 
-## <contexte> : <ce qu'il couvre>
+One word, one meaning per context. Two words for the same thing, or one word for two things, is a flaw in the model: fix it here, then in the code.
 
-| Terme | Ce que c'est | Dans le code |
-| --- | --- | --- |
+## <context>: <what it covers>
+
+| Term | Meaning | In code | UI wording |
+| --- | --- | --- | --- |

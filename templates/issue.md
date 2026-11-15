@@ -1,23 +1,23 @@
-# <titre : `FEAT-NNN · <tranche>`, `BUG-NNN · <résumé>` ou `TASK-NNN · <résumé>`>
+# <title: `FEAT-NNN · <slice>`, `BUG-NNN · <summary>` or `TASK-NNN · <summary>`>
 
-- **Type** : feature | bug | task
-- **Source** : [FEAT-NNN](../features/FEAT-NNN-slug.md) · couvre C1, C2 — ou BUG-NNN, TASK-NNN (`backlog.md`)
-- **Repos** : <noms des repos du profil que l'issue touche, si le Dramaturg le sait ; sinon le Choreographer tranche>
+- **Type**: feature | bug | task
+- **Source**: [FEAT-NNN](../features/FEAT-NNN-slug.md) · covers C1, C2 — or BUG-NNN, TASK-NNN (`backlog.md`)
+- **Repos**: <names of the profile's repos the issue touches, if the Dramaturg knows; otherwise the Choreographer decides>
 
-<!-- Brouillon d'issue, écrit par le Dramaturg. Le Conductor le publie sur GitHub ; aucun rôle ne le publie lui-même.
-     Une feature, une issue. Les scénarios ne sont pas recopiés : l'issue cite les critères qu'elle couvre.
-     La section Plan reste vide : c'est le Choreographer qui l'écrit, en Rehearsal. -->
+<!-- Issue draft, written by the Dramaturg. The Conductor publishes it on GitHub; no role publishes it itself.
+     One feature, one issue. Scenarios are not copied: the issue cites the criteria it covers.
+     The Plan section stays empty: the Choreographer writes it, during the Rehearsal. -->
 
-## Contexte
+## Context
 
-- **feature** : une ou deux phrases sur ce que la tranche apporte ; les critères sont dans la feature.
-- **bug** : ce que dit la spec (`@FEAT-NNN-C1` ou la règle), ce que fait le produit, comment reproduire.
-- **task** : quoi, pourquoi, et comment on saura que c'est fait.
+- **feature**: one or two sentences on what this slice brings; the criteria are in the feature.
+- **bug**: what the spec says (`@FEAT-NNN-C1` or the rule), what the product does, how to reproduce.
+- **task**: what, why, and how we will know it is done.
 
-## Hors périmètre
+## Out of scope
 
-Ce que cette issue ne fait pas, quand la feature est découpée en plusieurs tranches.
+What this issue does not do, when the feature is cut into several slices.
 
 ## Plan
 
-<!-- Choreographer : une section `### <repo>` par repo touché. -->
+<!-- Choreographer: one `### <repo>` section per repo touched. -->

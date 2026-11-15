@@ -89,6 +89,8 @@ def _project_problems(config):
         problems.append("[project] specs doit être un texte")
     if project.get("merge") not in MERGE_POLICIES:
         problems.append(f"[project] merge doit valoir {' ou '.join(MERGE_POLICIES)}")
+    if not _is_language_code(project.get("specs_language")):
+        problems.append("[project] specs_language doit être un code de langue, ex. en ou fr")
     return problems
 
 
@@ -173,6 +175,10 @@ def _threshold_problems(config):
 def _table(config, name):
     value = config.get(name, {})
     return value if isinstance(value, dict) else {}
+
+
+def _is_language_code(value):
+    return isinstance(value, str) and value.isalpha() and value.islower() and len(value) in (2, 3)
 
 
 def _models_differ(first, second):

@@ -48,6 +48,11 @@ class InitProjectTest(unittest.TestCase):
         config = ballet_config.effective_config(self.project)
         self.assertEqual(config["repos"]["mon-projet"]["proof"], 'echo "a" && make test')
 
+    def test_la_langue_des_specs_choisie_est_ecrite_dans_le_profil(self):
+        init_project.init_project(self.project, specs="docs/", proof="make test", specs_language="fr")
+        config = ballet_config.effective_config(self.project)
+        self.assertEqual(config["project"]["specs_language"], "fr")
+
     def test_ne_remplace_aucun_fichier_existant(self):
         (self.project / "AGENTS.md").write_text("à moi")
         report = self.init()

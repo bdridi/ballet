@@ -51,17 +51,19 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 - **Tampon** : la validation d'une phase, par un rôle (auto) ou par le Director (manuel).
 - **Escalade** : le Conductor ou un worker s'arrête et demande au Director de décider.
 
-**L'espace specs** (tenu par le Dramaturg, modèles dans `templates/` du plugin)
+**L'espace specs** (tenu par le Dramaturg, modèles dans `templates/` du plugin, en anglais)
 
 - **Backlog** (`backlog.md`) : ce qui attend, en quatre sortes d'entrées :
-  - **Opportunité** (`OPP-NNN`) : un problème pour quelqu'un, jamais une solution ;
-  - **Retour** : ce qu'un test a montré, en attente d'être classé (écart → bug, rectification → feature révisée, besoin nouveau → opportunité) ;
+  - **Opportunity** (`OPP-NNN`) : un problème pour quelqu'un, jamais une solution ;
+  - **Feedback** : ce qu'un test a montré, en attente d'être classé (gap → bug, rectification → feature révisée, new need → opportunity) ;
   - **Bug** (`BUG-NNN`) : un écart entre la spec et le produit ;
-  - **Tâche** (`TASK-NNN`) : un travail sans comportement visible nouveau.
-- **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi et les limites, sans critères.
+  - **Task** (`TASK-NNN`) : un travail sans comportement visible nouveau.
+- **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi, le signal de réussite, les règles métier transverses et les limites, sans critères.
 - **Feature** (`FEAT-NNN`) : un comportement visible, quatre critères Gherkin au plus, une issue.
-- **Brouillon d'issue** : l'issue écrite par le Dramaturg dans l'espace specs, que le Conductor publie ; le Choreographer y ajoute le plan.
-- **Glossaire** (`glossary.md`) : la langue du projet.
+- **Issue draft** : l'issue écrite par le Dramaturg dans l'espace specs, que le Conductor publie ; le Choreographer y ajoute le plan.
+- **Glossary** (`glossary.md`) : la langue du projet ; chaque terme avec son nom de code et son texte affiché.
+
+**Langues.** Le plugin (skills, modèles, règles, README) est en anglais ; le PRD, `TASKS.md` et les ADR restent en français tant que la méthode bouge. Le code est toujours en anglais. Les specs sont dans la langue `[project] specs_language` (anglais par défaut) ; le texte affiché par le produit reste dans la langue du produit, cité tel quel. La conversation avec le Director se fait dans sa langue.
 
 ## 4. La chaîne
 

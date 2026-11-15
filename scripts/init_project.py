@@ -1,6 +1,6 @@
 """Amorce un projet pour Ballet, dans son home.
 
-    python3 init_project.py <dossier> --specs specs/ --proof "make test" [--repo nom] [--rules tdd,bdd]
+    python3 init_project.py <dossier> --specs specs/ --proof "make test" [--specs-language fr] [--repo nom] [--rules tdd,bdd]
 
 Ne remplace jamais un fichier existant : il le signale.
 """
@@ -16,10 +16,11 @@ import ballet_config
 DEFAULT_RULES = ("tdd", "bdd", "ddd", "clean-code")
 
 CONFIG_TEMPLATE = """\
-# Profil du projet pour Ballet. Les surcharges de routage vont ici (voir config.toml du plugin).
+# Ballet project profile. Overrides of the plugin defaults go here (see the plugin's config.toml).
 
 [project]
 specs = {specs}
+specs_language = {specs_language}
 rules = [{rules}]
 
 [repos.{repo}]
@@ -28,50 +29,50 @@ proof = {proof}
 """
 
 AGENTS_TEMPLATE = """\
-# {name} — règles du projet
+# {name} — project rules
 
-Ce projet suit la méthode Ballet. Son profil est dans `.ballet/config.toml`.
+This project follows the Ballet method. Its profile is in `.ballet/config.toml`.
 
-Avant de coder, charge les règles communes listées dans `[project] rules` du profil
-(skills `ballet:<règle>`, par exemple `ballet:tdd`).
-Une règle écrite dans ce fichier l'emporte sur une règle commune.
+Before coding, load the common rules listed in `[project] rules` of the profile
+(skills `ballet:<rule>`, e.g. `ballet:tdd`).
+A rule written in this file wins over a common rule.
 
-## Domaine
+## Domain
 
-(à compléter : glossaire, invariants, décisions d'architecture)
+(to fill in: invariants, architecture decisions; the domain words live in the glossary of the specs space)
 """
 
 RESET_SKILL_TEMPLATE = """\
 ---
 name: reset-ballet
-description: Réinstalle le plugin Ballet depuis son clone, pour Claude, Vibe et Grok. À lancer après chaque évolution du plugin, ou quand un skill ballet semble ancien.
+description: Reinstalls the Ballet plugin from its clone, for Claude, Vibe and Grok. Run it after each change to the plugin, or when a ballet skill looks outdated.
 ---
 
 # reset-ballet
 
-Lance le script du clone de Ballet (jamais celui d'une copie installée, qui peut être ancienne) :
+Run the script of the Ballet clone (never the one of an installed copy, which may be outdated):
 
 ```sh
 python3 "{script}"
 ```
 
-Rapporte au Director la ligne de chaque CLI. Rappelle-lui de redémarrer les sessions ouvertes :
-elles gardent le plugin qu'elles ont chargé au démarrage.
+Report each CLI's line to the Director. Remind them to restart open sessions:
+they keep the plugin they loaded at startup.
 
-Si le chemin n'existe plus, le clone a bougé : relance `/ballet:init-project` depuis le nouveau
-clone après avoir supprimé ce skill (`.claude/skills/reset-ballet/`).
+If the path no longer exists, the clone has moved: delete this skill (`.claude/skills/reset-ballet/`),
+then run `/ballet:init-project` again from the new clone.
 """
 
 PLUGIN_NAME = "ballet"
 CLAUDE_MARKETPLACES = Path.home() / ".claude" / "plugins" / "known_marketplaces.json"
 
 
-def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES):
+def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES, specs_language="en"):
     """Crée ce qui manque ; renvoie ce qui a été créé et ce qui existait déjà."""
     project_dir = Path(project_dir).resolve()
     repo = repo or _repo_name(project_dir)
     report = {"created": [], "kept": []}
-    _write_config(project_dir, specs, proof, repo, rules, report)
+    _write_config(project_dir, specs, proof, repo, rules, specs_language, report)
     _write_agents(project_dir, report)
     _write_claude(project_dir, report)
     _link_agent_skills(project_dir, report)
@@ -82,7 +83,12 @@ def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES):
 def main(argv):
     arguments = _parse(argv)
     report = init_project(
-        arguments.project_dir, arguments.specs, arguments.proof, arguments.repo, arguments.rules
+        arguments.project_dir,
+        arguments.specs,
+        arguments.proof,
+        arguments.repo,
+        arguments.rules,
+        arguments.specs_language,
     )
     _print(report)
     return _check(arguments.project_dir)
@@ -91,9 +97,10 @@ def main(argv):
 # --- étapes -----------------------------------------------------------------
 
 
-def _write_config(project_dir, specs, proof, repo, rules, report):
+def _write_config(project_dir, specs, proof, repo, rules, specs_language, report):
     text = CONFIG_TEMPLATE.format(
         specs=_toml_string(specs),
+        specs_language=_toml_string(specs_language),
         proof=_toml_string(proof),
         repo=repo,
         rules=", ".join(_toml_string(rule) for rule in rules),
@@ -178,6 +185,7 @@ def _parse(argv):
     parser.add_argument("project_dir")
     parser.add_argument("--specs", required=True, help="espace des specs, ex. specs/")
     parser.add_argument("--proof", required=True, help="commande de preuve, ex. make test")
+    parser.add_argument("--specs-language", default="en", help="langue des specs (défaut : en)")
     parser.add_argument("--repo", help="nom du repo (défaut : nom du dossier)")
     parser.add_argument("--rules", type=_split_rules, default=DEFAULT_RULES)
     return parser.parse_args(argv[1:])

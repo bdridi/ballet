@@ -66,7 +66,9 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 - [ ] `dramaturg` : un vrai Workshop sur antimurphy, jusqu'au brouillon d'issue dans l'espace specs.
   - [x] Modèles de l'espace specs, inspirés de flownest-specs : backlog (opportunités, retours, bugs, tâches), capability, feature, brouillon d'issue, glossaire (`templates/`).
   - [x] Skill `dramaturg` : capturer, trier les retours, arbitrer, grouper, découper, écrire et réviser une feature, rédiger le brouillon d'issue.
-  - [ ] Workshop réel sur antimurphy, et ajustements.
+  - [x] Workshop réel sur antimurphy (CAP-001 → FEAT-001) : signal de réussite et règles métier dans la capability, règle de langue (0.2.0).
+  - [x] Plugin en anglais, specs en anglais par défaut (`[project] specs_language`), texte affiché cité dans la langue du produit (0.3.0).
+  - [ ] Ajustements après les Workshops suivants.
   - [ ] Plus tard : parcours, flux et expérience (le `/storyboard` de flownest).
 - [ ] `choreographer` : rend un plan, une section par repo, en lecture seule.
 - [ ] `dancer` : exécute le plan en red → green → refactor, commite, preuve verte.

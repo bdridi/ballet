@@ -1,29 +1,30 @@
 ---
 name: init-project
-description: Amorce un projet pour Ballet (profil `.ballet/config.toml`, AGENTS.md, CLAUDE.md, lien `.agents/skills`, skill `reset-ballet`). À utiliser une fois, dans le dossier d'accueil d'un projet, avant de lancer la chaîne, ou quand le Conductor refuse de démarrer faute de profil.
+description: Bootstraps a project for Ballet (profile `.ballet/config.toml`, AGENTS.md, CLAUDE.md, `.agents/skills` link, `reset-ballet` skill). Use once, in a project's home folder, before running the chain, or when the Conductor refuses to start for lack of a profile.
 ---
 
 # init-project
 
-Tu amorces le projet courant, qui doit être son dossier d'accueil (repo unique, ou repo de specs).
+You bootstrap the current project, which must be its home folder (single repo, or specs repo).
 
-1. Demande au Director, s'il ne les a pas donnés :
-   - l'**espace des specs** (un dossier, ex. `docs/` ou `specs/`) ;
-   - la **commande de preuve**, celle dont le succès veut dire « c'est vert » (ex. `make test`).
-2. Lance le script, qui se trouve à `../../scripts/init_project.py` par rapport au dossier de ce skill :
+1. Ask the Director, unless they already gave them:
+   - the **specs space** (a folder, e.g. `docs/` or `specs/`);
+   - the **proof command**, the one whose success means "it's green" (e.g. `make test`);
+   - the **specs language**, only if it is not English (e.g. `fr` for a client who reads the specs).
+2. Run the script, found at `../../scripts/init_project.py` relative to this skill's folder:
 
    ```sh
-   python3 <chemin>/scripts/init_project.py . --specs "<specs>" --proof "<preuve>"
+   python3 <path>/scripts/init_project.py . --specs "<specs>" --proof "<proof>"
    ```
 
-   Option : `--rules tdd,bdd` pour choisir les règles communes (défaut : `tdd,bdd,ddd,clean-code`), `--repo <nom>` pour nommer le repo.
-3. Rapporte au Director ce qui a été créé (dont le skill projet `reset-ballet`, qui réinstalle le plugin depuis son clone après chaque évolution : `/reset-ballet`), ce qui existait déjà (jamais modifié), et le résultat de la vérification.
-4. Si `AGENTS.md` existait déjà, propose d'y ajouter la consigne de charger les règles communes (voir le modèle dans `scripts/init_project.py`) sans l'écraser.
+   Options: `--specs-language fr` (default: `en`), `--rules tdd,bdd` to choose the common rules (default: `tdd,bdd,ddd,clean-code`), `--repo <name>` to name the repo.
+3. Report to the Director what was created (including the project skill `reset-ballet`, which reinstalls the plugin from its clone after each change: `/reset-ballet`), what already existed (never modified), and the result of the check.
+4. If `AGENTS.md` already existed, offer to add the instruction to load the common rules (see the template in `scripts/init_project.py`) without overwriting it.
 
-Ce skill ne gère que le **mono-repo** : pour un projet multi-repos, ajoute ensuite à la main une section `[repos.<nom>]` par repo (`path`, `proof`, `needs`) dans `.ballet/config.toml`, puis vérifie :
+This skill only handles a **single repo**: for a multi-repo project, then add one `[repos.<name>]` section per repo (`path`, `proof`, `needs`) to `.ballet/config.toml` by hand, and check:
 
 ```sh
-python3 <chemin>/scripts/ballet_config.py check .
+python3 <path>/scripts/ballet_config.py check .
 ```
 
-Tu ne modifies que ces fichiers, et rien d'autre dans le projet.
+You change only these files, nothing else in the project.

@@ -1,91 +1,95 @@
 # Ballet
 
-Une méthode commune pour faire travailler des agents de code (Claude, Grok, Mistral Vibe) en chaîne, sur Orca.
-Ballet est un plugin : on l'installe une fois, tous vos projets en profitent.
+A common method to make coding agents (Claude, Grok, Mistral Vibe) work as a chain, on Orca.
+Ballet is a plugin: install it once, and all your projects benefit.
 
-> État : en construction (v0.1). Aujourd'hui, le plugin fournit le skill `dramaturg`, les règles communes (`tdd`, `bdd`, `ddd`, `clean-code`) et l'amorçage d'un projet (`init-project`). La méthode complète est décrite dans [`PRD.md`](PRD.md), le plan dans [`TASKS.md`](TASKS.md).
+> Status: under construction (v0.3). Today the plugin provides the `dramaturg` skill, the common rules (`tdd`, `bdd`, `ddd`, `clean-code`), the specs space templates (`templates/`) and project bootstrapping (`init-project`). The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
 
-## Prérequis
+## Requirements
 
-- macOS avec Orca installé et ouvert.
-- Au moins un de ces CLI, authentifié : Claude Code (`claude`), Grok (`grok`), Mistral Vibe (`vibe`).
-- Python 3.11 ou plus récent (bibliothèque standard uniquement).
-- Un clone de ce repo, par exemple `~/Workspace/ballet`. Dans les commandes ci-dessous, remplacez `<chemin-vers-ballet>` par ce chemin.
+- macOS with Orca installed and running.
+- At least one of these CLIs, authenticated: Claude Code (`claude`), Grok (`grok`), Mistral Vibe (`vibe`).
+- Python 3.11 or later (standard library only).
+- A clone of this repo, e.g. `~/Workspace/ballet`. In the commands below, replace `<path-to-ballet>` with that path.
 
 ## Installation
 
-Une seule fois par CLI que vous utilisez.
+Once per CLI you use.
 
 ### Claude Code
 
 ```sh
-claude plugin marketplace add <chemin-vers-ballet>
+claude plugin marketplace add <path-to-ballet>
 claude plugin install ballet@ballet-local
 ```
 
-Pour essayer sans installer : `claude --plugin-dir <chemin-vers-ballet>`.
+To try it without installing: `claude --plugin-dir <path-to-ballet>`.
 
 ### Mistral Vibe
 
-Vibe n'a pas de commande d'installation : on lie le repo dans son dossier de plugins.
+Vibe has no install command: link the repo into its plugins folder.
 
 ```sh
 mkdir -p ~/.vibe/plugins
-ln -s <chemin-vers-ballet> ~/.vibe/plugins/ballet
+ln -s <path-to-ballet> ~/.vibe/plugins/ballet
 ```
 
-Au premier lancement dans un projet, Vibe demande d'approuver le dossier (« Trust this folder? ») : acceptez, sinon il ne charge ni `AGENTS.md` ni les skills du projet.
+The first time it runs in a project, Vibe asks to trust the folder ("Trust this folder?"): accept, otherwise it loads neither `AGENTS.md` nor the project's skills.
 
 ### Grok
 
 ```sh
-grok plugin install <chemin-vers-ballet> --trust
+grok plugin install <path-to-ballet> --trust
 ```
 
-(`--trust` : Grok exige un accord explicite pour installer un plugin. Ballet ne contient ni hook ni serveur MCP.)
+(`--trust`: Grok requires explicit consent to install a plugin. Ballet contains no hook and no MCP server.)
 
-## Vérifier l'installation
+## Check the installation
 
-Dans l'un des CLI, lancez :
+In one of the CLIs, run:
 
 ```
 /ballet:dramaturg
 ```
 
-Le Dramaturg doit se présenter. `/dramaturg` sans préfixe fonctionne aussi dans Claude et Vibe tant qu'aucun autre skill ne porte ce nom.
+The Dramaturg should introduce itself. `/dramaturg` without the prefix also works in Claude and Vibe, as long as no other skill has that name.
 
-## Amorcer un projet
+## Bootstrap a project
 
-Dans le dossier d'accueil du projet (le repo unique, ou le repo de specs en multi-repos) :
+In the project's home folder (the single repo, or the specs repo for a multi-repo project):
 
 ```
 /ballet:init-project
 ```
 
-Le skill demande l'espace des specs et la commande de preuve (celle qui dit « c'est vert »), puis crée :
+The skill asks for the specs space, the proof command (the one that says "it's green") and, if it is not English, the specs language. It then creates:
 
-- `.ballet/config.toml` : le profil du projet (repos, preuve, règles, surcharges de routage) ;
-- `AGENTS.md` et `CLAUDE.md` (qui importe `AGENTS.md`), sans écraser vos fichiers existants ;
-- `.claude/skills/` et le lien `.agents/skills` vers ce dossier, pour que Vibe voie les skills du projet ;
-- le skill projet `reset-ballet`, qui réinstalle le plugin depuis votre clone (voir *Mettre à jour*).
+- `.ballet/config.toml`: the project profile (repos, proof, rules, specs language, routing overrides);
+- `AGENTS.md` and `CLAUDE.md` (which imports `AGENTS.md`), without overwriting your existing files;
+- `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills;
+- the project skill `reset-ballet`, which reinstalls the plugin from your clone (see *Update*).
 
-Pour vérifier la configuration à la main :
-
-```sh
-python3 <chemin-vers-ballet>/scripts/ballet_config.py check <dossier-du-projet>
-```
-
-## Mettre à jour
-
-Après un `git pull` (ou une modification) dans le clone, lancez `/reset-ballet` depuis un projet amorcé, ou directement :
+To check the configuration by hand:
 
 ```sh
-python3 <chemin-vers-ballet>/scripts/reset_plugin.py
+python3 <path-to-ballet>/scripts/ballet_config.py check <project-folder>
 ```
 
-Claude travaille sur une copie du plugin, qu'il ne rafraîchit pas tant que la version ne change pas : le script le désinstalle, le réinstalle et vérifie que la copie a tous les fichiers du clone. Pour Vibe, il refait le lien si besoin ; pour Grok, il lance `grok plugin update`. Redémarrez ensuite les sessions ouvertes.
+## Languages
 
-## Désinstaller
+Code is always in English. Specs are in English by default (`[project] specs_language` to change it, e.g. for a client who reads them). Text the product displays stays in the product's language: scenarios quote it verbatim, and the glossary maps each term to its code name and its UI wording. The rule is in the `ballet:ddd` skill.
+
+## Update
+
+After a `git pull` (or a change) in the clone, run `/reset-ballet` from a bootstrapped project, or directly:
+
+```sh
+python3 <path-to-ballet>/scripts/reset_plugin.py
+```
+
+Claude works on a copy of the plugin, which it does not refresh while the version is unchanged: the script uninstalls it, reinstalls it and checks that the copy has every file of the clone. For Vibe, it relinks if needed; for Grok, it runs `grok plugin update`. Then restart open sessions.
+
+## Uninstall
 
 ```sh
 claude plugin uninstall ballet@ballet-local
@@ -93,10 +97,10 @@ grok plugin uninstall ballet
 rm ~/.vibe/plugins/ballet
 ```
 
-## Développer Ballet
+## Developing Ballet
 
 ```sh
 python3 -m unittest discover -s tests
 ```
 
-Règles du repo : [`AGENTS.md`](AGENTS.md).
+Repo rules: [`AGENTS.md`](AGENTS.md).

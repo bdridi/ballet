@@ -1,11 +1,11 @@
 ---
 name: clean-code
-description: Règle commune de code propre. À charger avant d'écrire ou de relire du code : lisibilité, petites fonctions, noms qui disent l'intention.
+description: Common clean code rule. Load it before writing or reviewing code: readability, small functions, names that state the intent.
 ---
 
 # Clean code
 
-- Un nom dit l'intention ; pas de commentaire qui répète le code.
-- Une fonction fait une seule chose, à un seul niveau d'abstraction.
-- Pas de duplication, pas de code mort, pas de code « malin » : la lisibilité prime.
-- Le changement le plus petit qui répond à la demande.
+- A name states the intent; no comment that repeats the code.
+- A function does one thing, at one level of abstraction.
+- No duplication, no dead code, no "clever" code: readability comes first.
+- The smallest change that answers the request.

@@ -1,10 +1,10 @@
 ---
 name: bdd
-description: Règle commune BDD. À charger pour décrire un comportement attendu en exemples concrets (Given / When / Then) avant de le coder.
+description: Common BDD rule. Load it to describe an expected behaviour as concrete examples (Given / When / Then) before coding it.
 ---
 
 # BDD
 
-- Décris chaque comportement par des exemples concrets : Given (contexte), When (action), Then (résultat observable).
-- Les exemples parlent le langage du métier, pas celui du code.
-- Un exemple correspond à un scénario testable ; les scénarios d'une issue en forment les critères d'acceptation.
+- Describe each behaviour with concrete examples: Given (context), When (action), Then (observable result).
+- Examples speak the language of the business, not of the code.
+- One example is one testable scenario; the scenarios of an issue are its acceptance criteria.

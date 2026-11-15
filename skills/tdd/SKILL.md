@@ -1,12 +1,12 @@
 ---
 name: tdd
-description: Règle commune TDD. À charger avant d'écrire du code : un test qui échoue d'abord, puis le code minimal, puis le refactoring.
+description: Common TDD rule. Load it before writing code: a failing test first, then the minimal code, then the refactoring.
 ---
 
 # TDD
 
-1. Écris un test qui échoue, pour un seul comportement.
-2. Écris le code minimal qui le fait passer.
-3. Refactore, tests au vert.
+1. Write a failing test, for a single behaviour.
+2. Write the minimal code that makes it pass.
+3. Refactor, with the tests green.
 
-Pas de code de production sans test qui l'a demandé. Un test ne dépend ni de l'ordre d'exécution ni d'un autre test.
+No production code without a test that asked for it. A test depends neither on execution order nor on another test.

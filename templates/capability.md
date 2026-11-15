@@ -1,39 +1,39 @@
-# CAP-NNN — Nom de la capability
+# CAP-NNN — Capability name
 
-- **Répond à** : OPP-NNN, OPP-NNN
+- **Answers**: OPP-NNN, OPP-NNN
 
-Le chapeau métier de plusieurs features. Elle dit le pourquoi et les limites ; les critères vivent dans ses features, qui la déclarent (`Capability : CAP-NNN`). Ses features se lisent dans `features/README.md`, colonne Capability.
+The business umbrella of several features. It states the why and the limits; the criteria live in its features, which declare it (`Capability: CAP-NNN`). Its features are listed in `features/README.md`, Capability column.
 
-## Problème
+## Problem
 
-Pour qui, et ce que ça coûte aujourd'hui. Repris des opportunités qu'elle couvre.
+For whom, and what it costs today. Taken from the opportunities it covers.
 
-## Signal de réussite
+## Success signal
 
-Comment on saura que la capability a réussi : un comportement observable de la personne (Lean UX), pas une liste de features livrées.
+How we will know the capability succeeded: an observable behaviour of the person (Lean UX), not a list of shipped features.
 
-## Ce que le produit saura faire
+## What the product will do
 
-Le résultat d'ensemble, à gros grain, du point de vue de la personne : une page au plus.
+The overall outcome, coarse-grained, from the person's point of view: one page at most.
 
-## Parcours
+## Journey
 
-Le parcours d'ensemble, en langage métier : ce que la personne fait avant, pendant et après. Absent si la capability n'a pas d'écran.
+The overall journey, in business language: what the person does before, during and after. Absent if the capability has no screen.
 
-## Règles métier
+## Business rules
 
-Seulement les règles qui traversent plusieurs features, dans la langue du glossaire (Example Mapping, côté métier). Une règle propre à une feature reste dans la feature. Chaque feature en fait des critères ; une règle qui change ici fait réviser les features qui l'emploient.
+Only the rules that span several features, in the glossary's language (Example Mapping, business side). A rule specific to one feature stays in the feature. Each feature turns them into criteria; a rule that changes here makes the features that use it be revised.
 
-- **Nom de la règle** : …
+- **Rule name**: …
 
-## Mots du glossaire
+## Glossary terms
 
-Les termes de `glossary.md` qu'elle emploie, et ceux qu'elle introduit.
+The `glossary.md` terms it uses, and those it introduces.
 
-## Hors périmètre
+## Out of scope
 
-Obligatoire : ce que la capability ne couvre pas, et où c'est traité le cas échéant.
+Mandatory: what the capability does not cover, and where it is handled, if anywhere.
 
-## Questions ouvertes
+## Open questions
 
 - [ ] …

@@ -1,44 +1,44 @@
 # Backlog
 
-Ce qui attend d'être fait, une ligne par entrée. Le Dramaturg le tient : il capture, classe, fusionne et arbitre. Aucun avancement ici : une entrée quitte son tableau pour *Traités* dès qu'une capability, une feature ou un brouillon d'issue y répond.
+What is waiting to be done, one line per entry. The Dramaturg keeps it: captures, triages, merges and arbitrates. No progress here: an entry leaves its table for *Done* as soon as a capability, a feature or an issue draft answers it.
 
-## Prochainement
+## Next up
 
-Ce que le Dramaturg recommande de faire ensuite, dans l'ordre : 5 entrées au plus (`OPP-`, `BUG-`, `TASK-`, `CAP-` ou `FEAT-`), chacune avec sa raison en une ligne.
+What the Dramaturg recommends doing next, in order: 5 entries at most (`OPP-`, `BUG-`, `TASK-`, `CAP-` or `FEAT-`), each with its reason in one line.
 
 1. …
 
-## Opportunités
+## Opportunities
 
-Un problème pour quelqu'un, jamais une solution. Une piste peut figurer dans la preuve, après « Piste évoquée ».
+A problem for someone, never a solution. A lead may appear in the proof, after "Lead mentioned".
 
-| ID | Pour qui | Problème | Preuve |
+| ID | For whom | Problem | Proof |
 | --- | --- | --- | --- |
 
-## Retours
+## Feedback
 
-Les retours d'un test, notés tels quels en attendant d'être classés : **écart** (la spec le demande, le produit ne le fait pas) → bug ; **rectification** (le produit suit la spec, c'est elle qui est à revoir) → la feature est révisée ; **besoin nouveau** → opportunité.
+Points from a test, noted as they were said until they are triaged: **gap** (the spec asks for it, the product does not do it) → bug; **rectification** (the product follows the spec, the spec is what must change) → the feature is revised; **new need** → opportunity.
 
-| ID | Date, contexte | Ce qui a été vu |
+| ID | Date, context | What was seen |
 | --- | --- | --- |
 
 ## Bugs
 
-Un écart entre ce que dit la spec et ce que fait le produit. La spec ne bouge pas.
+A gap between what the spec says and what the product does. The spec does not move.
 
-| ID | Ce que dit la spec | Ce que fait le produit | Reproduire |
+| ID | What the spec says | What the product does | How to reproduce |
 | --- | --- | --- | --- |
 
-## Tâches
+## Tasks
 
-Un travail sans comportement visible nouveau (outillage, dette, montée de version) : il ne passe ni par une capability ni par une feature.
+Work with no new visible behaviour (tooling, debt, upgrades): it goes through neither a capability nor a feature.
 
-| ID | Quoi | Pourquoi |
+| ID | What | Why |
 | --- | --- | --- |
 
-## Traités
+## Done
 
-| ID | Résumé | Statut | Réponse |
+| ID | Summary | Status | Answer |
 | --- | --- | --- | --- |
 
-<!-- Statut : accepted (Réponse : CAP-NNN, FEAT-NNN ou le brouillon d'issue), merged (Réponse : l'ID qui l'absorbe), rejected (Réponse : la raison). -->
+<!-- Status: accepted (Answer: CAP-NNN, FEAT-NNN or the issue draft), merged (Answer: the ID that absorbs it), rejected (Answer: the reason). -->

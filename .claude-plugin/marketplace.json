@@ -5,7 +5,7 @@
     {
       "name": "ballet",
       "source": "./",
-      "description": "Ballet : agents de code en chaîne sur Orca."
+      "description": "Ballet: coding agents as a chain, on Orca."
     }
   ]
 }
