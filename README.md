@@ -66,7 +66,8 @@ Le skill demande l'espace des specs et la commande de preuve (celle qui dit « c
 
 - `.ballet/config.toml` : le profil du projet (repos, preuve, règles, surcharges de routage) ;
 - `AGENTS.md` et `CLAUDE.md` (qui importe `AGENTS.md`), sans écraser vos fichiers existants ;
-- `.claude/skills/` et le lien `.agents/skills` vers ce dossier, pour que Vibe voie les skills du projet.
+- `.claude/skills/` et le lien `.agents/skills` vers ce dossier, pour que Vibe voie les skills du projet ;
+- le skill projet `reset-ballet`, qui réinstalle le plugin depuis votre clone (voir *Mettre à jour*).
 
 Pour vérifier la configuration à la main :
 
@@ -76,7 +77,13 @@ python3 <chemin-vers-ballet>/scripts/ballet_config.py check <dossier-du-projet>
 
 ## Mettre à jour
 
-Le plugin est lu depuis votre clone : `git pull` dans le clone, puis `claude plugin marketplace update ballet-local` pour Claude. Vibe et Grok relisent le dossier tel quel (pour Grok, `grok plugin update`).
+Après un `git pull` (ou une modification) dans le clone, lancez `/reset-ballet` depuis un projet amorcé, ou directement :
+
+```sh
+python3 <chemin-vers-ballet>/scripts/reset_plugin.py
+```
+
+Claude travaille sur une copie du plugin, qu'il ne rafraîchit pas tant que la version ne change pas : le script le désinstalle, le réinstalle et vérifie que la copie a tous les fichiers du clone. Pour Vibe, il refait le lien si besoin ; pour Grok, il lance `grok plugin update`. Redémarrez ensuite les sessions ouvertes.
 
 ## Désinstaller
 

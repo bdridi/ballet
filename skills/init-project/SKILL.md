@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: Amorce un projet pour Ballet (profil `.ballet/config.toml`, AGENTS.md, CLAUDE.md, lien `.agents/skills`). À utiliser une fois, dans le dossier d'accueil d'un projet, avant de lancer la chaîne, ou quand le Conductor refuse de démarrer faute de profil.
+description: Amorce un projet pour Ballet (profil `.ballet/config.toml`, AGENTS.md, CLAUDE.md, lien `.agents/skills`, skill `reset-ballet`). À utiliser une fois, dans le dossier d'accueil d'un projet, avant de lancer la chaîne, ou quand le Conductor refuse de démarrer faute de profil.
 ---
 
 # init-project
@@ -17,7 +17,7 @@ Tu amorces le projet courant, qui doit être son dossier d'accueil (repo unique,
    ```
 
    Option : `--rules tdd,bdd` pour choisir les règles communes (défaut : `tdd,bdd,ddd,clean-code`), `--repo <nom>` pour nommer le repo.
-3. Rapporte au Director ce qui a été créé, ce qui existait déjà (jamais modifié), et le résultat de la vérification.
+3. Rapporte au Director ce qui a été créé (dont le skill projet `reset-ballet`, qui réinstalle le plugin depuis son clone après chaque évolution : `/reset-ballet`), ce qui existait déjà (jamais modifié), et le résultat de la vérification.
 4. Si `AGENTS.md` existait déjà, propose d'y ajouter la consigne de charger les règles communes (voir le modèle dans `scripts/init_project.py`) sans l'écraser.
 
 Ce skill ne gère que le **mono-repo** : pour un projet multi-repos, ajoute ensuite à la main une section `[repos.<nom>]` par repo (`path`, `proof`, `needs`) dans `.ballet/config.toml`, puis vérifie :

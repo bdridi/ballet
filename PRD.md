@@ -51,6 +51,18 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 - **Tampon** : la validation d'une phase, par un rôle (auto) ou par le Director (manuel).
 - **Escalade** : le Conductor ou un worker s'arrête et demande au Director de décider.
 
+**L'espace specs** (tenu par le Dramaturg, modèles dans `templates/` du plugin)
+
+- **Backlog** (`backlog.md`) : ce qui attend, en quatre sortes d'entrées :
+  - **Opportunité** (`OPP-NNN`) : un problème pour quelqu'un, jamais une solution ;
+  - **Retour** : ce qu'un test a montré, en attente d'être classé (écart → bug, rectification → feature révisée, besoin nouveau → opportunité) ;
+  - **Bug** (`BUG-NNN`) : un écart entre la spec et le produit ;
+  - **Tâche** (`TASK-NNN`) : un travail sans comportement visible nouveau.
+- **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi et les limites, sans critères.
+- **Feature** (`FEAT-NNN`) : un comportement visible, quatre critères Gherkin au plus, une issue.
+- **Brouillon d'issue** : l'issue écrite par le Dramaturg dans l'espace specs, que le Conductor publie ; le Choreographer y ajoute le plan.
+- **Glossaire** (`glossary.md`) : la langue du projet.
+
 ## 4. La chaîne
 
 **Workshop** (Dramaturg) → **Rehearsal** : plan (Choreographer) → code (Dancer) → validation (Critic) → **Premiere** : merge sur `main`

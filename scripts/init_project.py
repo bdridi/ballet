@@ -6,6 +6,7 @@ Ne remplace jamais un fichier existant : il le signale.
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -40,6 +41,30 @@ Une règle écrite dans ce fichier l'emporte sur une règle commune.
 (à compléter : glossaire, invariants, décisions d'architecture)
 """
 
+RESET_SKILL_TEMPLATE = """\
+---
+name: reset-ballet
+description: Réinstalle le plugin Ballet depuis son clone, pour Claude, Vibe et Grok. À lancer après chaque évolution du plugin, ou quand un skill ballet semble ancien.
+---
+
+# reset-ballet
+
+Lance le script du clone de Ballet (jamais celui d'une copie installée, qui peut être ancienne) :
+
+```sh
+python3 "{script}"
+```
+
+Rapporte au Director la ligne de chaque CLI. Rappelle-lui de redémarrer les sessions ouvertes :
+elles gardent le plugin qu'elles ont chargé au démarrage.
+
+Si le chemin n'existe plus, le clone a bougé : relance `/ballet:init-project` depuis le nouveau
+clone après avoir supprimé ce skill (`.claude/skills/reset-ballet/`).
+"""
+
+PLUGIN_NAME = "ballet"
+CLAUDE_MARKETPLACES = Path.home() / ".claude" / "plugins" / "known_marketplaces.json"
+
 
 def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES):
     """Crée ce qui manque ; renvoie ce qui a été créé et ce qui existait déjà."""
@@ -50,6 +75,7 @@ def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES):
     _write_agents(project_dir, report)
     _write_claude(project_dir, report)
     _link_agent_skills(project_dir, report)
+    _write_reset_skill(project_dir, report)
     return report
 
 
@@ -97,7 +123,36 @@ def _link_agent_skills(project_dir, report):
     report["created"].append(link)
 
 
+def _write_reset_skill(project_dir, report):
+    script = _plugin_clone() / "scripts" / "reset_plugin.py"
+    text = RESET_SKILL_TEMPLATE.format(script=script)
+    _write_unless_exists(project_dir / ".claude" / "skills" / "reset-ballet" / "SKILL.md", text, report)
+
+
 # --- outils -----------------------------------------------------------------
+
+
+def _plugin_clone():
+    """Le clone de Ballet : la marketplace locale de Claude qui le sert, sinon le dossier de ce script.
+
+    Ce script peut tourner depuis la copie que Claude garde en cache : il ne faut pas la désigner.
+    """
+    for path in _local_marketplaces():
+        if _is_ballet(path):
+            return path
+    return Path(__file__).resolve().parent.parent
+
+
+def _local_marketplaces():
+    if not CLAUDE_MARKETPLACES.exists():
+        return []
+    marketplaces = json.loads(CLAUDE_MARKETPLACES.read_text()).values()
+    return [Path(m["source"]["path"]) for m in marketplaces if m["source"].get("source") == "directory"]
+
+
+def _is_ballet(path):
+    manifest = path / ".claude-plugin" / "plugin.json"
+    return manifest.exists() and json.loads(manifest.read_text()).get("name") == PLUGIN_NAME
 
 
 def _write_unless_exists(path, text, report):
