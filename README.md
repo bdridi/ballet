@@ -60,6 +60,19 @@ To check the configuration by hand:
 python3 <path-to-ballet>/scripts/ballet_config.py check <project-folder>
 ```
 
+## Run a Piece
+
+Once a feature is ready (framed with `/ballet:dramaturg`), from the project's home folder, in Orca:
+
+```
+/ballet:hybrid-track #12                       # an existing issue
+/ballet:hybrid-track #12 #13 #14               # a queue of issues, one after the other
+/ballet:hybrid-track FEAT-002 FEAT-003         # ready features: the Choreographer creates their issues and slices
+/ballet:hybrid-track FEAT-002 --plan auto      # without the Director's review of the plan
+```
+
+Everything is sequential: one Rehearsal at a time, each from `main` after the previous merge; the slices of a feature play before the next item. By default (`--plan review`, `[escalation] plan_approval = true`), the queue stops once the Choreographer has published a plan: read it, label the issue `ballet:plan-approved`, and tell the Conductor to resume. Any escalation pauses the queue the same way. The state lives in `.ballet/run/`; `python3 <path-to-ballet>/scripts/ballet_rehearsal.py status` shows it.
+
 ## Watch the Rehearsals (concept)
 
 A local, read-only page that shows what happens in a project, live and in history: the Rehearsals, the role at work in each, and its journal as a thread (what the Conductor hands to each worker, every message received in full, every step of the script). It reads `.ballet/run/` and listens on 127.0.0.1 only.
