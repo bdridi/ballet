@@ -29,7 +29,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 |---|---|---|
 | **Director** | — | Moi. Je cadre avec le Dramaturg, je tamponne en manuel et je reçois les escalades. |
 | **Dramaturg** | PM | Cadre le périmètre fonctionnel, rédige l'issue et les specs. |
-| **Choreographer** | architecte | Rend le plan technique. |
+| **Choreographer** | architecte | Crée l'issue et son plan technique à partir d'une feature prête. |
 | **Dancer** | dev | Exécute le plan. |
 | **Critic** | validateur | Juge le travail et rend un verdict. |
 | **Conductor** (`conductor`, `parallel-conductor`) | coordinateur | Enchaîne les rôles, répond à leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
@@ -60,7 +60,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
   - **Task** (`TASK-NNN`) : un travail sans comportement visible nouveau.
 - **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi, le signal de réussite, les règles métier transverses et les limites, sans critères.
 - **Feature** (`FEAT-NNN`) : un comportement visible, quatre critères Gherkin au plus, une issue.
-- **Issue draft** : l'issue écrite par le Dramaturg dans l'espace specs, que le Conductor publie ; le Choreographer y ajoute le plan.
+- **Issue** : l'issue GitHub, créée par le Choreographer à partir d'une feature prête (ou d'un bug, d'une tâche du backlog), avec son plan. Elle ne vit que sur GitHub, jamais dans l'espace specs.
 - **Slice** (`FEAT-NNN.K`) : une part d'une feature trop grosse pour une seule session du Dancer, proposée par le Choreographer seulement si besoin. Chaque slice est une Rehearsal complète (code, validation, preuve verte, merge sur `main`) et couvre des critères entiers, ou un prérequis technique de la suivante.
 - **Glossary** (`glossary.md`) : la langue du projet ; chaque terme avec son nom de code et son texte affiché.
 
@@ -100,7 +100,7 @@ En Workshop, le Choreographer peut être consulté, mais il ne rend son plan off
 ### 5.2 Les quatre rôles
 
 - **Dramaturg** : cadre le périmètre fonctionnel et rédige l'issue et les specs (dans des fichiers, jamais sur GitHub directement). Répond aux questions de produit. Écrit dans l'espace specs du projet, nulle part ailleurs. Il travaille en amont du Conductor (Workshop interactif) ou lancé par lui (Workshop auto ou discovery).
-- **Choreographer** : lit le code, fixe les choix techniques et rend le plan, une section par repo. Seul à écrire les ADR (dossier `[project] adr`), les spikes (branches `spike/NN-slug`, jamais mergées) et les règles techniques du projet dans `AGENTS.md`. Pour le reste, lecture seule : c'est le Conductor qui écrit le plan dans l'issue.
+- **Choreographer** : part d'une feature prête, lit le code, fixe les choix techniques et crée l'issue avec son plan, une section par repo (et les issues de slices si besoin), par le script GitHub. Pose ses questions au Dramaturg quand la feature a des manques, et reste éveillé en attendant la réponse. Rend un rapport au Conductor, qui le journalise. Seul à écrire les ADR (dossier `[project] adr`), les spikes (branches `spike/NN-slug`, jamais mergées) et les règles techniques du projet dans `AGENTS.md`. Pour le reste, lecture seule.
 - **Dancer** : exécute sa section du plan en red → green → refactor, commite. Preuve : la commande de preuve de son repo est verte. Écrit dans le code de son repo.
 - **Critic** : relit le travail et rend un verdict. Lecture seule. Première ligne de sa réponse : `VERDICT: APPROVED`, `VERDICT: REJECTED` ou `VERDICT: ESCALATE`, puis les preuves et les points à corriger.
 
@@ -112,8 +112,8 @@ Une consigne ne suffit pas : un agent peut la lire et la transgresser quand mêm
 
 **Le périmètre est fixé par rôle, dans Ballet, jamais par tâche :**
 - **Dancer** : écrit dans le code de son repo, hors espace specs et hors zones interdites. Le plan ne restreint pas les fichiers qu'il touche ;
-- **Dramaturg** : écrit dans l'**espace specs** (brouillons d'issues, specs, glossaire, opportunités…), déclaré dans le profil projet : un repo de specs, ou un dossier dans un repo unique. Jamais dans le code ;
-- **Choreographer** : écrit seulement les ADR (dossier `[project] adr`, sur `main`), les spikes (code jetable et compte rendu `spikes/NN-slug.md`, sur une branche `spike/NN-slug` jamais mergée) et `AGENTS.md`, pour y imposer une règle technique (ses sections projet, jamais le bloc Ballet). Il **rend** son plan ; c'est le Conductor qui l'écrit dans l'issue ;
+- **Dramaturg** : écrit dans l'**espace specs** (backlog, capabilities, features, glossaire…), déclaré dans le profil projet : un repo de specs, ou un dossier dans un repo unique. Jamais dans le code ;
+- **Choreographer** : écrit seulement les ADR (dossier `[project] adr`, sur `main`), les spikes (code jetable et compte rendu `spikes/NN-slug.md`, sur une branche `spike/NN-slug` jamais mergée) et `AGENTS.md`, pour y imposer une règle technique (ses sections projet, jamais le bloc Ballet). Il crée l'issue avec son plan, et les issues de slices, **par le script GitHub uniquement**, puis rend son rapport au Conductor ;
 - **Critic** : lecture seule. Il **rend** son verdict ; c'est le Conductor qui l'écrit dans l'issue ;
 - **Conductor** : ne touche pas au code ; il publie sur GitHub ce que les rôles lui rendent, et il intègre, toujours par le script GitHub (section 5.4).
 
@@ -142,19 +142,20 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
   - **Choreographer** : sur `main`, tous les fichiers modifiés sont dans le dossier des ADR ou sont `AGENTS.md` ; seules des branches `spike/*` ont été créées ; il est revenu sur `main` ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dramaturg** : tous les fichiers modifiés sont dans l'espace specs, aucun dans une zone interdite ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dancer** : aucun fichier modifié par ses commits n'est dans l'espace specs, dans le dossier des ADR ni dans une zone interdite ; l'arbre de travail est propre ; le nouveau `HEAD` descend de l'ancien (pas de réécriture d'historique) ; aucune branche ni aucun tag créé ou supprimé.
-  - **tous les rôles** : l'état GitHub de l'issue (corps, libellés, commentaires, état) est identique avant et après leur passage.
+  - **tous les rôles** : l'état GitHub de l'issue (corps, libellés, commentaires, état) est identique avant et après leur passage ; seule exception, le Choreographer, qui crée l'issue de sa feature et ses slices (liées à la parente) et peut réécrire leur section `## Plan`.
 - Les zones interdites sont des motifs de chemins (globs), pour que la vérification reste mécanique.
 
 **Une violation n'est jamais intégrée.** Le Conductor ne pousse pas ; il renvoie le travail au rôle avec la liste des violations, une fois. À la deuxième violation, il escalade vers le Director. Toute violation est journalisée.
 
 ### 5.4 GitHub : un seul point de passage
 
-**Toute interaction avec GitHub passe par le Conductor, au moyen d'un script déterministe de Ballet.** Aucun rôle n'appelle `gh`, l'API GitHub ou `git push`.
+**Toute interaction avec GitHub passe par un script déterministe de Ballet** (`scripts/ballet_github.py`). Le Conductor l'appelle ; le Choreographer aussi, pour ses seules opérations (créer l'issue, créer une slice, lire une issue, réécrire son plan) ; le Dancer, seulement pour lire son issue. Aucun rôle n'appelle `gh`, l'API GitHub ou `git push` directement.
 
 - **Le script expose une liste fermée d'opérations**, chacune avec ses entrées vérifiées :
   - lire une issue ;
-  - créer ou mettre à jour une issue à partir d'un brouillon de l'espace specs ;
-  - écrire le plan rendu par le Choreographer dans sa section de l'issue ;
+  - créer une issue (Choreographer) ;
+  - créer une issue de slice, liée à sa parente (Choreographer) ;
+  - réécrire la section `## Plan` d'une issue (Choreographer) ;
   - cocher une tâche du plan ;
   - commenter (verdict du Critic, escalade, rapport final) ;
   - poser ou retirer un libellé ;
@@ -163,7 +164,7 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
 - **Aucune opération libre** : pas de commande `gh` arbitraire, pas de suppression, pas de modification des réglages du repo.
 - **Le Conductor décide quand appeler une opération, jamais comment elle s'exécute.**
 - **Chaque appel est journalisé** (opération, entrées, résultat), comme les transitions.
-- **Les rôles produisent, le script publie :** le Dramaturg rédige un brouillon d'issue dans l'espace specs, le Choreographer rend son plan, le Critic rend son verdict ; le Conductor les publie.
+- **Les rôles produisent, le script publie :** le Choreographer publie lui-même l'issue et ses slices, puis rend son rapport au Conductor, qui le journalise ; le Critic rend son verdict, le Conductor le publie.
 - **Garde-fous :** couche 2, les workers sont lancés sans accès à `gh` ni au jeton GitHub quand le CLI le permet ; couche 3, la politique vérifie que l'état GitHub de l'issue n'a pas bougé pendant le passage d'un rôle.
 
 ## 6. Les axes
@@ -247,12 +248,12 @@ On part en auto dès le début, pour mesurer la qualité du Critic grâce au jou
 
 - **En étoile** : tout passe par le Conductor. Les workers ne se parlent pas entre eux. Le Conductor sait qui a demandé quoi, peut répondre lui-même, arbitre et trace.
 - **Primitives Orca** : un worker pose une question avec `ask` et termine avec `worker_done` ; le Conductor répond avec `reply` et écrit à un worker avec `send`.
-- **Types de messages** : question, blocage, proposition de changement de plan, fini.
+- **Un seul format de message**, pour tous les échanges (`templates/message.md`) : une première ligne JSON, l'en-tête (`from`, `to`, `type`, `subject`, `round`), lue par le Conductor avec la bibliothèque standard ; puis le corps en Markdown, jamais échappé, pour les agents et le Director. Un en-tête qui n'est pas du JSON valide est renvoyé. Types : `question`, `answer`, `report`, `verdict`, `escalation`. Le Conductor ne lit que l'en-tête : il route sur `to`, compte les tours par sujet et par paire de rôles, et escalade vers le Director au-delà de `[escalation] max_exchange_rounds` (3 par défaut).
 - **Qui répond** : produit → Dramaturg, technique → Choreographer, hors cadre → Director.
-- **Un plafond d'échanges** par tâche avant escalade.
 - **Un plan modifié retourne toujours dans l'issue**, jamais seulement dans les messages.
 - En parallèle, un Dancer qui découvre une collision avec un autre Dancer le signale au Conductor, qui gère l'ordre de merge.
 - Le Dramaturg consulté pendant la Rehearsal est **éphémère par défaut** : lancé à la demande avec l'issue et la question, il répond à partir de l'issue et des specs. Si sa réponse change le périmètre, il met l'issue ou les specs à jour.
+- **Choreographer → Dramaturg** : si la feature a des manques (cas oublié, contradiction, critère flou, mot absent du glossaire, découpage trop gros), le Choreographer envoie une `question` au Dramaturg, points numérotés avec sa recommandation, et **reste éveillé** pour garder son contexte. Le Dramaturg rend une `answer`, point par point : une réponse simple, ou une modification déjà commitée dans les specs (commit et fichiers nommés, sans le diff ; le Choreographer relit les specs). Un manque purement technique reste au Choreographer.
 
 ## 9. Les agents
 
@@ -397,8 +398,8 @@ En mono-repo, une seule entrée `[repos.<nom>]` avec `path = "."` et sans `needs
 
 **Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca :
 
-1. `/ballet:dramaturg` : le Director cadre avec le Dramaturg (Workshop), qui rédige le brouillon d'issue dans l'espace specs.
-2. `/ballet:hybrid-track <brouillon>` : la Piece appelle `conductor` ; le Conductor publie d'abord l'issue sur GitHub par le script (#12), puis enchaîne la Rehearsal. Une issue déjà publiée se lance aussi : `/ballet:hybrid-track #12`.
+1. `/ballet:dramaturg` : le Director cadre avec le Dramaturg (Workshop), jusqu'à une feature prête dans l'espace specs.
+2. `/ballet:hybrid-track FEAT-NNN` : la Piece appelle `conductor` ; le Conductor lance le Choreographer, qui crée l'issue et son plan (#12), puis enchaîne la Rehearsal. Une issue déjà créée se lance aussi : `/ballet:hybrid-track #12`.
 3. Le Conductor lit le profil et lance Choreographer, Dancer et Critic dans les bons repos (`orca orchestration worker-start --worktree path:<repo>`).
 
 Autres entrées :
@@ -460,5 +461,5 @@ Tranchées par le spike 1 et l'étape 2 : voir `docs/ADR/0001-*` à `0003-*`.
 - Le Dramaturg consulté pendant la Rehearsal reste-t-il éphémère, ou devient-il persistant ?
 - Le format exact du journal d'événements.
 - Quelles permissions chaque CLI sait réellement imposer à un worker lancé par Orca (lecture seule, limite au dossier de travail), et comment Orca les lui passe.
-- La source de vérité d'une issue : le brouillon dans l'espace specs, ou l'issue GitHub une fois publiée ? Et comment une modification faite d'un côté rejoint l'autre.
+- ~~La source de vérité d'une issue~~ : tranché, il n'y a plus de brouillon ; le Choreographer crée l'issue à partir de la feature, et l'issue (plan compris) ne vit que sur GitHub.
 - Comment priver un worker de `gh` et du jeton GitHub quand Orca le lance (variables d'environnement, permissions du CLI).

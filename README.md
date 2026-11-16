@@ -3,7 +3,7 @@
 A common method to make coding agents (Claude, Grok, Mistral Vibe) work as a chain, on Orca.
 Ballet is a plugin: install it once, and all your projects benefit.
 
-> Status: under construction (v0.4.2). Today the plugin provides the `dramaturg` and `choreographer` skills, the common rules (`tdd`, `bdd`, `ddd`, `clean-code`), the specs space templates (`templates/`) and project bootstrapping (`init-project`). The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
+> Status: under construction (v0.6.0). Today the plugin provides the `dramaturg`, `choreographer` and `dancer` skills, the common rules (`tdd`, `bdd`, `ddd`, `clean-code`), the specs space templates (`templates/`) and project bootstrapping (`init-project`). The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
 
 ## Requirements
 

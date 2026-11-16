@@ -26,4 +26,5 @@ sensitive_zones = []             # globs, valables dans tous les repos
 
 [escalation]
 max_round_trips = 2              # allers-retours Dancer ↔ Critic
+max_exchange_rounds = 3          # tours de questions entre deux rôles sur un même sujet (message.md)
 max_diff_lines = 400             # taille de diff au-delà de laquelle on escalade

@@ -1,6 +1,6 @@
 # Backlog
 
-What is waiting to be done, one line per entry. The Dramaturg keeps it: captures, triages, merges and arbitrates. No progress here: an entry leaves its table for *Done* as soon as a capability, a feature or an issue draft answers it.
+What is waiting to be done, one line per entry. The Dramaturg keeps it: captures, triages, merges and arbitrates. No progress here: an entry leaves its table for *Done* as soon as a capability or a feature answers it, or the Choreographer turns it into an issue.
 
 ## Next up
 
@@ -41,4 +41,4 @@ Work with no new visible behaviour (tooling, debt, upgrades): it goes through ne
 | ID | Summary | Status | Answer |
 | --- | --- | --- | --- |
 
-<!-- Status: accepted (Answer: CAP-NNN, FEAT-NNN or the issue draft), merged (Answer: the ID that absorbs it), rejected (Answer: the reason). -->
+<!-- Status: accepted (Answer: CAP-NNN, FEAT-NNN or the issue #N), merged (Answer: the ID that absorbs it), rejected (Answer: the reason). -->

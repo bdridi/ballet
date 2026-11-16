@@ -160,6 +160,10 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_round_trips = 0\n")
         self.assertProblem("max_round_trips doit être un entier positif")
 
+    def test_plafond_d_echanges_invalide_est_refuse(self):
+        self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_exchange_rounds = 0\n")
+        self.assertProblem("max_exchange_rounds doit être un entier positif")
+
 
 if __name__ == "__main__":
     unittest.main()

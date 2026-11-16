@@ -63,7 +63,7 @@ Résultat : `docs/ADR/0003-schema-config-et-critic-dancer.md`, `config.toml`, `s
 
 Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore facile.
 
-- [ ] `dramaturg` : un vrai Workshop sur antimurphy, jusqu'au brouillon d'issue dans l'espace specs.
+- [ ] `dramaturg` : un vrai Workshop sur antimurphy, jusqu'à une feature prête dans l'espace specs.
   - [x] Modèles de l'espace specs, inspirés de flownest-specs : backlog (opportunités, retours, bugs, tâches), capability, feature, brouillon d'issue, glossaire (`templates/`).
   - [x] Skill `dramaturg` : capturer, trier les retours, arbitrer, grouper, découper, écrire et réviser une feature, rédiger le brouillon d'issue.
   - [x] Workshop réel sur antimurphy (CAP-001 → FEAT-001) : signal de réussite et règles métier dans la capability, règle de langue (0.2.0).
@@ -75,17 +75,23 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
   - [x] Skill `choreographer` : interview technique, décisions explicites (le Dancer n'improvise pas), plan par repo, slices seulement si besoin (0.4.0).
   - [x] Seul le Choreographer écrit les ADR (`[project] adr`) et les spikes (branches `spike/NN-slug`, jamais mergées) ; modèles `adr.md` et `spike.md` (0.4.1).
   - [x] Le Choreographer impose les règles techniques dans `AGENTS.md`, sections projet seulement (0.4.2).
-  - [ ] Plan réel de FEAT-001 sur antimurphy, et ajustements.
+  - [x] Premier plan réel de FEAT-001 sur antimurphy : un tour Choreographer → Dramaturg a ajusté la feature et le glossaire.
+  - [x] Le Choreographer part de la feature et crée l'issue avec son plan, et ses slices, par le script GitHub (`publish`, `slice`, `read`, `plan`) ; plus de brouillon d'issue chez le Dramaturg ; rapport au Conductor (0.5.0).
+  - [x] Format de message unique entre rôles (`templates/message.md`), plafond `[escalation] max_exchange_rounds` ; le Choreographer pose ses questions au Dramaturg et reste éveillé ; réponse simple ou modification commitée des specs, sans diff (0.5.0).
+  - [ ] Créer l'issue de FEAT-001 sur anti-murphy par le script, retirer `specs/issues/`.
 - [ ] `dancer` : exécute le plan en red → green → refactor, commite, preuve verte.
-- [ ] `critic` : rend un verdict au format `VERDICT: …`, en lecture seule.
+  - [x] Skill `dancer` : sa section du plan, un commit vert par tâche, jamais de push ni de test existant modifié, questions au Choreographer ou au Dramaturg en restant éveillé, rapport au Conductor (0.6.0).
+  - [ ] Premier run réel sur FEAT-001 d'antimurphy.
+- [ ] `critic` : rend un verdict (message `type: verdict`, première ligne `VERDICT: …`), en lecture seule.
 - [ ] Les règles communes minimales chargées par chaque rôle (tdd, clean code, trunk-based).
 
-**Fini quand** : une issue d'antimurphy passe à la main du brouillon au code validé.
+**Fini quand** : une feature d'antimurphy passe à la main de l'état prêt au code validé.
 
 ## Étape 5 — Les scripts déterministes
 
 - [ ] Script de politique : état git avant et après, zones interdites, périmètre par rôle (dont ADR, `AGENTS.md` et branches `spike/*` réservés au Choreographer), état GitHub de l'issue inchangé.
-- [ ] Script GitHub : la liste fermée d'opérations (PRD §5.4), chaque appel journalisé.
+- [ ] Script GitHub : la liste fermée d'opérations (PRD §5.4), chaque appel journalisé. Déjà là : `read`, `publish`, `plan`, `slice` (0.5.0).
+- [ ] Lecture de l'en-tête JSON des messages (`message.md`), renvoi d'un en-tête invalide, compte des tours par sujet et paire de rôles.
 - [ ] Tests sur des repos jouets.
 
 **Fini quand** : chaque violation du PRD §5.3 est détectée par un test.
@@ -93,7 +99,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 ## Étape 6 — Le Conductor séquentiel, Piece v0 `hybrid-track`
 
 - [ ] Créer le remote GitHub d'antimurphy.
-- [ ] Skill `conductor` : publie l'issue, enchaîne Choreographer → Dancer → Critic.
+- [ ] Skill `conductor` : lance le Choreographer sur une feature prête, route ses questions au Dramaturg (Orca `ask`/`reply`, Choreographer gardé éveillé), escalade au-delà de `max_exchange_rounds`, journalise les rapports, enchaîne Dancer → Critic.
 - [ ] Slices : publier une issue par slice, liée à l'issue parente ; enchaîner leurs Rehearsals dans l'ordre ; fermer la parente avec la dernière.
 - [ ] Politique après chaque rôle ; renvoi une fois, escalade à la deuxième violation.
 - [ ] Plafond de 2 allers-retours Dancer ↔ Critic.
