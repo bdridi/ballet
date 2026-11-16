@@ -281,9 +281,19 @@ def _premiere(rehearsal, tools):
     if not rehearsal.pull_request:
         raise RehearsalError("no pull request to merge")
     ballet_github.merge_pull_request(rehearsal.pull_request, run=tools.gh, git=tools.git(rehearsal.repo))
+    closed = _close_issues(rehearsal, tools)
     tools.orca(["worktree", "rm", "--worktree", f"path:{rehearsal.worktree}", "--delete-branch"])
     return Step("done", f"#{rehearsal.pull_request} merged on main",
-                [f"#{rehearsal.pull_request} merged by rebase, {rehearsal.branch} deleted", "worktree removed"])
+                [f"#{rehearsal.pull_request} merged by rebase, {rehearsal.branch} deleted", closed, "worktree removed"])
+
+
+def _close_issues(rehearsal, tools):
+    """Le merge est fait : une issue restée ouverte se signale, elle n'arrête pas la Premiere."""
+    try:
+        closed = ballet_github.close_issue(rehearsal.issue, rehearsal.pull_request, run=tools.gh)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        return f"issue #{rehearsal.issue} left open: {error}; close it by hand"
+    return "issues closed: " + (", ".join(f"#{number}" for number in closed) or f"none, #{rehearsal.issue} was already closed")
 
 
 # --- l'état en clair ----------------------------------------------------------

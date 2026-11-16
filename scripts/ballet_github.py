@@ -14,6 +14,7 @@
     python3 ballet_github.py resolve  <pr> <rapport.md>          # résout les fils des points que le Dancer dit corrigés
     python3 ballet_github.py label   <pr> <VERDICT>              # pose le libellé du verdict (ballet:approved…), retire les autres
     python3 ballet_github.py merge   <pr>                        # la Premiere : merge par rebase, puis supprime la branche
+    python3 ballet_github.py close   <issue> <pr>                # ferme l'issue livrée, puis sa parente si plus aucune slice n'est ouverte
 
 Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
 Le titre d'une issue est le premier titre `# …` de son brouillon ; le corps, tout le reste.
@@ -26,6 +27,8 @@ Le verdict qui fait foi est le libellé de la PR : `ballet:approved`, `ballet:re
 Le Conductor pose celui du Critic ; le Director tranche une escalade en posant le sien. S'il en reste plusieurs,
 le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts » restent, pour la lecture.
 `merge` refuse sans libellé `ballet:approved` posé après le dernier commit, et sans CI entièrement verte.
+`close` ne se fie pas au `Closes #N` de la PR (implicite, et absent d'une PR ouverte à la main) : il ferme lui-même.
+Une slice se reconnaît à sa première ligne, `Part of #<parente>` (posée par `slice`).
 """
 
 import json
@@ -38,6 +41,7 @@ from pathlib import Path
 from ballet_message import VERDICT_LINE, MessageError, read_message
 
 PLAN_HEADING = "## Plan"
+PARENT_LINE = re.compile(r"^Part of #(\d+)\s*$", re.MULTILINE)
 BASE_BRANCH = "main"
 REHEARSAL_BRANCH = re.compile(r"rehearsal/(FEAT|BUG|TASK)-\d{3}(\.\d+)?")
 VERDICTS_MARKER = "<!-- ballet:verdicts -->"
@@ -165,6 +169,18 @@ def merge_pull_request(pr_number, run=None, git=None):
     _delete_remote_branch(pull_request["headRefName"], git or _run_git)
 
 
+def close_issue(issue_number, pr_number, run=None):
+    """Ferme l'issue livrée par la PR, puis sa parente quand c'était sa dernière slice ouverte ; renvoie ce qui a été fermé."""
+    run = run or _run_gh
+    number, pr_number = _issue_number(issue_number), _issue_number(pr_number)
+    issue = _issue_state(number, run)
+    closed = _close_if_open(number, issue, f"Done in #{pr_number}.", run)
+    parent = _parent_of(issue["body"])
+    if parent and not _open_slices(parent, besides=number, run=run):
+        closed += _close_if_open(parent, _issue_state(parent, run), f"All its slices are done; the last one, #{number}, in #{pr_number}.", run)
+    return closed
+
+
 def label_pull_request(pr_number, verdict, run=None):
     """Pose le libellé du verdict sur la PR et retire les deux autres : un seul verdict en vigueur."""
     run = run or _run_gh
@@ -226,6 +242,7 @@ def _dispatch(operation, arguments):
         "resolve": (_resolve_and_say, 2),
         "label": (label_pull_request, 2),
         "merge": (merge_pull_request, 1),
+        "close": (_close_and_say, 2),
     }
     if operation not in operations:
         raise GitHubError(f"unknown operation '{operation}'; known: {', '.join(operations)}")
@@ -233,6 +250,35 @@ def _dispatch(operation, arguments):
     if len(arguments) != arity:
         raise GitHubError(f"{operation} expects {arity} argument(s)")
     return function(*arguments)
+
+
+def _close_and_say(issue_number, pr_number):
+    closed = close_issue(issue_number, pr_number)
+    return "closed: " + (", ".join(f"#{number}" for number in closed) or "nothing, already closed")
+
+
+def _issue_state(number, run):
+    return json.loads(run(["issue", "view", number, "--json", "state,body"]))
+
+
+def _close_if_open(number, issue, comment, run):
+    if issue["state"] != "OPEN":
+        return []
+    run(["issue", "close", number, "--reason", "completed", "--comment", comment])
+    return [number]
+
+
+def _parent_of(body):
+    match = PARENT_LINE.match(body)
+    return match.group(1) if match else None
+
+
+def _open_slices(parent, besides, run):
+    """Les slices encore ouvertes de la parente ; la recherche GitHub est floue, la première ligne tranche.
+    L'index de recherche a du retard : la slice qu'on vient de fermer peut y paraître encore ouverte."""
+    found = json.loads(run(["issue", "list", "--state", "open", "--search", f'"Part of #{parent}" in:body',
+                            "--json", "number,body", "--limit", "100"]))
+    return [issue["number"] for issue in found if _parent_of(issue["body"]) == parent and str(issue["number"]) != besides]
 
 
 def _issue_body(number, run):

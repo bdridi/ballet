@@ -349,6 +349,68 @@ def thread(thread_id, review_id, body, path="a.rs", line=1, resolved=False):
             "comments": {"nodes": [{"body": body, "path": path, "line": line, "pullRequestReview": {"databaseId": review_id}}]}}
 
 
+class FakeIssuesGh:
+    """Des issues et leur état ; `issue list` rend ce que la recherche GitHub trouverait (floue)."""
+
+    def __init__(self, issues):
+        self.issues = issues
+        self.calls = []
+
+    def __call__(self, arguments):
+        self.calls.append(arguments)
+        if arguments[:2] == ["issue", "view"]:
+            return json.dumps(self.issues[arguments[2]])
+        if arguments[:2] == ["issue", "list"]:
+            return json.dumps([{"number": int(n), "body": i["body"]} for n, i in self.issues.items() if i["state"] == "OPEN"])
+        if arguments[:2] == ["issue", "close"]:
+            self.issues[arguments[2]]["state"] = "CLOSED"
+        return ""
+
+    def closed(self):
+        return [call[2] for call in self.calls if call[:2] == ["issue", "close"]]
+
+
+def an_issue(body, state="OPEN"):
+    return {"state": state, "body": body}
+
+
+class CloseIssueTest(unittest.TestCase):
+    def test_ferme_l_issue_livree_avec_un_renvoi_a_sa_pr(self):
+        gh = FakeIssuesGh({"7": an_issue("## Context\n")})
+        self.assertEqual(ballet_github.close_issue("#7", "#9", run=gh), ["7"])
+        close = gh.calls[-1]
+        self.assertEqual(close[:5], ["issue", "close", "7", "--reason", "completed"])
+        self.assertIn("Done in #9.", close)
+
+    def test_une_issue_deja_fermee_par_github_n_est_pas_refermee(self):
+        gh = FakeIssuesGh({"7": an_issue("## Context\n", "CLOSED")})
+        self.assertEqual(ballet_github.close_issue("7", "9", run=gh), [])
+        self.assertEqual(gh.closed(), [])
+
+    def test_la_derniere_slice_ferme_sa_parente(self):
+        gh = FakeIssuesGh({"1": an_issue("## Context\n"), "6": an_issue("Part of #1\n\n## Context\n"),
+                           "5": an_issue("Part of #1\n\n## Context\n", "CLOSED")})
+        self.assertEqual(ballet_github.close_issue("6", "12", run=gh), ["6", "1"])
+
+    def test_la_parente_reste_ouverte_tant_qu_une_slice_l_est(self):
+        gh = FakeIssuesGh({"1": an_issue("## Context\n"), "4": an_issue("Part of #1\n\n## Context\n"),
+                           "5": an_issue("Part of #1\n\n## Context\n")})
+        self.assertEqual(ballet_github.close_issue("4", "10", run=gh), ["4"])
+
+    def test_une_issue_qui_cite_la_parente_sans_en_etre_une_slice_ne_compte_pas(self):
+        gh = FakeIssuesGh({"1": an_issue("## Context\n"), "6": an_issue("Part of #1\n"),
+                           "8": an_issue("## Context\n\nSee Part of #1 for the background.\n"),
+                           "11": an_issue("Part of #12\n")})
+        self.assertEqual(ballet_github.close_issue("6", "12", run=gh), ["6", "1"])
+
+    def test_la_slice_fermee_encore_listee_ouverte_par_la_recherche_ne_bloque_pas_la_parente(self):
+        gh = FakeIssuesGh({"1": an_issue("## Context\n"), "6": an_issue("Part of #1\n")})
+        original = gh.__call__
+        stale = lambda arguments: (json.dumps([{"number": 6, "body": "Part of #1\n"}])
+                                   if arguments[:2] == ["issue", "list"] else original(arguments))
+        self.assertEqual(ballet_github.close_issue("6", "12", run=stale), ["6", "1"])
+
+
 class FakeThreadsGh:
     """gh pour le résumé des verdicts et les fils de review."""
 

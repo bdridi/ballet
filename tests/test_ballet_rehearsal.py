@@ -49,6 +49,7 @@ class FakeWorld:
         self.dispatches = 0
         self.reviews = [{"id": 11, "submitted_at": "2026-11-16T10:00:00Z", "html_url": "u", "body": "VERDICT: REJECTED\n\n## Blocking\n\n1. `a.rs:1` (inline comment)\n"}]
         self.timeline = []
+        self.issue_state = "OPEN"
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -66,7 +67,9 @@ class FakeWorld:
 
     def gh(self, arguments):
         if arguments[:2] == ["issue", "view"]:
-            return json.dumps({"title": "FEAT-001.2 · Inventory model", "body": self.issue_body})
+            return json.dumps({"title": "FEAT-001.2 · Inventory model", "body": self.issue_body, "state": self.issue_state})
+        if arguments[:2] == ["issue", "list"]:
+            return "[]"
         if arguments[:2] == ["pr", "create"]:
             return "https://github.com/o/r/pull/8\n"
         if arguments[:2] == ["pr", "view"]:
@@ -297,6 +300,24 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(self.world.ran("gh", "pr", "merge")[0], ["gh", "pr", "merge", "8", "--rebase"])
         self.assertTrue(self.world.ran("orca", "worktree", "rm", "--worktree", "path:/wt/FEAT-001.2"))
         self.assertEqual(self.state()["status"], "done")
+
+    def test_la_premiere_ferme_l_issue(self):
+        self.to_the_critic()
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(self.world.ran("gh", "issue", "close")[0][:4], ["gh", "issue", "close", "3"])
+        self.assertIn("issues closed: #3", step.done)
+
+    def test_une_issue_qu_on_ne_peut_fermer_n_annule_pas_la_premiere(self):
+        self.to_the_critic()
+        world = self.world
+        def failing(argv):
+            if argv[:3] == ["gh", "issue", "close"]:
+                raise ballet_rehearsal.RehearsalError("HTTP 403")
+            return world(argv)
+        self.tools.run = failing
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual((step.next, self.state()["status"]), ("done", "done"))
+        self.assertIn("issue #3 left open: HTTP 403; close it by hand", step.done)
 
     def test_approved_sans_ci_escalade_et_ne_merge_pas(self):
         self.world.pull_request = pull_request_state(checks=False)

@@ -11,7 +11,7 @@ The script's last line is always one of:
 
 - `NEXT: wait`: a worker is busy. **End your turn**: Orca wakes you with its next message. Never poll, never read a worker's terminal.
 - `NEXT: escalate <reason>`: stop and tell the Director (see *Escalation*).
-- `NEXT: done`: the Premiere is done. Report and stop.
+- `NEXT: done`: the Premiere is done: pull request merged, issue closed (and its parent, after its last slice), worktree removed. Report and stop.
 
 The lines before it (`- …`) say what the script did. Relay them to the Director in one or two lines. An escalation is an expected outcome: the script still exits with 0. Exit code 2 means you called it wrongly; any other non-zero code is a crash of the script: tell the Director, with its output.
 
