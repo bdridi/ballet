@@ -12,6 +12,7 @@
     python3 ballet_github.py comment-pr    <pr> <message.md>     # publie un message (rapport du Dancer) sur la PR
     python3 ballet_github.py verdicts <pr>                       # réécrit le commentaire « Verdicts » de la PR : une ligne par tour
     python3 ballet_github.py resolve  <pr> <rapport.md>          # résout les fils des points que le Dancer dit corrigés
+    python3 ballet_github.py label   <pr> <VERDICT>              # pose le libellé du verdict (ballet:approved…), retire les autres
     python3 ballet_github.py merge   <pr>                        # la Premiere : merge par rebase, puis supprime la branche
 
 Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
@@ -21,7 +22,10 @@ Un message (review, commentaire) suit `templates/message.md` : en-tête JSON sur
 en commentaire sur cette ligne ; le corps de la review garde le verdict, la preuve et les autres points.
 `resolve` lit la section `## Fixed` du rapport (`- Blocking 1: <sha>`, ``- Note `fichier:ligne`: <sha>``),
 répond « Fixed in <sha> » dans le fil du dernier verdict, puis le marque résolu.
-`merge` refuse sans dernier verdict `APPROVED` postérieur au dernier commit, et sans CI entièrement verte.
+Le verdict qui fait foi est le libellé de la PR : `ballet:approved`, `ballet:rejected` ou `ballet:escalated`.
+Le Conductor pose celui du Critic ; le Director tranche une escalade en posant le sien. S'il en reste plusieurs,
+le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts » restent, pour la lecture.
+`merge` refuse sans libellé `ballet:approved` posé après le dernier commit, et sans CI entièrement verte.
 """
 
 import json
@@ -49,6 +53,11 @@ GREEN_CONCLUSIONS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 LIST_ITEM = re.compile(r"^(?:(\d+)\.|-)\s+(.*)$")
 PLACED_POINT = re.compile(r"^`([^`\s]+?):(\d+)(?:-(\d+))?`\s*(?:—|–|-|:)?\s*(.*)$")
 HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+VERDICT_LABELS = {
+    "APPROVED": ("ballet:approved", "0e8a16", "Ballet: approved, the Premiere may merge"),
+    "REJECTED": ("ballet:rejected", "d93f0b", "Ballet: rejected, back to the Dancer"),
+    "ESCALATE": ("ballet:escalated", "fbca04", "Ballet: escalated, the Director decides"),
+}
 
 
 class GitHubError(Exception):
@@ -150,16 +159,40 @@ def merge_pull_request(pr_number, run=None, git=None):
     run = run or _run_gh
     number = _issue_number(pr_number)
     pull_request = _merge_state(number, run)
-    _require_fresh_approval(pull_request)
+    _require_fresh_approval(pull_request, _verdict_labels_in_force(number, run))
     _require_green_ci(pull_request)
     run(["pr", "merge", number, "--rebase"])
     _delete_remote_branch(pull_request["headRefName"], git or _run_git)
 
 
+def label_pull_request(pr_number, verdict, run=None):
+    """Pose le libellé du verdict sur la PR et retire les deux autres : un seul verdict en vigueur."""
+    run = run or _run_gh
+    number = _issue_number(pr_number)
+    verdict = _known_verdict(verdict)
+    _ensure_verdict_labels(run)
+    run(["pr", "edit", number, *_label_changes(verdict)])
+
+
+def director_decision(pr_number, run=None):
+    """Le verdict en vigueur (dernier libellé posé), sa date, et les commentaires de la PR depuis la dernière escalade."""
+    run = run or _run_gh
+    number = _issue_number(pr_number)
+    events = _label_events(number, run)
+    verdict, labeled_at = _latest_verdict(_labels_in_force(events))
+    escalated_at = _last_labeled(events, "ESCALATE")
+    return {"verdict": verdict, "labeled_at": labeled_at, "escalated_at": escalated_at,
+            "comments": _comments_since(number, escalated_at, run)}
+
+
 def pull_request_status(pr_number, run=None):
-    """Où en est la PR : son état GitHub, son dernier verdict et sa CI, sans rien refuser."""
-    pull_request = _merge_state(_issue_number(pr_number), run or _run_gh)
-    return {"state": pull_request.get("state", ""), "verdict": _verdict_or_none(pull_request), "ci": _ci_summary(pull_request)}
+    """Où en est la PR : son état GitHub, le verdict de son libellé, celui du Critic et sa CI, sans rien refuser."""
+    run = run or _run_gh
+    number = _issue_number(pr_number)
+    pull_request = _merge_state(number, run)
+    in_force, _ = _latest_verdict(_verdict_labels_in_force(number, run))
+    return {"state": pull_request.get("state", ""), "label": in_force and _label_name(in_force), "verdict": _verdict_or_none(pull_request),
+            "ci": _ci_summary(pull_request)}
 
 
 def main(argv):
@@ -191,6 +224,7 @@ def _dispatch(operation, arguments):
         "comment-pr": (comment_pull_request, 2),
         "verdicts": (update_verdicts, 1),
         "resolve": (_resolve_and_say, 2),
+        "label": (label_pull_request, 2),
         "merge": (merge_pull_request, 1),
     }
     if operation not in operations:
@@ -345,14 +379,14 @@ def _close_thread(thread_id, reply, run):
 # --- conditions de la Premiere ----------------------------------------------
 
 
-def _require_fresh_approval(pull_request):
-    """Le dernier verdict doit être APPROVED, et rendu après le dernier commit de la branche."""
-    reviewed_at, verdict = _last_verdict(pull_request)
+def _require_fresh_approval(pull_request, labels):
+    """Le libellé en vigueur doit être `ballet:approved`, posé après le dernier commit de la branche."""
+    verdict, labeled_at = _latest_verdict(labels)
     if verdict != "APPROVED":
-        raise GitHubError(f"the last verdict is {verdict}, not APPROVED")
+        raise GitHubError(f"the verdict label in force is {_label_name(verdict)}, not ballet:approved")
     last_commit = max(commit["committedDate"] for commit in pull_request["commits"])
-    if reviewed_at < last_commit:
-        raise GitHubError(f"the APPROVED verdict ({reviewed_at}) is older than the last commit ({last_commit})")
+    if labeled_at < last_commit:
+        raise GitHubError(f"ballet:approved ({labeled_at}) is older than the last commit ({last_commit})")
 
 
 def _last_verdict(pull_request):
@@ -364,6 +398,77 @@ def _last_verdict(pull_request):
     if not verdicts:
         raise GitHubError("the pull request has no verdict yet")
     return max(verdicts)
+
+
+# --- libellés de verdict ----------------------------------------------------
+
+
+def _known_verdict(verdict):
+    verdict = verdict.upper()
+    if verdict not in VERDICT_LABELS:
+        raise GitHubError(f"unknown verdict '{verdict}'; known: {', '.join(VERDICT_LABELS)}")
+    return verdict
+
+
+def _ensure_verdict_labels(run):
+    """Crée les trois libellés au premier usage ; `--force` les laisse tels quels ensuite."""
+    for name, color, description in VERDICT_LABELS.values():
+        run(["label", "create", name, "--color", color, "--description", description, "--force"])
+
+
+def _label_changes(verdict):
+    changes = ["--add-label", _label_name(verdict)]
+    for other in VERDICT_LABELS:
+        if other != verdict:
+            changes += ["--remove-label", _label_name(other)]
+    return changes
+
+
+def _label_name(verdict):
+    return VERDICT_LABELS[verdict][0] if verdict else "none"
+
+
+def _verdict_labels_in_force(number, run):
+    return _labels_in_force(_label_events(number, run))
+
+
+def _label_events(number, run):
+    """Les poses et retraits de libellés de verdict, dans l'ordre de la timeline de la PR."""
+    names = {name: verdict for verdict, (name, _, _) in VERDICT_LABELS.items()}
+    return [
+        (event["event"], names[event["label"]["name"]], event["created_at"])
+        for event in _api_list(f"repos/{{owner}}/{{repo}}/issues/{number}/timeline", run)
+        if event.get("event") in ("labeled", "unlabeled") and event.get("label", {}).get("name") in names
+    ]
+
+
+def _labels_in_force(events):
+    """Verdict → date de sa dernière pose, pour chaque libellé encore sur la PR."""
+    in_force = {}
+    for kind, verdict, at in events:
+        if kind == "labeled":
+            in_force[verdict] = at
+        else:
+            in_force.pop(verdict, None)
+    return in_force
+
+
+def _latest_verdict(labels):
+    if not labels:
+        return None, None
+    verdict = max(labels, key=labels.get)
+    return verdict, labels[verdict]
+
+
+def _last_labeled(events, verdict):
+    return max((at for kind, labeled, at in events if kind == "labeled" and labeled == verdict), default=None)
+
+
+def _comments_since(number, since, run):
+    if not since:
+        return []
+    comments = json.loads(run(["pr", "view", number, "--json", "comments"]))["comments"]
+    return [comment["body"] for comment in comments if comment["createdAt"] > since]
 
 
 def _verdict_or_none(pull_request):

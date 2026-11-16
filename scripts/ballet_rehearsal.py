@@ -3,12 +3,16 @@
     python3 ballet_rehearsal.py begin    <issue>                                   # ouvre la Rehearsal, lance le premier rôle
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message d'un worker, ou du Director
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI encore en cours)
+    python3 ballet_rehearsal.py resume   <ID>                                      # applique la décision du Director (libellé de la PR)
     python3 ballet_rehearsal.py status   <ID> [--json]                             # où en est la Rehearsal
 
 Lancé depuis le home du projet. Le skill `conductor` n'a qu'à appeler ce script et lire sa dernière ligne :
     NEXT: wait               un worker travaille ; Orca réveillera le Conductor
     NEXT: escalate <motif>   le Director décide ; la Rehearsal attend
     NEXT: done               la Premiere est faite
+
+Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
+ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
 
 Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
 et un autre code ≠ 0 n'est qu'une panne du script.
@@ -59,6 +63,7 @@ class Rehearsal:
     pending: list = field(default_factory=list)      # questions en attente : {id, from, to}
     status: str = "open"                             # open | escalated | done
     reason: str = ""                                 # le motif de la dernière escalade, ou de la fin
+    label: str = ""                                  # le dernier verdict posé en libellé par le script
 
     @property
     def branch(self):
@@ -109,7 +114,7 @@ def begin(issue, home, tools):
     _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal), config, home, tools)
     step.done.append(f"{first_role} started on issue #{rehearsal.issue}")
     _log(home, rehearsal, "begin", {"first_role": first_role})
-    return _settle(rehearsal, step, home)
+    return _settle(rehearsal, step, home, tools)
 
 
 def receive(rehearsal_id, message_path, question_id, home, tools):
@@ -121,7 +126,7 @@ def receive(rehearsal_id, message_path, question_id, home, tools):
         step = _route(rehearsal, header, text, question_id, config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
-    return _settle(rehearsal, step, home)
+    return _settle(rehearsal, step, home, tools)
 
 
 def premiere(rehearsal_id, home, tools):
@@ -130,7 +135,20 @@ def premiere(rehearsal_id, home, tools):
         step = _premiere(rehearsal, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", f"merge refused: {error}")
-    return _settle(rehearsal, step, home)
+    return _settle(rehearsal, step, home, tools)
+
+
+def resume(rehearsal_id, home, tools):
+    """Applique la décision du Director sur une Rehearsal escaladée, lue sur le libellé de sa PR."""
+    config = _checked_config(home)
+    rehearsal = _load(rehearsal_id, home)
+    if rehearsal.status != "escalated":
+        return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, [f"nothing to resume: Rehearsal {rehearsal.id} is {rehearsal.status}"])
+    try:
+        step = _apply_decision(rehearsal, config, home, tools)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        step = Step("escalate", str(error))
+    return _settle(rehearsal, step, home, tools)
 
 
 def status(rehearsal_id, home, tools):
@@ -220,7 +238,8 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
     step = Step("wait")
     _publish_review(rehearsal, text, home, tools)
     ballet_github.update_verdicts(rehearsal.pull_request, run=tools.gh)
-    step.done.append(f"verdict {verdict} published on #{rehearsal.pull_request}, Verdicts comment updated")
+    _label(rehearsal, verdict, tools)
+    step.done.append(f"verdict {verdict} published on #{rehearsal.pull_request}, labelled, Verdicts comment updated")
     if verdict == "ESCALATE":
         return Step("escalate", "the Critic escalates: see its review", step.done)
     if verdict == "APPROVED":
@@ -234,8 +253,31 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
     return step
 
 
+def _apply_decision(rehearsal, config, home, tools):
+    """`ballet:approved` : la Premiere ; `ballet:rejected` : le Dancer reprend avec les commentaires du Director."""
+    if not rehearsal.pull_request:
+        raise RehearsalError("no pull request yet: answer the pending question with an `answer` message (receive)")
+    decision = ballet_github.director_decision(rehearsal.pull_request, run=tools.gh)
+    _log(home, rehearsal, "director-decision", decision)
+    if decision["verdict"] == "APPROVED":
+        rehearsal.label = "APPROVED"
+        return _premiere(rehearsal, tools)
+    if decision["verdict"] == "REJECTED":
+        return _back_to_the_dancer(rehearsal, decision["comments"], config, home, tools)
+    return Step("escalate", f"nothing decided yet on #{rehearsal.pull_request}: label it ballet:approved, "
+                "or ballet:rejected with a comment saying what to fix, then resume")
+
+
+def _back_to_the_dancer(rehearsal, comments, config, home, tools):
+    if not comments:
+        return Step("escalate", f"ballet:rejected needs a comment on #{rehearsal.pull_request} saying what to fix, then resume")
+    rehearsal.label = "REJECTED"
+    _ask_role(rehearsal, "dancer", _director_fix_assignment(rehearsal, comments), config, home, tools)
+    return Step("wait", done=[f"the Director rejected #{rehearsal.pull_request}: {len(comments)} comment(s) carried to the dancer"])
+
+
 def _premiere(rehearsal, tools):
-    """Merge par rebase (le script GitHub refuse sans APPROVED frais ni CI verte), puis range le worktree."""
+    """Merge par rebase (le script GitHub refuse sans `ballet:approved` frais ni CI verte), puis range le worktree."""
     if not rehearsal.pull_request:
         raise RehearsalError("no pull request to merge")
     ballet_github.merge_pull_request(rehearsal.pull_request, run=tools.gh, git=tools.git(rehearsal.repo))
@@ -259,7 +301,8 @@ def _pull_request_line(rehearsal, tools):
     except (RehearsalError, ballet_github.GitHubError) as error:
         return f"pull request #{rehearsal.pull_request}: cannot read it ({error})"
     state = f" ({found['state'].lower()})" if found["state"] else ""
-    return f"pull request #{rehearsal.pull_request}{state}: last verdict {found['verdict'] or 'none yet'}, {found['ci']}"
+    return (f"pull request #{rehearsal.pull_request}{state}: {found['label'] or 'no verdict label'}, "
+            f"Critic's last verdict {found['verdict'] or 'none yet'}, {found['ci']}")
 
 
 def _round_trips_line(rehearsal, config):
@@ -329,6 +372,16 @@ def _critic_assignment(rehearsal):
             f"the branch `{rehearsal.branch}` against the plan.")
 
 
+def _director_fix_assignment(rehearsal, comments):
+    quoted = "\n\n".join(_quote(comment) for comment in comments)
+    return (f"The Director rejected pull request #{rehearsal.pull_request}. Their comments, your blocking points:\n\n{quoted}\n\n"
+            f"Fix each one, then report again (`read-pr {rehearsal.pull_request}` for the whole pull request).")
+
+
+def _quote(text):
+    return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
+
+
 def _fix_assignment(rehearsal):
     return (f"Round {rehearsal.round_trips + 1}: the Critic rejected pull request #{rehearsal.pull_request}. "
             f"Read its review (`read-pr {rehearsal.pull_request}`), fix each blocking point, then report again.")
@@ -389,8 +442,26 @@ def _write_spec(rehearsal, role, spec, home):
     return path
 
 
-def _settle(rehearsal, step, home):
-    """Le pas fixe le statut de la Rehearsal ; l'état est sauvé et le pas journalisé."""
+def _label(rehearsal, verdict, tools):
+    ballet_github.label_pull_request(rehearsal.pull_request, verdict, run=tools.gh)
+    rehearsal.label = verdict
+
+
+def _flag_escalation(rehearsal, step, tools):
+    """Une escalade avec une PR pose `ballet:escalated`, sauf sur une approbation en vigueur (CI en cours)
+    ou une escalade déjà posée : le libellé qu'y met ensuite le Director reste le sien."""
+    if step.next != "escalate" or not rehearsal.pull_request or rehearsal.label in ("APPROVED", "ESCALATE"):
+        return
+    try:
+        _label(rehearsal, "ESCALATE", tools)
+        step.done.append(f"#{rehearsal.pull_request} labelled ballet:escalated: the Director decides")
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        step.done.append(f"#{rehearsal.pull_request} not labelled ballet:escalated: {error}")
+
+
+def _settle(rehearsal, step, home, tools):
+    """Le pas fixe le statut de la Rehearsal (et le libellé d'une escalade) ; l'état est sauvé et le pas journalisé."""
+    _flag_escalation(rehearsal, step, tools)
     rehearsal.status = STATUS_OF_STEP[step.next]
     rehearsal.reason = step.reason
     _save(rehearsal, home)
@@ -546,11 +617,13 @@ def _command(command, arguments, home, tools):
         return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools).render()
     if command == "premiere" and len(arguments) == 1:
         return premiere(arguments[0], home, tools).render()
+    if command == "resume" and len(arguments) == 1:
+        return resume(arguments[0], home, tools).render()
     if command == "status" and len(arguments) == 1:
         return status(arguments[0], home, tools).render()
     if command == "status" and arguments[1:] == ["--json"]:
         return json.dumps(asdict(_load(arguments[0], home)), indent=2)
-    raise UsageError("usage: begin <issue> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | status <ID> [--json]")
+    raise UsageError("usage: begin <issue> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | resume <ID> | status <ID> [--json]")
 
 
 if __name__ == "__main__":

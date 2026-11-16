@@ -40,6 +40,14 @@ def mergeable_pull_request(verdict="APPROVED", checks=(GREEN_CHECK,), reviewed_a
     }
 
 
+def labeled(name, at, kind="labeled"):
+    return {"event": kind, "label": {"name": name}, "created_at": at}
+
+
+APPROVED_TIMELINE = [labeled("ballet:rejected", "2026-11-16T10:00:00Z"), labeled("ballet:rejected", "2026-11-16T12:00:00Z", "unlabeled"),
+                     labeled("ballet:approved", "2026-11-16T12:00:00Z")]
+
+
 PR_DIFF = """diff --git a/e2e/package.json b/e2e/package.json
 --- a/e2e/package.json
 +++ b/e2e/package.json
@@ -86,9 +94,10 @@ VERDICT: REJECTED
 
 
 class FakeGh:
-    def __init__(self, body=ISSUE_BODY, pull_request=PULL_REQUEST):
+    def __init__(self, body=ISSUE_BODY, pull_request=PULL_REQUEST, timeline=()):
         self.body = body
         self.pull_request = pull_request
+        self.timeline = [{"event": "commented"}, *timeline]
         self.calls = []
         self.posted_reviews = []
 
@@ -104,6 +113,8 @@ class FakeGh:
             return json.dumps(self.pull_request)
         if arguments[:2] == ["pr", "diff"]:
             return PR_DIFF
+        if arguments[0] == "api" and arguments[1].endswith("/timeline"):
+            return json.dumps([self.timeline])
         if arguments[0] == "api" and "--input" in arguments:
             self.posted_reviews.append(json.loads(Path(arguments[arguments.index("--input") + 1]).read_text()))
             return "{}"
@@ -263,25 +274,56 @@ class BalletGitHubTest(unittest.TestCase):
             ballet_github.comment_issue("2", self.file("m.md", "hello\n"), run=FakeGh())
 
     def test_merge_par_rebase_puis_supprime_la_branche(self):
-        gh, git = FakeGh(pull_request=mergeable_pull_request()), FakeGit()
+        gh, git = FakeGh(pull_request=mergeable_pull_request(), timeline=APPROVED_TIMELINE), FakeGit()
         ballet_github.merge_pull_request("#43", run=gh, git=git)
         self.assertEqual(gh.calls[-1], ["pr", "merge", "43", "--rebase"])
         self.assertEqual(git.calls, [["push", "origin", "--delete", "rehearsal/FEAT-001.1"]])
 
-    def test_refuse_de_merger_sans_dernier_verdict_approved(self):
-        for verdict in ("REJECTED", "ESCALATE"):
-            with self.subTest(verdict=verdict):
-                self.assert_merge_refused(mergeable_pull_request(verdict=verdict), "verdict")
+    def test_le_libelle_fait_foi_et_non_la_review_du_critic(self):
+        gh, git = FakeGh(pull_request=mergeable_pull_request(verdict="ESCALATE"), timeline=APPROVED_TIMELINE), FakeGit()
+        ballet_github.merge_pull_request("43", run=gh, git=git)
+        self.assertEqual(gh.calls[-1], ["pr", "merge", "43", "--rebase"])
 
-    def test_refuse_de_merger_un_verdict_plus_ancien_que_le_dernier_commit(self):
-        self.assert_merge_refused(mergeable_pull_request(reviewed_at="2026-11-16T10:30:00Z"), "commit")
+    def test_refuse_de_merger_sans_libelle_approved_en_vigueur(self):
+        timelines = {
+            "none": [],
+            "rejected": [labeled("ballet:rejected", "2026-11-16T12:00:00Z")],
+            "removed": [*APPROVED_TIMELINE, labeled("ballet:approved", "2026-11-16T12:30:00Z", "unlabeled")],
+            "later escalation": [*APPROVED_TIMELINE, labeled("ballet:escalated", "2026-11-16T12:30:00Z")],
+        }
+        for case, timeline in timelines.items():
+            with self.subTest(case=case):
+                self.assert_merge_refused(mergeable_pull_request(), "not ballet:approved", timeline)
+
+    def test_refuse_de_merger_une_approbation_plus_ancienne_que_le_dernier_commit(self):
+        self.assert_merge_refused(mergeable_pull_request(), "commit", [labeled("ballet:approved", "2026-11-16T10:30:00Z")])
 
     def test_refuse_de_merger_sans_ci_ou_avec_une_ci_rouge(self):
         self.assert_merge_refused(mergeable_pull_request(checks=()), "no CI")
         self.assert_merge_refused(mergeable_pull_request(checks=(GREEN_CHECK, RED_CHECK)), "proof")
 
-    def assert_merge_refused(self, pull_request, reason):
-        gh, git = FakeGh(pull_request=pull_request), FakeGit()
+    def test_label_cree_les_libelles_pose_le_verdict_et_retire_les_autres(self):
+        gh = FakeGh()
+        ballet_github.label_pull_request("#43", "approved", run=gh)
+        self.assertEqual(len([call for call in gh.calls if call[:2] == ["label", "create"]]), 3)
+        self.assertEqual(gh.calls[-1], ["pr", "edit", "43", "--add-label", "ballet:approved",
+                                        "--remove-label", "ballet:rejected", "--remove-label", "ballet:escalated"])
+
+    def test_label_refuse_un_verdict_inconnu(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown verdict"):
+            ballet_github.label_pull_request("43", "maybe", run=FakeGh())
+
+    def test_la_decision_du_director_et_ses_commentaires_depuis_l_escalade(self):
+        timeline = [labeled("ballet:escalated", "2026-11-16T10:30:00Z"), labeled("ballet:rejected", "2026-11-16T11:30:00Z")]
+        decision = ballet_github.director_decision("43", run=FakeGh(timeline=timeline))
+        self.assertEqual((decision["verdict"], decision["labeled_at"]), ("REJECTED", "2026-11-16T11:30:00Z"))
+        self.assertEqual(decision["comments"], ["Dancer report, round 2"])
+
+    def test_sans_escalade_pas_de_commentaire_du_director(self):
+        self.assertEqual(ballet_github.director_decision("43", run=FakeGh(timeline=APPROVED_TIMELINE))["comments"], [])
+
+    def assert_merge_refused(self, pull_request, reason, timeline=APPROVED_TIMELINE):
+        gh, git = FakeGh(pull_request=pull_request, timeline=timeline), FakeGit()
         with self.assertRaisesRegex(ballet_github.GitHubError, reason):
             ballet_github.merge_pull_request("43", run=gh, git=git)
         self.assertFalse([call for call in gh.calls if call[:2] == ["pr", "merge"]])

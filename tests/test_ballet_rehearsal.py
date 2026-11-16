@@ -34,6 +34,7 @@ def pull_request_state(verdict="APPROVED", checks=True):
         "reviews": [{"author": {"login": "b"}, "body": f"VERDICT: {verdict}", "submittedAt": "2026-11-16T12:00:00Z"}],
         "commits": [{"committedDate": "2026-11-16T11:00:00Z"}],
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "proof", "status": "COMPLETED", "conclusion": "SUCCESS"}] if checks else [],
+        "comments": [],
     }
 
 
@@ -47,6 +48,7 @@ class FakeWorld:
         self.commands = []
         self.dispatches = 0
         self.reviews = [{"id": 11, "submitted_at": "2026-11-16T10:00:00Z", "html_url": "u", "body": "VERDICT: REJECTED\n\n## Blocking\n\n1. `a.rs:1` (inline comment)\n"}]
+        self.timeline = []
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -69,6 +71,11 @@ class FakeWorld:
             return "https://github.com/o/r/pull/8\n"
         if arguments[:2] == ["pr", "view"]:
             return json.dumps(self.pull_request)
+        if arguments[:2] == ["pr", "edit"]:
+            self.relabel(arguments)
+            return ""
+        if arguments[0] == "api" and arguments[1].endswith("/timeline"):
+            return json.dumps([self.timeline])
         if arguments[:2] == ["api", "graphql"]:
             if any("reviewThreads" in argument for argument in arguments):
                 return json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": self.threads}}}}})
@@ -80,6 +87,29 @@ class FakeWorld:
         if arguments[0] == "api":
             return "{}"
         return ""
+
+    def relabel(self, arguments):
+        """Comme GitHub : `--remove-label` d'un libellé absent ne laisse aucune trace dans la timeline."""
+        on_the_pr = self.labels()
+        for flag, label in zip(arguments, arguments[1:]):
+            if flag == "--add-label":
+                self.label_event("labeled", label)
+            elif flag == "--remove-label" and label in on_the_pr:
+                self.label_event("unlabeled", label)
+
+    def label_event(self, kind, label):
+        at = f"2026-11-16T12:{len(self.timeline):02d}:00Z"
+        self.timeline.append({"event": kind, "label": {"name": label}, "created_at": at})
+        return at
+
+    def labels(self):
+        on_the_pr = set()
+        for event in self.timeline:
+            (on_the_pr.add if event["event"] == "labeled" else on_the_pr.discard)(event["label"]["name"])
+        return on_the_pr
+
+    def director_comments(self, *bodies):
+        self.pull_request["comments"] = [{"body": body, "createdAt": "2026-11-16T13:00:00Z"} for body in bodies]
 
     def ran(self, *prefix):
         return [command for command in self.commands if command[:len(prefix)] == list(prefix)]
@@ -115,6 +145,13 @@ class BalletRehearsalTest(unittest.TestCase):
     def to_the_critic(self):
         self.begin()
         self.receive(message("dancer", "conductor", "report", "- Tasks: all done."))
+
+    def escalated(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: ESCALATE\n\n## Escalation\n\nSize."))
+
+    def resume(self):
+        return ballet_rehearsal.resume("FEAT-001.2", self.home, self.tools)
 
     # --- begin ---
 
@@ -282,6 +319,95 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(step.next, "escalate")
         self.assertFalse(self.world.ran("gh", "pr", "merge"))
 
+    # --- libellés et décision du Director ---
+
+    def test_chaque_verdict_pose_son_libelle_et_retire_les_autres(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.assertEqual(self.world.labels(), {"ballet:rejected"})
+        self.receive(message("dancer", "conductor", "report", "- Fixed."))
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(self.world.labels(), {"ballet:approved"})
+
+    def test_une_escalade_avec_une_pr_pose_ballet_escalated(self):
+        self.to_the_critic()
+        for _ in range(3):
+            self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+            self.receive(message("dancer", "conductor", "report", "- Fixed."))
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.assertEqual(step.next, "escalate")
+        self.assertEqual(self.world.labels(), {"ballet:escalated"})
+
+    def test_une_ci_en_cours_ne_retire_pas_l_approbation(self):
+        self.world.pull_request = pull_request_state(checks=False)
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(self.world.labels(), {"ballet:approved"})
+
+    def test_resume_sans_decision_reste_escalade(self):
+        self.escalated()
+        step = self.resume()
+        self.assertEqual((step.next, self.state()["status"]), ("escalate", "escalated"))
+        self.assertIn("nothing decided yet", step.reason)
+        self.assertEqual(self.world.labels(), {"ballet:escalated"})
+
+    def test_le_director_approuve_par_le_libelle_et_resume_fait_la_premiere(self):
+        self.escalated()
+        self.world.label_event("labeled", "ballet:approved")
+        step = self.resume()
+        self.assertEqual(step.next, "done")
+        self.assertTrue(self.world.ran("gh", "pr", "merge"))
+        self.assertTrue(self.world.ran("orca", "worktree", "rm"))
+        self.assertEqual(self.state()["status"], "done")
+
+    def test_la_decision_du_director_est_journalisee(self):
+        self.escalated()
+        self.world.label_event("labeled", "ballet:approved")
+        self.resume()
+        journal = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
+        decisions = [json.loads(line) for line in journal if '"director-decision"' in line]
+        self.assertEqual(decisions[0]["detail"]["verdict"], "APPROVED")
+
+    def test_une_approbation_du_director_sur_ci_en_cours_reste_posee(self):
+        self.escalated()
+        self.world.pull_request = pull_request_state(checks=False)
+        self.world.label_event("labeled", "ballet:approved")
+        step = self.resume()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("ballet:approved", self.world.labels())
+        self.world.pull_request = pull_request_state()
+        self.assertEqual(ballet_rehearsal.premiere("FEAT-001.2", self.home, self.tools).next, "done")
+
+    def test_le_director_refuse_avec_un_commentaire_et_le_dancer_reprend(self):
+        self.escalated()
+        self.world.label_event("labeled", "ballet:rejected")
+        self.world.director_comments("Make the fields of `Date` private.")
+        step = self.resume()
+        self.assertEqual((step.next, self.state()["status"]), ("wait", "open"))
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_1")
+        self.assertIn("> Make the fields of `Date` private.", send[send.index("--body") + 1])
+
+    def test_un_refus_sans_commentaire_reste_escalade_sans_toucher_au_libelle(self):
+        self.escalated()
+        self.world.label_event("labeled", "ballet:rejected")
+        step = self.resume()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("needs a comment", step.reason)
+        self.assertIn("ballet:rejected", self.world.labels())
+
+    def test_un_commentaire_d_avant_l_escalade_n_est_pas_une_decision(self):
+        self.escalated()
+        self.world.label_event("labeled", "ballet:rejected")
+        self.world.pull_request["comments"] = [{"body": "Dancer report", "createdAt": "2026-11-16T09:00:00Z"}]
+        self.assertIn("needs a comment", self.resume().reason)
+
+    def test_resume_sur_une_rehearsal_ouverte_ne_fait_rien(self):
+        self.begin()
+        step = self.resume()
+        self.assertEqual(step.next, "wait")
+        self.assertFalse(self.world.ran("gh", "api"))
+
     # --- ligne de commande ---
 
     def test_la_derniere_ligne_dit_au_conductor_quoi_faire(self):
@@ -316,7 +442,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.receive(message("critic", "conductor", "verdict", "VERDICT: ESCALATE\n\n## Escalation\n\nSize."))
         code, lines = self.run_main("status", "FEAT-001.2")
         self.assertEqual(code, 0)
-        self.assertIn("- pull request #8: last verdict APPROVED, CI green", lines)
+        self.assertIn("- pull request #8: ballet:escalated, Critic's last verdict APPROVED, CI green", lines)
         self.assertIn("- Dancer ↔ Critic round trips: 0 of 2", lines)
         self.assertEqual(lines[-1], "NEXT: escalate the Critic escalates: see its review")
 

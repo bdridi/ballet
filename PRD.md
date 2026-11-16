@@ -165,7 +165,7 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
   - ouvrir la PR, liée à l'issue ;
   - lire une PR et ses reviews (Conductor, Dancer) ;
   - publier une review de la PR (verdict du Critic) et la commenter (rapport du Dancer) ;
-  - merger la PR par rebase (la Premiere) après une politique verte, une CI verte et le tampon de la phase, puis supprimer sa branche ;
+  - merger la PR par rebase (la Premiere) après une politique verte, une CI verte et le tampon de la phase, puis supprimer sa branche ; le verdict qui fait foi est le libellé de la PR (`ballet:approved`, `ballet:rejected`, `ballet:escalated`) : le Conductor pose celui du Critic, le Director tranche une escalade en posant le sien, et le merge exige `ballet:approved` posé après le dernier commit ;
   - fermer l'issue.
 - **Jamais de push direct sur `main`** : `main` ne bouge que par le merge d'une PR.
 - **Aucune opération libre** : pas de commande `gh` arbitraire, pas de suppression, pas de modification des réglages du repo.
