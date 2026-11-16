@@ -73,4 +73,4 @@ Your final text is a message, `type: report`, to the Conductor, which checks the
 
 ## When the Critic rejects
 
-You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its points in one batch. Fix each point it raises, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.
+You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its blocking points in one batch, then optional notes. Fix each blocking point, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again. A note is optional: act on it only if it fits inside a blocking point's fix or is a one-line change; otherwise leave it. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.

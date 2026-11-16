@@ -1,9 +1,10 @@
-"""Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues.
+"""Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues et les PR.
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
     python3 ballet_github.py publish <brouillon.md>              # crée l'issue, affiche son numéro
     python3 ballet_github.py plan    <issue> <plan.md>           # écrit la section ## Plan de l'issue
     python3 ballet_github.py slice   <parente> <brouillon.md>    # crée l'issue d'une slice, liée à sa parente
+    python3 ballet_github.py read-pr <pr>                        # affiche la PR, ses reviews et ses commentaires, dans l'ordre
 
 Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
 Le titre d'une issue est le premier titre `# …` de son brouillon ; le corps, tout le reste.
@@ -42,6 +43,12 @@ def publish_slice(parent_number, draft_path, run=None):
     return _create_issue(title, _linked_to_parent(body, parent_number), run or _run_gh)
 
 
+def read_pull_request(number, run=None):
+    number = _issue_number(number)
+    pull_request = _pull_request(number, run or _run_gh)
+    return _as_markdown(number, pull_request)
+
+
 def main(argv):
     operation, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
@@ -63,6 +70,7 @@ def _dispatch(operation, arguments):
         "publish": (publish_issue, 1),
         "plan": (write_plan, 2),
         "slice": (publish_slice, 2),
+        "read-pr": (read_pull_request, 1),
     }
     if operation not in operations:
         raise GitHubError(f"opération inconnue « {operation} » ; connues : {', '.join(operations)}")
@@ -77,6 +85,11 @@ def _issue_body(number, run):
     return json.loads(output)["body"]
 
 
+def _pull_request(number, run):
+    output = run(["pr", "view", number, "--json", "title,body,reviews,comments"])
+    return json.loads(output)
+
+
 def _create_issue(title, body, run):
     url = run(["issue", "create", "--title", title, "--body", body]).strip()
     return url.rsplit("/", 1)[-1]
@@ -87,6 +100,26 @@ def _edit_issue(number, body, run):
 
 
 # --- texte des issues -------------------------------------------------------
+
+
+def _as_markdown(number, pull_request):
+    header = f"# PR #{number} · {pull_request['title']}\n\n{pull_request['body'].strip()}\n"
+    entries = sorted(_reviews(pull_request) + _comments(pull_request))
+    return header + "".join(f"\n## {heading}\n\n{body.strip()}\n" for _, heading, body in entries)
+
+
+def _reviews(pull_request):
+    return [
+        (review["submittedAt"], f"Review · {review['author']['login']} · {review['submittedAt']}", review["body"])
+        for review in pull_request.get("reviews", [])
+    ]
+
+
+def _comments(pull_request):
+    return [
+        (comment["createdAt"], f"Comment · {comment['author']['login']} · {comment['createdAt']}", comment["body"])
+        for comment in pull_request.get("comments", [])
+    ]
 
 
 def _read_draft(path):
@@ -137,7 +170,7 @@ def _linked_to_parent(body, parent_number):
 def _issue_number(value):
     number = str(value).lstrip("#")
     if not number.isdigit():
-        raise GitHubError(f"numéro d'issue invalide : {value}")
+        raise GitHubError(f"numéro d'issue ou de PR invalide : {value}")
     return number
 
 

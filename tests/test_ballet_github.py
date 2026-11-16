@@ -10,6 +10,16 @@ import ballet_github  # noqa: E402
 
 ISSUE_BODY = "## Context\n\nWhy.\n\n## Plan\n\n<!-- empty -->\n\n## Notes\n\nKeep me.\n"
 
+PULL_REQUEST = {
+    "title": "FEAT-001.1 · Walking skeleton",
+    "body": "Closes #2",
+    "reviews": [{"author": {"login": "bilel"}, "state": "COMMENTED", "body": "VERDICT: REJECTED\n\n1. Fix it.", "submittedAt": "2026-11-16T10:00:00Z"}],
+    "comments": [
+        {"author": {"login": "bilel"}, "body": "Dancer report", "createdAt": "2026-11-16T09:00:00Z"},
+        {"author": {"login": "bilel"}, "body": "Dancer report, round 2", "createdAt": "2026-11-16T11:00:00Z"},
+    ],
+}
+
 
 class FakeGh:
     def __init__(self, body=ISSUE_BODY):
@@ -22,6 +32,8 @@ class FakeGh:
             return json.dumps({"body": self.body})
         if arguments[:2] == ["issue", "create"]:
             return "https://github.com/o/r/issues/42\n"
+        if arguments[:2] == ["pr", "view"]:
+            return json.dumps(PULL_REQUEST)
         if arguments[:2] == ["issue", "edit"]:
             self.body = arguments[arguments.index("--body") + 1]
         return ""
@@ -80,6 +92,14 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertEqual(ballet_github.publish_slice("#7", draft, run=gh), "42")
         body = gh.calls[0][gh.calls[0].index("--body") + 1]
         self.assertTrue(body.startswith("Part of #7\n"))
+
+    def test_lit_une_pr_avec_ses_reviews_et_commentaires_dans_l_ordre(self):
+        text = ballet_github.read_pull_request("#5", run=FakeGh())
+        self.assertTrue(text.startswith("# PR #5 · FEAT-001.1 · Walking skeleton\n\nCloses #2"))
+        first, review, second = (text.index("Dancer report\n"), text.index("VERDICT: REJECTED"), text.index("round 2"))
+        self.assertLess(first, review)
+        self.assertLess(review, second)
+        self.assertIn("## Review · bilel · 2026-11-16T10:00:00Z", text)
 
     def test_refuse_un_numero_invalide(self):
         with self.assertRaises(ballet_github.GitHubError):

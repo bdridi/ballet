@@ -86,6 +86,8 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
     - [x] Slice #2 (walking skeleton) : 7 tâches, preuve verte, 3 questions au Choreographer.
   - [x] Chaque Rehearsal sur sa branche `rehearsal/<ID>`, dans son worktree, intégrée par une PR que le Conductor merge par rebase ; le Critic rend ses remarques en un lot, publiées en une review ; sur un refus, le Dancer relit la PR ; clé `[project] merge` retirée (ADR 0004, 0.7.0).
 - [ ] `critic` : rend un verdict (message `type: verdict`, première ligne `VERDICT: …`), en lecture seule.
+  - [x] Skill `critic` : relance la preuve, vérifie tâches, critères, décisions, règles et périmètre sur le diff de la branche de Rehearsal ; points bloquants en un seul lot, notes optionnelles ; relecture point par point au round suivant ; `read-pr` dans le script GitHub (0.8.0).
+  - [ ] Première review réelle : la PR de la slice #2 d'antimurphy, ouverte à la main par le Director.
 - [ ] Les règles communes minimales chargées par chaque rôle (tdd, clean code, trunk-based).
 
 **Fini quand** : une feature d'antimurphy passe à la main de l'état prêt au code validé.
