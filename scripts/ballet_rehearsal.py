@@ -799,10 +799,24 @@ def _first_assignment(role, rehearsal, config):
     if role == "dancer":
         return f"Execute your repo's section of the plan of issue #{rehearsal.issue}, task by task."
     if rehearsal.feature:
-        return (f"Plan the ready feature {rehearsal.feature}: create its issue with `publish` (and its slices with `slice`, "
-                "if it needs them), commit your ADRs on this branch, then report with the issue's number (`- Issue: #<n>`).")
-    return (f"Issue #{rehearsal.issue} has no plan yet: write it (`plan`), or cut it into slices (`slice {rehearsal.issue}`), "
-            "commit your ADRs on this branch, then report.")
+        publish = f"Plan the ready feature {rehearsal.feature}: publish its issue (`publish`), and its slices (`slice`) if it needs them."
+    else:
+        publish = (f"Issue #{rehearsal.issue} has no plan yet: write it (`plan {rehearsal.issue}`), or cut it into slices "
+                   f"(`slice {rehearsal.issue}`).")
+    return f"{publish}\n\n{_auto_mode(rehearsal, config)}"
+
+
+def _auto_mode(rehearsal, config):
+    """La consigne du Choreographer en mode auto : il tranche seul, découpe sous le seuil et publie sans attendre de oui."""
+    limit = config["escalation"]["max_diff_lines"]
+    review = ("the Director reviews the published plan before any code" if rehearsal.plan == "review"
+              else "the Dancer starts on it as soon as you report")
+    return (f"Auto mode (section *Auto mode* of your skill): nobody says yes in this session; {review}. Settle every "
+            "choice yourself and write it in *Decisions*. Product gaps go to the Dramaturg; what neither of you can settle "
+            f"goes to the Director (a question `to: director`). Slices: `max_diff_lines` is {limit}; aim each slice at "
+            f"{limit // 2} lines or less, tests included, and cut again any slice estimated over {limit * 2 // 3}. "
+            "Commit your ADRs and `AGENTS.md` rules on this branch: they ship with the first slice. "
+            "Then report, with `- Issue: #<n>` (the parent, when sliced).")
 
 
 def _review_round(rehearsal):

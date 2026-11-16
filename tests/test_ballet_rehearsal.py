@@ -1063,6 +1063,25 @@ class PlanningTest(unittest.TestCase):
         self.assertIn("ready feature FEAT-002", start["text"])
         self.assertIn("- Issue: #<n>", start["text"])
 
+    def test_le_choreographer_planifie_en_mode_auto_sous_la_moitie_du_seuil(self):
+        self.run_main("run", "FEAT-002")
+        text = self.journal("handoff")[0]["text"]
+        self.assertIn("Auto mode", text)
+        self.assertIn("nobody says yes in this session; the Director reviews the published plan before any code", text)
+        self.assertIn("aim each slice at 200 lines or less", text)
+        self.assertIn("goes to the Director", text)
+
+    def test_en_plan_auto_le_choreographer_sait_que_le_dancer_suit(self):
+        self.run_main("run", "FEAT-002", "--plan", "auto")
+        self.assertIn("the Dancer starts on it as soon as you report", self.journal("handoff")[0]["text"])
+
+    def test_une_issue_sans_plan_est_aussi_planifiee_en_mode_auto(self):
+        self.world.issues["3"] = {"title": "FEAT-002 · Inventory", "body": UNPLANNED_ISSUE, "state": "OPEN"}
+        self.run_main("run", "#3")
+        text = self.journal("handoff")[0]["text"]
+        self.assertIn("`plan 3`", text)
+        self.assertIn("Auto mode", text)
+
     def test_en_auto_la_premiere_slice_se_joue_dans_le_worktree_de_la_planification(self):
         lines = self.planned("--plan", "auto")
         self.assertIn("- issue #13 cut into slices: #14, #15", lines)
