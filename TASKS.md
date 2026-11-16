@@ -96,7 +96,12 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 - [ ] Script GitHub : la liste fermée d'opérations (PRD §5.4), chaque appel journalisé. Déjà là : `read`, `publish`, `plan`, `slice` (0.5.0). À ajouter (ADR 0004) : pousser la branche de Rehearsal, ouvrir la PR, `read-pr` (PR et reviews), publier une review, commenter l'issue et la PR, merger par rebase, supprimer la branche mergée.
 - [ ] Lecture de l'en-tête JSON des messages (`message.md`), renvoi d'un en-tête invalide, compte des tours par sujet et paire de rôles.
 - [ ] Compter les tours **par point** et non par issue : au premier run, 3 questions sur 3 sujets différents auraient déclenché une escalade à tort. Trancher : un sujet par point (`#2/wasm-outdir`) ou un `round` remis à 1 sur une nouvelle question.
-- [ ] Politique : un commit appartient au rôle du passage où il est apparu (Choreographer et Dancer partagent la branche de Rehearsal).
+- [ ] Politique : un commit appartient au rôle du passage où il est apparu (Choreographer et Dancer partagent la branche de Rehearsal). **Sujet à traiter à part.** Piste, le message, l'auteur ou un trailer étant falsifiables :
+  - le Conductor relève l'état du repo à chaque relais (lancement, `ask`, `reply`, `worker_done`) ;
+  - au `ask` du Dancer, la politique vérifie aussi l'arbre non commité (rien dans ses zones interdites, sinon le Choreographer l'embarquerait) ;
+  - au retour du Choreographer, ses commits ne touchent qu'ADR et `AGENTS.md`, et l'arbre non commité est identique au relevé d'avant ;
+  - un registre des commits (sha → rôle), hors du worktree, vérifié avant la Premiere : un commit inconnu bloque le merge ;
+  - limite : tient tant que le Dancer ne peut pas écrire dans le dossier du Conductor (couche 2). La signature par rôle : voir PRD §17.
 - [ ] Tests sur des repos jouets.
 
 **Fini quand** : chaque violation du PRD §5.3 est détectée par un test.

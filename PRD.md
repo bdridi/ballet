@@ -475,4 +475,5 @@ Tranchées par le spike 1 et l'étape 2 : voir `docs/ADR/0001-*` à `0003-*`.
 - ~~La source de vérité d'une issue~~ : tranché, il n'y a plus de brouillon ; le Choreographer crée l'issue à partir de la feature, et l'issue (plan compris) ne vit que sur GitHub.
 - Qui pousse les commits du Dramaturg (specs, sur `main`) quand l'espace specs est dans le repo de code : une PR de specs, ou le Conductor au début de la Rehearsal ?
 - Un repo sans CI : la Premiere se contente-t-elle de la preuve locale ?
+- Signer les commits par rôle (une clé par rôle) n'a de sens qu'avec une isolation par l'OS (un utilisateur ou un bac à sable par rôle) : sous le même utilisateur, le Dancer peut lire la clé du Choreographer. Même chantier que la ligne suivante.
 - Comment priver un worker de `gh` et du jeton GitHub quand Orca le lance (variables d'environnement, permissions du CLI).
