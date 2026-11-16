@@ -56,6 +56,11 @@ class FakeWorld:
         self.issue_state = "OPEN"
         self.numstat = "10\t2\tsrc/a.rs\n"
         self.inbox = []
+        self.branch = "rehearsal/FEAT-001.2"
+        self.head = "c0ffee1"
+        self.dirty = ""
+        self.changed = []
+        self.new_commits = []
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -71,12 +76,28 @@ class FakeWorld:
             return self.numstat
         if tool == "git" and "worktree" in arguments:
             return f"worktree {self.home}\nbranch refs/heads/main\n\nworktree /wt/FEAT-001.2\nbranch refs/heads/rehearsal/FEAT-001.2\n"
+        if tool == "git":
+            return self.policy_git(arguments[2:])
         if arguments[:2] == ["orchestration", "inbox"]:
             return json.dumps({"ok": True, "result": {"messages": self.inbox}})
         if arguments[:2] == ["orchestration", "worker-start"]:
             self.dispatches += 1
             return json.dumps({"ok": True, "result": {"worker": {"dispatchId": f"ctx_{self.dispatches}"}}})
         return ""
+
+    def policy_git(self, arguments):
+        """Ce que lit la politique : un worktree en règle, sauf ce que le test y met (`changed`, `dirty`, `branch`)."""
+        answers = {
+            ("rev-parse", "--abbrev-ref"): self.branch + "\n",
+            ("rev-parse", "HEAD"): self.head + "\n",
+            ("rev-list", "--count"): "0\n",
+            ("status", "--porcelain"): self.dirty,
+            ("merge-base", "origin/main"): "base\n",
+            ("diff", "--name-only"): "\n".join(self.changed),
+        }
+        if arguments[0] == "rev-list" and arguments[1] != "--count":
+            return "\n".join(self.new_commits)
+        return answers.get(tuple(arguments[:2]), "")
 
     def gh(self, arguments):
         if arguments[:2] == ["issue", "view"]:
@@ -225,6 +246,72 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertIn("- Tasks: all done.", comment[comment.index("--body") + 1])
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
         self.assertEqual(self.state()["pull_request"], "8")
+
+    # --- la politique ---
+
+    def policy_events(self):
+        journal = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
+        return [json.loads(line)["detail"] for line in journal if json.loads(line)["event"] == "policy"]
+
+    def test_chaque_passage_est_verifie_et_journalise_meme_en_regle(self):
+        self.to_the_critic()
+        self.assertEqual(self.policy_events(), [{"role": "dancer", "violations": []}])
+
+    def test_un_dancer_en_violation_n_est_pas_pousse_et_corrige_une_fois(self):
+        self.begin()
+        self.world.changed = ["specs/backlog.md"]
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual(step.next, "wait")
+        self.assertFalse(self.world.ran("git", "-C", str(self.home.resolve()), "push", "--set-upstream", "origin", "rehearsal/FEAT-001.2"))
+        self.assertFalse(self.world.ran("gh", "pr", "create"))
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertIn("- specs/backlog.md: the specs space", send[send.index("--body") + 1])
+
+    def test_la_deuxieme_violation_escalade(self):
+        self.begin()
+        self.world.changed = ["specs/backlog.md"]
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        step = self.receive(message("dancer", "conductor", "report", "- Done again."))
+        self.assertEqual((step.next, step.reason), ("escalate", "policy: the dancer broke the rules: specs/backlog.md: the specs space"))
+
+    def test_une_violation_corrigee_repart_vers_le_critic(self):
+        self.begin()
+        self.world.changed = [".github/workflows/proof.yml"]
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.world.changed = []
+        self.receive(message("dancer", "conductor", "report", "- Reverted."))
+        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+
+    def test_un_critic_qui_a_ecrit_escalade_sans_que_son_verdict_soit_publie(self):
+        self.to_the_critic()
+        self.world.head = "d1rty00"
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("the Critic is read-only", step.reason)
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+
+    def test_les_commits_du_choreographer_qui_repond_lui_appartiennent(self):
+        self.begin()
+        self.receive(message("dancer", "choreographer", "question", "1. A rule?"), question_id="msg_1")
+        self.world.changed, self.world.new_commits = ["AGENTS.md"], ["abc1234"]
+        self.receive(message("choreographer", "dancer", "answer", "1. Yes, in AGENTS.md."))
+        self.assertEqual(self.state()["owned"], ["abc1234"])
+
+    def test_un_choreographer_qui_repond_hors_de_ses_fichiers_escalade(self):
+        self.begin()
+        self.receive(message("dancer", "choreographer", "question", "1. A?"), question_id="msg_1")
+        self.world.changed = ["src/a.rs"]
+        step = self.receive(message("choreographer", "dancer", "answer", "1. Done for you."))
+        self.assertEqual(step.next, "escalate")
+        self.assertFalse(self.world.ran("orca", "orchestration", "reply"))
+
+    def test_le_plan_du_choreographer_est_verifie_avant_de_lancer_le_dancer(self):
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.begin()
+        self.world.changed = ["src/a.rs"]
+        step = self.receive(message("choreographer", "conductor", "report", "- Plan written."))
+        self.assertEqual((step.next, self.world.started_roles()), ("wait", ["Choreographer · FEAT-001.2"]))
+        self.assertIn("src/a.rs: the Choreographer writes only ADRs and AGENTS.md", step.done[0])
 
     # --- questions et réponses ---
 

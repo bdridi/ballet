@@ -23,6 +23,10 @@ escalade avant le Critic, jusqu'à ce que le Director pose `ballet:size-accepted
 La Premiere attend une CI en cours (`ci_wait_seconds`, un sondage toutes les 15 s) ; une CI rouge, ou encore
 en cours à l'échéance, refuse le merge et escalade. Ces appels peuvent donc durer plusieurs minutes.
 
+Après chaque passage d'un rôle, la politique (`ballet_policy.py`) vérifie ce qu'il a fait du repo, et le journalise
+(`policy`). Une violation n'est jamais poussée : le rôle la corrige une fois, la deuxième escalade ; un Critic
+ou un Choreographer qui répond au Dancer en violation escalade tout de suite.
+
 Un worker qui finit son tour sans `worker_done` est relancé une fois pour envoyer son rapport ; s'il recommence,
 ou s'il est tombé en erreur, la Rehearsal escalade.
 
@@ -45,6 +49,7 @@ from pathlib import Path
 
 import ballet_config
 import ballet_github
+import ballet_policy
 import ballet_size
 from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
 
@@ -57,6 +62,7 @@ STATUS_OF_STEP = {"wait": "open", "escalate": "escalated", "done": "done"}
 STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 CI_POLL_SECONDS = 15
 MAX_NUDGES = 1
+MAX_POLICY_RESENDS = 1
 REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
 
 
@@ -86,6 +92,10 @@ class Rehearsal:
     blocked_on: str = ""                             # "size" : le Critic attend que le Director accepte la taille
     notes: str = ""                                  # "" | "asked" (le Dancer prend les notes) | "reviewed" (le Critic a relu)
     nudges: dict = field(default_factory=dict)       # rôle → relances sans `worker_done`, remis à zéro à son prochain message
+    checkpoint: str = ""                             # `HEAD` du worktree quand le dernier rôle a reçu la main
+    refs: list = field(default_factory=list)         # branches et tags au dernier passage en règle
+    owned: list = field(default_factory=list)        # les commits du Choreographer sur la branche
+    violations: dict = field(default_factory=dict)   # rôle → passages refusés par la politique
 
     @property
     def branch(self):
@@ -134,6 +144,8 @@ def begin(issue, home, tools):
     rehearsal.worktree = _open_worktree(rehearsal, tools)
     step.done.append(f"worktree {rehearsal.worktree} on {rehearsal.branch}, from origin/main")
     first_role = "dancer" if _has_tasks(body) else "choreographer"
+    git = tools.git(rehearsal.worktree)
+    rehearsal.checkpoint, rehearsal.refs = ballet_policy.head(git), ballet_policy.refs(git)
     _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal), config, home, tools)
     step.done.append(f"{first_role} started on issue #{rehearsal.issue}")
     _log(home, rehearsal, "begin", {"first_role": first_role})
@@ -213,7 +225,7 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
     if kind == "question":
         return _relay_question(rehearsal, header, text, question_id, config, home, tools)
     if kind == "answer":
-        return _relay_answer(rehearsal, header, text, home, tools)
+        return _relay_answer(rehearsal, header, text, config, home, tools)
     if kind == "report" and sender == "choreographer":
         return _after_plan(rehearsal, config, home, tools)
     if kind == "report" and sender == "dancer":
@@ -255,9 +267,14 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
     return step
 
 
-def _relay_answer(rehearsal, header, text, home, tools):
+def _relay_answer(rehearsal, header, text, config, home, tools):
     """Publie la réponse sur l'issue et la rend au demandeur, qui reprend avec son contexte."""
     question = _pending_question(rehearsal, asker=header["to"], answerer=header["from"])
+    if header["from"] == "choreographer":
+        found = _policy(rehearsal, "choreographer", config, home, tools, answering=True)
+        if found:
+            return Step("escalate", f"policy: the choreographer broke the rules while answering: {'; '.join(found)}")
+        _own_choreographer_commits(rehearsal, tools)
     step = Step("wait")
     _comment_issue(rehearsal, text, home, tools)
     step.done.append(f"answer published on issue #{rehearsal.issue}")
@@ -268,6 +285,10 @@ def _relay_answer(rehearsal, header, text, home, tools):
 
 
 def _after_plan(rehearsal, config, home, tools):
+    found = _policy(rehearsal, "choreographer", config, home, tools)
+    if found:
+        return _refused_by_policy(rehearsal, "choreographer", found, config, home, tools)
+    _own_choreographer_commits(rehearsal, tools)
     _, body = _issue(rehearsal.issue, tools)
     if not _has_tasks(body):
         raise RehearsalError(f"the Choreographer reported but issue #{rehearsal.issue} has no tasks (slices?)")
@@ -276,7 +297,11 @@ def _after_plan(rehearsal, config, home, tools):
 
 
 def _after_code(rehearsal, report, config, home, tools):
-    """Pousse la branche, ouvre la PR au premier rapport, y publie le rapport, puis passe la main au Critic."""
+    """La politique d'abord : rien n'est poussé en violation. Puis pousse la branche, ouvre la PR au premier rapport,
+    y publie le rapport, et passe la main au Critic."""
+    found = _policy(rehearsal, "dancer", config, home, tools)
+    if found:
+        return _refused_by_policy(rehearsal, "dancer", found, config, home, tools)
     step = Step("wait")
     ballet_github.push_branch(rehearsal.branch, git=tools.git(rehearsal.repo))
     step.done.append(f"{rehearsal.branch} pushed")
@@ -337,6 +362,9 @@ def _blocked_by_size(rehearsal, size, config, tools):
 
 
 def _after_verdict(rehearsal, verdict, text, config, home, tools):
+    found = _policy(rehearsal, "critic", config, home, tools)
+    if found:
+        return _refused_by_policy(rehearsal, "critic", found, config, home, tools)
     step = Step("wait")
     _publish_review(rehearsal, text, home, tools)
     ballet_github.update_verdicts(rehearsal.pull_request, run=tools.gh)
@@ -384,6 +412,34 @@ def _back_to_the_dancer(rehearsal, comments, config, home, tools):
     rehearsal.label, rehearsal.blocked_on = "REJECTED", ""
     _ask_role(rehearsal, "dancer", _director_fix_assignment(rehearsal, comments), config, home, tools)
     return Step("wait", done=[f"the Director rejected #{rehearsal.pull_request}: {len(comments)} comment(s) carried to the dancer"])
+
+
+def _policy(rehearsal, role, config, home, tools, answering=False):
+    """Les violations du passage qui s'achève, journalisées à chaque fois ; en règle, ses branches font foi."""
+    git = tools.git(rehearsal.worktree)
+    passage = ballet_policy.Passage(role, rehearsal.branch, rehearsal.checkpoint, rehearsal.refs, rehearsal.owned, answering)
+    found = ballet_policy.violations(passage, ballet_policy.zones_of(config), git)
+    _log(home, rehearsal, "policy", {"role": role, "violations": found})
+    if not found:
+        rehearsal.refs = ballet_policy.refs(git)
+    return found
+
+
+def _refused_by_policy(rehearsal, role, found, config, home, tools):
+    """Le rôle corrige une fois ; la deuxième violation escalade. Le Critic, en lecture seule, n'a rien à corriger."""
+    rehearsal.violations[role] = rehearsal.violations.get(role, 0) + 1
+    listed = "; ".join(found)
+    if role == "critic" or rehearsal.violations[role] > MAX_POLICY_RESENDS:
+        return Step("escalate", f"policy: the {role} broke the rules: {listed}")
+    _ask_role(rehearsal, role, _policy_fix_assignment(found), config, home, tools)
+    return Step("wait", done=[f"policy refused the {role}'s work, sent back once: {listed}"])
+
+
+def _own_choreographer_commits(rehearsal, tools):
+    """Les commits du passage du Choreographer lui appartiennent : ils ne comptent pas contre le Dancer."""
+    git = tools.git(rehearsal.worktree)
+    rehearsal.owned += ballet_policy.commits_since(rehearsal.checkpoint, git)
+    rehearsal.checkpoint = ballet_policy.head(git)
 
 
 def _then_premiere(rehearsal, step, config, tools):
@@ -476,6 +532,7 @@ def _workers_line(rehearsal):
 
 def _ask_role(rehearsal, role, assignment, config, home, tools):
     """Un rôle déjà lancé reçoit la suite dans sa session, avec son contexte ; sinon il démarre."""
+    rehearsal.checkpoint = ballet_policy.head(tools.git(rehearsal.worktree))
     dispatch = rehearsal.dispatches.get(role)
     if dispatch:
         tools.orca(["orchestration", "send", "--to", f"dispatch:{dispatch}",
@@ -543,6 +600,13 @@ def _director_fix_assignment(rehearsal, comments):
     quoted = "\n\n".join(_quote(comment) for comment in comments)
     return (f"The Director rejected pull request #{rehearsal.pull_request}. Their comments, your blocking points:\n\n{quoted}\n\n"
             f"Fix each one, then report again (`read-pr {rehearsal.pull_request}` for the whole pull request).")
+
+
+def _policy_fix_assignment(found):
+    listed = "\n".join(f"- {violation}" for violation in found)
+    return (f"Ballet's policy refused your work: nothing was pushed.\n\n{listed}\n\nFix it with new commits "
+            "(a revert is fine), never by rewriting history, and leave the worktree clean. If the plan really needs "
+            "one of these changes, ask instead. Then report again. A second violation goes to the Director.")
 
 
 def _quote(text):
