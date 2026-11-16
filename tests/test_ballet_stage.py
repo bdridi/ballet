@@ -13,6 +13,10 @@ ENTRY = {"at": "2026-11-16T12:34:38+00:00", "rehearsal": "FEAT-001.2", "event": 
 
 class BalletStageTest(unittest.TestCase):
     def setUp(self):
+        ballet_stage.TITLES.clear()
+        self.read_title = ballet_stage._read_title
+        ballet_stage._read_title = lambda home, issue: f"FEAT-001.2 · Issue {issue}"
+        self.addCleanup(setattr, ballet_stage, "_read_title", self.read_title)
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.home = Path(self.folder.name) / "antimurphy"
@@ -29,6 +33,22 @@ class BalletStageTest(unittest.TestCase):
         self.assertEqual(project["name"], "antimurphy")
         self.assertEqual([state["status"] for state in project["rehearsals"]], ["done"])
         self.assertEqual(project["journal"], [ENTRY])
+
+    def test_donne_le_titre_de_l_issue_de_chaque_rehearsal(self):
+        (self.run / "FEAT-001.2.json").write_text(json.dumps({"id": "FEAT-001.2", "issue": "3"}), encoding="utf-8")
+        self.assertEqual(ballet_stage.snapshot([self.home])["projects"][0]["titles"], {"FEAT-001.2": "FEAT-001.2 · Issue 3"})
+
+    def test_ne_demande_le_titre_qu_une_fois(self):
+        calls = []
+        ballet_stage._read_title = lambda home, issue: calls.append(issue) or "titre"
+        (self.run / "FEAT-001.2.json").write_text(json.dumps({"id": "FEAT-001.2", "issue": "3"}), encoding="utf-8")
+        ballet_stage.snapshot([self.home])
+        ballet_stage.snapshot([self.home])
+        self.assertEqual(calls, ["3"])
+
+    def test_donne_la_distribution_du_profil(self):
+        cast = ballet_stage.snapshot([self.home])["projects"][0]["cast"]
+        self.assertEqual(cast["dancer"]["cli"], "claude")
 
     def test_saute_une_ligne_a_moitie_ecrite(self):
         self._journal(json.dumps(ENTRY), '{"at": "2026-11-16T12:3')

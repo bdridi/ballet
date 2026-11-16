@@ -33,6 +33,9 @@ ou s'il est tombé en erreur, la Rehearsal escalade.
 Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
 et un autre code ≠ 0 n'est qu'une panne du script.
 
+Le journal garde, texte entier, chaque message reçu (`message`) et tout ce que le Conductor remet à un worker
+(`handoff` : `start`, `send`, `reply` ou `nudge`) : la Scène le lit.
+
 L'état vit dans `.ballet/run/<ID>.json`, le journal dans `.ballet/run/journal.jsonl`
 (`init-project` met `.ballet/run/` dans le `.gitignore` du projet).
 """

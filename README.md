@@ -62,7 +62,7 @@ python3 <path-to-ballet>/scripts/ballet_config.py check <project-folder>
 
 ## Watch the Rehearsals (concept)
 
-A local, read-only page that shows what happens in a project, live and in history (stage, score of the journal, replay, season). It reads `.ballet/run/` and listens on 127.0.0.1 only.
+A local, read-only page that shows what happens in a project, live and in history: the Rehearsals, the role at work in each, and its journal as a thread (what the Conductor hands to each worker, every message received in full, every step of the script). It reads `.ballet/run/` and listens on 127.0.0.1 only.
 
 ```
 python3 <path-to-ballet>/scripts/ballet_stage.py <project-folder>

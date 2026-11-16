@@ -3,567 +3,148 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ballet — Théâtre des Rehearsals</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Jost:wght@300;400;500&family=Pinyon+Script&display=swap" rel="stylesheet">
+<title>Ballet Stage</title>
 <style>
-:root{
-  --night:#12071a; --night2:#1d0d27; --velvet:#6e1224; --velvet2:#9a1c38; --gold:#e3b95a; --gold-dim:#9c7a35;
-  --ivory:#f8efe1; --blush:#f3b8c6; --lilac:#b9a1e6; --silver:#a9cfcb; --rose:#e0486a; --ok:#8fd3a5;
-  --serif:'Cormorant Garamond','Playfair Display',Georgia,serif;
-  --script:'Pinyon Script','Snell Roundhand','Apple Chancery',cursive;
-  --ui:'Jost','Avenir Next',system-ui,sans-serif;
-}
-*{box-sizing:border-box}
-html{color-scheme:dark;font-variant-numeric:lining-nums}
-body{margin:0;background:radial-gradient(ellipse at 50% -10%,#3a1236 0,var(--night) 60%) fixed;color:var(--ivory);font:400 15px/1.45 var(--ui);min-height:100vh}
-button{font:inherit;color:inherit;cursor:pointer}
-.wrap{max-width:1280px;margin:0 auto;padding:0 16px 60px}
-
-/* rideau d'ouverture */
-.curtain{position:fixed;top:0;bottom:0;width:51%;z-index:100;transition:transform 1.8s cubic-bezier(.7,0,.2,1);
-  background:repeating-linear-gradient(90deg,#4a0a18 0,#9a1c38 28px,#5a0d1e 56px,#3a0712 84px);box-shadow:0 0 60px #000 inset}
-.curtain.l{left:0;border-right:6px solid var(--gold)} .curtain.r{right:0;border-left:6px solid var(--gold)}
-.curtain.open.l{transform:translateX(-102%)} .curtain.open.r{transform:translateX(102%)}
-.curtain-title{position:fixed;inset:0;z-index:101;display:grid;place-items:center;font:400 clamp(60px,12vw,150px) var(--script);color:var(--gold);
-  text-shadow:0 0 30px #000;transition:opacity .8s;pointer-events:none}
-.curtain-title.open{opacity:0}
-.gone{display:none}
-
-/* en-tête */
-header{display:flex;align-items:center;gap:18px;padding:22px 0 8px;flex-wrap:wrap}
-.logo{font:400 54px/1 var(--script);color:var(--gold);text-shadow:0 0 24px rgba(227,185,90,.35)}
-.tagline{font:italic 400 18px var(--serif);color:var(--blush);letter-spacing:.04em}
-.spacer{flex:1}
-.metro{display:flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold-dim)}
-.metro svg{width:26px;height:34px;overflow:visible}
-.metro .arm{transform-origin:13px 32px;animation:tick 1.5s ease-in-out infinite alternate}
-.metro.off{color:var(--rose)} .metro.off .arm{animation:none;transform:rotate(40deg)}
-@keyframes tick{from{transform:rotate(-24deg)}to{transform:rotate(24deg)}}
-
-/* affiches (projets) */
-.posters{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px}
-.poster{position:relative;padding:10px 22px 10px 18px;border:1px solid var(--gold-dim);background:linear-gradient(160deg,#2a1230,#170a1f);
-  border-radius:3px;text-align:left;min-width:170px}
-.poster:before{content:"";position:absolute;inset:3px;border:1px solid rgba(227,185,90,.25);pointer-events:none}
-.poster b{display:block;font:600 22px var(--serif);color:var(--ivory)}
-.poster small{color:var(--blush);font-size:12px;letter-spacing:.06em}
-.poster.on{border-color:var(--gold);box-shadow:0 0 22px rgba(227,185,90,.25);background:linear-gradient(160deg,#4a1330,#24102c)}
-.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px;animation:pulse 1.4s infinite}
-.live.red{background:var(--rose)} .live.dim{background:var(--gold-dim);animation:none}
-@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(143,211,165,0);opacity:.6}0%{box-shadow:0 0 0 0 rgba(143,211,165,.6)}}
-
-/* programme : tickets */
-h2{font:italic 400 24px var(--serif);color:var(--gold);margin:22px 0 10px;letter-spacing:.03em}
-h2:after{content:"";display:inline-block;width:80px;height:1px;background:linear-gradient(90deg,var(--gold-dim),transparent);margin-left:14px;vertical-align:middle}
-.tickets{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 12px}
-.ticket{flex:0 0 auto;min-width:190px;padding:10px 16px;text-align:left;border:1px solid var(--gold-dim);border-radius:4px;
-  background:linear-gradient(135deg,#f8efe1 0,#ecdcc2 100%);color:#2a1220;position:relative;
-  -webkit-mask:radial-gradient(circle 7px at 0 50%,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 7px at 100% 50%,#0000 98%,#000) right/51% 100% no-repeat;
-  mask:radial-gradient(circle 7px at 0 50%,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 7px at 100% 50%,#0000 98%,#000) right/51% 100% no-repeat}
-.ticket b{font:600 20px var(--serif);display:block}
-.ticket small{display:block;font-size:12px;opacity:.75}
-.ticket.on{outline:2px solid var(--gold);outline-offset:2px}
-.badge{display:inline-block;margin-top:4px;padding:1px 9px;border-radius:99px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:500}
-.badge.open{background:#1f6b45;color:#dff8e8}.badge.escalated{background:var(--rose);color:#fff}.badge.done{background:#7a5a14;color:#ffecb8}
-
-/* scène */
-.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px}
-@media(max-width:1000px){.grid{grid-template-columns:1fr}}
-.stage-wrap{position:relative;border:2px solid var(--gold-dim);border-radius:6px;overflow:hidden;background:#000;box-shadow:0 20px 60px rgba(0,0,0,.6)}
-svg.stage{display:block;width:100%;height:auto}
-.banner{position:absolute;left:14px;top:12px;max-width:62%;padding:8px 14px;background:rgba(18,7,26,.72);border:1px solid var(--gold-dim);
-  border-radius:3px;backdrop-filter:blur(4px)}
-.banner b{font:600 20px var(--serif);color:var(--gold)}
-.banner div{font-size:13px;color:var(--ivory)}
-.banner .why{color:var(--blush);font-style:italic;font-family:var(--serif);font-size:15px;margin-top:2px}
-.petals{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.petal{position:absolute;top:-20px;width:12px;height:16px;background:var(--blush);border-radius:100% 0 100% 0;opacity:.9;animation:fall linear forwards}
-@keyframes fall{to{transform:translate(var(--dx),640px) rotate(540deg);opacity:.2}}
-.controls{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#150a1d;border-top:1px solid var(--gold-dim);flex-wrap:wrap}
-.controls button{background:#2a1230;border:1px solid var(--gold-dim);border-radius:3px;padding:3px 11px;min-width:34px}
-.controls button:hover{background:#43183c}
-.controls button.direct{border-color:var(--ok);color:var(--ok)} .controls button.direct.on{background:#143a27}
-.controls input{flex:1;min-width:140px;accent-color:var(--gold)}
-.controls .t{font-size:12px;color:var(--blush);min-width:170px;text-align:right}
-.stage .role{transition:opacity .7s,filter .7s}
-.stage .role.dim{opacity:.72;filter:saturate(.7)}
-.stage .spot{opacity:0;transition:opacity .8s}.stage .spot.on{opacity:1}
-.stage .body{animation:breathe 4.5s ease-in-out infinite;transform-origin:0 0}
-.stage .role.active .body{animation:twirl 2.6s ease-in-out infinite}
-.stage .role.bow .body{animation:bow 2.4s ease-in-out infinite}
-.stage .arm{animation:armsway 3.6s ease-in-out infinite alternate}.stage .a2{animation-delay:-1.4s}
-.stage .role.active .arm{animation-duration:1.3s}
-.stage .baton{transform-origin:14px -58px;animation:wave 2.6s ease-in-out infinite alternate}
-.stage .role.active .baton{animation-duration:.7s}
-.stage .bell{transform-origin:0 -8px}.stage .alarm .bell{animation:ring .4s infinite alternate}
-.stage .lamp{fill:#ffcf7a;transition:fill .5s}.stage .alarm .lamp{fill:var(--rose);animation:pulse2 .9s infinite alternate}
-.stage .star{animation:twinkle 3s ease-in-out infinite alternate}
-.stage .foot{animation:pulse2 2.2s ease-in-out infinite alternate}
-.stage .water{animation:shimmer 5s ease-in-out infinite alternate}
-@keyframes breathe{50%{transform:translateY(-2px) scaleY(1.01)}}
-@keyframes twirl{0%{transform:scaleX(1)}18%{transform:scaleX(.15) translateY(-8px)}36%{transform:scaleX(-1) translateY(-12px)}54%{transform:scaleX(-.15) translateY(-6px)}72%,100%{transform:scaleX(1)}}
-@keyframes bow{0%,15%{transform:rotate(0)}50%,70%{transform:rotate(22deg) translateY(4px)}100%{transform:rotate(0)}}
-@keyframes armsway{from{transform:rotate(-7deg)}to{transform:rotate(9deg)}}
-@keyframes wave{from{transform:rotate(-18deg)}to{transform:rotate(14deg)}}
-@keyframes ring{from{transform:rotate(-22deg)}to{transform:rotate(22deg)}}
-@keyframes pulse2{from{opacity:.45}to{opacity:1}}
-@keyframes twinkle{from{opacity:.15}to{opacity:1}}
-@keyframes shimmer{from{opacity:.3;transform:translateX(-8px)}to{opacity:.8;transform:translateX(8px)}}
-.pop{font:600 17px var(--serif);fill:var(--gold);paint-order:stroke;stroke:#000;stroke-width:3px;animation:rise 2.4s ease-out forwards}
-@keyframes rise{to{transform:translateY(-46px);opacity:0}}
-
-/* coulisses */
-.wings{background:linear-gradient(180deg,#220f2b,#150a1d);border:1px solid var(--gold-dim);border-radius:6px;padding:12px 6px 6px 14px;max-height:760px;display:flex;flex-direction:column}
-.wings h3{margin:0 0 8px;font:italic 400 21px var(--serif);color:var(--gold)}
-.feed{overflow-y:auto;padding-right:8px;flex:1}
-.entry{display:grid;grid-template-columns:30px 1fr;gap:8px;padding:7px 6px;border-bottom:1px dotted rgba(227,185,90,.2);cursor:pointer;border-radius:3px}
-.entry:hover{background:rgba(255,255,255,.04)}
-.entry.cur{background:rgba(227,185,90,.12)} .entry.future{opacity:.35}
-.entry.fresh{animation:flash 2s}
-@keyframes flash{from{background:rgba(224,72,106,.5)}}
-.ico{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:14px;color:#1a0b22;font-weight:600}
-.entry .when{font-size:11px;color:var(--gold-dim);letter-spacing:.06em}
-.entry .txt{font-size:14px}.entry .sub{font:italic 14px var(--serif);color:#cbb7c9;margin-top:2px}
-.entry.wait .txt{color:#a493a8;font-size:13px}
-
-/* partition */
-.score-wrap{border:1px solid var(--gold-dim);border-radius:6px;background:linear-gradient(180deg,#f8efe1,#eadbc0);overflow-x:auto;color:#2a1220;margin-top:18px}
-.score-wrap svg{display:block}
-.score-wrap text{font-family:var(--serif)}
-.note{cursor:pointer}.note:hover .head{stroke:#000;stroke-width:1.5}
-.playhead{animation:pulse2 1.2s infinite alternate}
-
-/* saison */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
-.kpi{padding:12px 14px;border:1px solid var(--gold-dim);background:linear-gradient(160deg,#2a1230,#170a1f);border-radius:4px}
-.kpi b{display:block;font:600 34px/1.1 var(--serif);color:var(--gold)}
-.kpi span{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--blush)}
-.roses{letter-spacing:3px;color:var(--rose);font-size:18px}.roses i{color:#4a2a45;font-style:normal}
-.season{border:1px solid var(--gold-dim);border-radius:6px;background:#150a1d;padding:6px 14px 12px}
-.row{display:grid;grid-template-columns:110px minmax(120px,1fr) 80px 54px 130px;gap:12px;align-items:center;padding:8px 0;border-bottom:1px dotted rgba(227,185,90,.18);cursor:pointer}
-.row:hover{background:rgba(255,255,255,.03)}.row.on{background:rgba(227,185,90,.08)}
-.row.head{cursor:default;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold-dim)}
-.row b{font:600 17px var(--serif)}
-.track{position:relative;height:22px;border-radius:11px;background:rgba(255,255,255,.05)}
-.bar{position:absolute;top:5px;height:12px;border-radius:6px;min-width:8px;background:linear-gradient(90deg,#7a5a14,var(--gold))}
-.bar.escalated{background:linear-gradient(90deg,#7a1a2c,var(--rose))}.bar.open{background:linear-gradient(90deg,#1f6b45,var(--ok));animation:pulse2 1.3s infinite alternate}
-.dot{position:absolute;top:8px;width:6px;height:6px;border-radius:50%;transform:translateX(-3px);background:#fff}
-.gauge{height:8px;background:rgba(255,255,255,.1);border-radius:4px;position:relative;overflow:hidden}
-.gauge i{position:absolute;left:0;top:0;bottom:0;background:var(--silver)}.gauge.over i{background:var(--rose)}
-.axis{display:flex;justify-content:space-between;font-size:11px;color:var(--gold-dim);padding:4px 0 0 122px}
-@media(max-width:760px){.row{grid-template-columns:80px 1fr 60px}.row>:nth-child(n+4){display:none}.axis{padding-left:92px}}
-
-.empty{padding:70px 20px;text-align:center;font:italic 24px var(--serif);color:var(--blush)}
-.empty code{font:14px ui-monospace,monospace;background:#2a1230;padding:3px 8px;border-radius:3px;color:var(--gold)}
-.toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
-.toast{max-width:320px;padding:10px 16px;border-left:4px solid var(--gold);background:rgba(34,15,43,.96);border-radius:3px;animation:in .4s,out .6s 4.4s forwards;font-size:14px}
-.toast.bad{border-color:var(--rose)}.toast b{font-family:var(--serif);font-size:17px;color:var(--gold)}
-@keyframes in{from{transform:translateX(40px);opacity:0}}@keyframes out{to{opacity:0;transform:translateY(10px)}}
-@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.curtain,.curtain-title{display:none}}
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6e6e73; --line:#e5e5ea; --panel:#f5f5f7; --pick:#e8f0fe;
+          --open:#0a7d32; --escalated:#b25000; --done:#6e6e73; --worker:#3b5bdb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161618; --fg:#ececf0; --muted:#9a9aa2; --line:#2c2c30; --panel:#1f1f23; --pick:#22304d;
+            --open:#4cc76f; --escalated:#f0a050; --done:#9a9aa2; --worker:#8ea6ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, sans-serif; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; }
+  header b { font-size:15px; }
+  #live { color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 43px); }
+  nav { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
+  nav h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:12px 16px 4px; }
+  nav a { display:block; padding:6px 16px; color:inherit; text-decoration:none; }
+  nav a:hover { background:var(--panel); }
+  nav a.picked { background:var(--pick); }
+  nav small { display:block; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  section { overflow:auto; padding:16px; }
+  .status { font-size:12px; font-weight:600; }
+  .status.open { color:var(--open); } .status.escalated { color:var(--escalated); } .status.done { color:var(--done); }
+  .head { background:var(--panel); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .head h1 { font-size:16px; margin:0 0 4px; }
+  .head p { margin:2px 0; color:var(--muted); }
+  .now { font-weight:600; color:var(--fg); }
+  ol { list-style:none; margin:0; padding:0; }
+  li { border-bottom:1px solid var(--line); padding:6px 0; display:grid; grid-template-columns:70px 1fr; gap:8px; }
+  li time { color:var(--muted); font-variant-numeric:tabular-nums; }
+  li.step { color:var(--muted); }
+  li.step div div { font-size:13px; }
+  .who { font-weight:600; }
+  .who.worker { color:var(--worker); }
+  details summary { cursor:pointer; color:var(--muted); }
+  pre { white-space:pre-wrap; word-break:break-word; background:var(--panel); padding:8px; border-radius:6px; margin:6px 0 0; font:12px/1.4 ui-monospace, monospace; }
+  .empty { color:var(--muted); padding:24px; }
+  @media (max-width: 700px) {
+    main { grid-template-columns:1fr; height:auto; }
+    nav { border-right:0; border-bottom:1px solid var(--line); max-height:40vh; }
+    li { grid-template-columns:1fr; gap:0; }
+  }
 </style>
 </head>
 <body>
-<div class="curtain l" id="cl"></div><div class="curtain r" id="cr"></div><div class="curtain-title" id="ct">Ballet</div>
-<div class="wrap">
-  <header>
-    <div class="logo">Ballet</div>
-    <div class="tagline">Théâtre des Rehearsals — en direct &amp; en archives</div>
-    <div class="spacer"></div>
-    <div class="metro" id="metro" title="Battement : la page relit le journal toutes les 1,5 s">
-      <svg viewBox="0 0 26 34"><path d="M3 33 L10 2 H16 L23 33Z" fill="#2a1230" stroke="#9c7a35"/><g class="arm"><line x1="13" y1="32" x2="13" y2="4" stroke="#e3b95a" stroke-width="2"/><circle cx="13" cy="10" r="3" fill="#e3b95a"/></g></svg>
-      <span id="metro-t">connexion…</span>
-    </div>
-  </header>
-  <nav class="posters" id="posters"></nav>
-  <main id="main"></main>
-</div>
-<div class="toasts" id="toasts"></div>
-
+<header><b>Ballet Stage</b><span id="live">…</span></header>
+<main><nav id="list"></nav><section id="detail"><p class="empty">Choisis une Rehearsal.</p></section></main>
 <script>
-'use strict';
-const ROLES = {
-  dramaturg:{label:'Dramaturg',color:'#b9a1e6',x:150,y:385,s:.95,k:9},
-  choreographer:{label:'Choreographer',color:'#a9cfcb',x:335,y:330,s:.85,k:5},
-  dancer:{label:'Dancer',color:'#f3b8c6',x:545,y:400,s:1.1,k:3},
-  critic:{label:'Critic',color:'#f8efe1',x:780,y:350,s:.92,k:7},
-  conductor:{label:'Conductor',color:'#e3b95a',x:500,y:600,s:1,k:1},
-  director:{label:'Director',color:'#e0486a',x:885,y:112,s:1,k:12}
-};
-const TYPE_FR = {question:'pose une question',answer:'répond',report:'rend son rapport',verdict:'rend son verdict',notes:'envoie ses notes'};
-const TYPE_GLYPH = {question:'?',answer:'✦',report:'✉',verdict:'⚖'};
+const ROLES = ['choreographer', 'dancer', 'critic'];
+let data = null, version = '', picked = decodeURIComponent(location.hash.slice(1));
+
 const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const pad = n => String(n).padStart(2,'0');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[c]));
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
+const time = at => `<time title="${esc(new Date(at).toLocaleString('fr-FR'))}">${new Date(at).toLocaleTimeString('fr-FR')}</time>`;
 
-let data = {projects:[]}, version = '', current = 0, pinned = null, index = null, timer = null, seen = {}, firstLoad = true, stageBuilt = false;
-
-/* ---------- modèle ---------- */
-function build(p){
-  const byId = {};
-  for (const s of p.rehearsals) byId[s.id] = {id:s.id, state:s, events:[]};
-  for (const e of p.journal) (byId[e.rehearsal] ??= {id:e.rehearsal, state:null, events:[]}).events.push(e);
-  const list = Object.values(byId).filter(r => r.events.length);
-  for (const r of list){
-    r.events.sort((a,b) => a.at < b.at ? -1 : 1);
-    const last = r.events.at(-1);
-    r.start = Date.parse(r.events[0].at); r.last = Date.parse(last.at);
-    r.status = r.state?.status ?? ({done:'done',escalate:'escalated'}[last.event] || 'open');
-    r.end = r.status === 'open' ? Date.now() : r.last;
-    r.escalations = r.events.filter(e => e.event === 'escalate').length;
-    r.verdicts = r.events.filter(e => e.event === 'message' && e.detail?.type === 'verdict').length;
-    r.size = r.state?.size && Object.keys(r.state.size).length ? r.state.size : [...r.events].reverse().find(e => e.event === 'diff-size')?.detail;
-  }
-  list.sort((a,b) => a.start - b.start);
-  return {name:p.name, home:p.home, list};
+/* Une Rehearsal : son état, ses entrées de journal et son rôle en cours. */
+function rehearsals(project){
+  return project.rehearsals.map(state => {
+    const events = project.journal.filter(e => e.rehearsal === state.id);
+    return {key:`${project.name}/${state.id}`, project, state, events, title:(project.titles?.[state.id] || '').replace(state.id, '').replace(/^\s*[·:-]\s*/, ''),
+            last:events.at(-1)?.at || '', current:currentRole(state, events)};
+  }).sort((a, b) => (a.state.status === 'done') - (b.state.status === 'done') || b.last.localeCompare(a.last));
 }
-function actorOf(e){
+
+/* Qui a la main : le Director sur une escalade ; sinon le dernier worker à qui le Conductor a remis quelque chose,
+   tant qu'il n'a pas répondu. Les vieux journaux sans `handoff` : le rôle cité dans la dernière ligne du script. */
+function currentRole(state, events){
+  if (state.status === 'done') return '';
+  if (state.status === 'escalated') return 'director';
+  for (const e of [...events].reverse()){
+    if (e.event === 'message') return 'conductor';
+    if (e.event === 'handoff' || e.event === 'nudge') return e.detail.role;
+    const said = (e.detail?.done || []).join(' ').match(/(choreographer|dancer|critic) (started|asked)/g);
+    if (said) return said.at(-1).split(' ')[0];
+  }
+  return 'conductor';
+}
+
+function renderList(){
+  $('#list').innerHTML = data.projects.map(project => `<h2>${esc(project.name)}</h2>` + rehearsals(project).map(r =>
+    `<a href="#${esc(r.key)}" class="${r.key === picked ? 'picked' : ''}">
+       <b>${esc(r.state.id)}</b> <span class="status ${r.state.status}">${r.state.status}</span>
+       ${r.current ? ` · <span class="now">${cap(r.current)}</span>` : ''}
+       <small>${esc(r.title || '#' + r.state.issue)}</small></a>`).join('') || '<p class="empty">Aucune Rehearsal.</p>').join('');
+}
+
+function renderDetail(){
+  const r = data.projects.flatMap(rehearsals).find(r => r.key === picked);
+  if (!r) return $('#detail').innerHTML = '<p class="empty">Choisis une Rehearsal.</p>';
+  const s = r.state, cast = r.project.cast || {};
+  const box = $('#detail'), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = `<div class="head">
+      <h1>${esc(s.id)} ${esc(r.title)}</h1>
+      <p><span class="status ${s.status}">${s.status}</span>${r.current ? ` · en cours : <span class="now">${cap(r.current)}</span>` : ''}${s.reason ? ` · ${esc(s.reason)}` : ''}</p>
+      <p>issue #${esc(s.issue)}${s.pull_request ? ` · PR #${esc(s.pull_request)}` : ''} · ${esc(s.branch || 'rehearsal/' + s.id)}</p>
+      <p>${ROLES.map(role => `${cap(role)} : ${esc(cast[role]?.cli || '?')}${cast[role]?.model ? ' ' + esc(cast[role].model) : ''}${s.dispatches?.[role] ? ` (${esc(s.dispatches[role])})` : ''}`).join(' · ')}</p>
+    </div><ol>${r.events.map(line).join('')}</ol>`;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+/* Une ligne du fil : qui parle à qui, et le texte entier dépliable quand le journal le garde. */
+function line(e){
   const d = e.detail || {};
-  return {begin:d.first_role, message:d.from, 'director-decision':'director'}[e.event] || 'conductor';
-}
-function castAt(r, i){
-  let active = null, mood = 'open', why = '', from = null, to = null;
-  for (let n = 0; n <= i; n++){
-    const e = r.events[n], d = e.detail || {};
-    if (e.event === 'begin'){ active = d.first_role; mood = 'open'; }
-    else if (e.event === 'message'){ from = d.from; to = d.to; active = d.to; mood = 'open'; }
-    else if (e.event === 'wait'){
-      const cue = cueOf(d.done || []); if (cue){ from = 'conductor'; to = cue; active = cue; }
-    }
-    else if (e.event === 'diff-size'){ active = 'conductor'; }
-    else if (e.event === 'escalate'){ active = 'director'; mood = 'escalated'; why = d.reason || ''; }
-    else if (e.event === 'director-decision'){ active = 'director'; mood = 'open'; why = ''; }
-    else if (e.event === 'done'){ active = null; mood = 'done'; why = d.reason || ''; }
-  }
-  if (i === r.events.length - 1 && r.state) mood = r.state.status;
-  return {active, mood, why, from, to, event:r.events[i]};
-}
-function cueOf(done){
-  for (const line of done){
-    const m = /(\w+) (?:asked|started)|(?:carried|handed back) to the (\w+)/.exec(line);
-    const role = m && (m[1] || m[2]); if (ROLES[role]) return role;
-  }
-  return null;
-}
-
-/* ---------- formats ---------- */
-const hhmm = t => new Date(t).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-const day = t => new Date(t).toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
-function dur(ms){ const m = Math.round(ms/60000); return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${pad(m%60)}`; }
-function ago(t){ const s = Math.max(0,(Date.now()-t)/1000); return s < 60 ? 'à l’instant' : s < 3600 ? `il y a ${Math.round(s/60)} min` : s < 86400 ? `il y a ${Math.round(s/3600)} h` : `il y a ${Math.round(s/86400)} j`; }
-const STATUS_FR = {open:'En scène', escalated:'Appel du Director', done:'Premiere'};
-const role = k => `<b style="color:${ROLES[k]?.color || '#fff'}">${esc(ROLES[k]?.label || k)}</b>`;
-
-function describe(e){
-  const d = e.detail || {};
+  const row = (cls, head, body) => `<li class="${cls}">${time(e.at)}<div>${head}${body || ''}</div></li>`;
+  const text = t => t ? `<details><summary>texte</summary><pre>${esc(t)}</pre></details>` : '';
   switch (e.event){
-    case 'begin': return {g:'♪', c:ROLES[d.first_role]?.color, t:`Lever de rideau — ${role(d.first_role)} entre en scène`};
-    case 'message': return {g:TYPE_GLYPH[d.type] || '♪', c:ROLES[d.from]?.color, t:`${role(d.from)} → ${role(d.to)}`, s:`${TYPE_FR[d.type] || d.type} · ${esc(d.subject||'')} · tour ${d.round ?? '?'}`};
-    case 'wait': return {g:'·', c:'#6d5a72', t:'Le Conductor relaie', s:(d.done||[]).map(esc).join(' · '), wait:true};
-    case 'diff-size': return {g:d.over?'♯':'♮', c:d.over?'#e0486a':'#8fd3a5', t:`Le Conductor mesure le diff : <b>${d.counted}</b> lignes`, s:`limite ${d.limit}${d.strict?' (strict)':''}${d.excluded?` · ${d.excluded} exclues`:''}`};
-    case 'escalate': return {g:'🔔', c:'#e0486a', t:'<b style="color:#e0486a">Appel du Director</b>', s:esc(d.reason)};
-    case 'director-decision': return {g:'♛', c:'#e0486a', t:`${role('director')} tranche`, s:esc(JSON.stringify(d))};
-    case 'done': return {g:'✦', c:'#e3b95a', t:'<b style="color:#e3b95a">Premiere !</b>', s:esc(d.reason)};
+    case 'handoff':
+      return row('', `<span class="who">Conductor</span> → <span class="who worker">${cap(d.role)}</span> · ${esc(d.how)}${d.agent ? ` (${esc(d.agent)}${d.model ? ' ' + esc(d.model) : ''})` : ''}`, text(d.text));
+    case 'nudge':
+      return row('', `<span class="who">Conductor</span> → <span class="who worker">${cap(d.role)}</span> · nudge`);
+    case 'message':
+      return row('', `<span class="who worker">${cap(d.from)}</span> → <span class="who">${cap(d.to)}</span> · ${esc(d.type)} · ${esc(d.subject)} round ${esc(d.round)}`, text(d.text));
+    case 'wait': case 'escalate': case 'done':
+      return row('step', `script → <b>${e.event}</b>${d.reason ? ' : ' + esc(d.reason) : ''}`, (d.done || []).map(x => `<div>- ${esc(x)}</div>`).join(''));
+    case 'diff-size':
+      return row('step', `diff : ${d.counted} lignes (limite ${d.limit})${d.over ? ' · au-dessus' : ''}`);
+    case 'policy':
+      return row('step', `policy ${esc(d.role)} : ${d.violations?.length ? esc(d.violations.join('; ')) : 'en règle'}`);
+    case 'begin':
+      return row('step', '<b>begin</b>');
+    default:
+      return row('step', `${esc(e.event)}`, text(JSON.stringify(d, null, 2)));
   }
-  return {g:'·', c:'#888', t:esc(e.event)};
 }
 
-/* ---------- scène ---------- */
-function ballerina(color, prop){
-  const tights = '#f1cfc6', skin = '#f6dccd';
-  return `<ellipse cx="0" cy="3" rx="38" ry="7" fill="rgba(0,0,0,.45)"/>
-  <g class="body">
-    <path d="M0 -50 V-7" stroke="${tights}" stroke-width="6" stroke-linecap="round"/>
-    <path d="M-3 -7 l-2 8 h9 l-2 -8z" fill="#f7a6b8"/>
-    <path d="M3 -52 Q34 -58 58 -78" stroke="${tights}" stroke-width="6" fill="none" stroke-linecap="round"/>
-    <ellipse cx="0" cy="-52" rx="40" ry="9" fill="${color}" opacity=".55"/>
-    <ellipse cx="0" cy="-55" rx="31" ry="7" fill="${color}"/>
-    <path d="M-30 -55 q30 8 60 0" stroke="rgba(0,0,0,.18)" fill="none"/>
-    <path d="M-9 -55 L-7 -89 Q0 -94 7 -89 L9 -55Z" fill="${color}" stroke="rgba(0,0,0,.25)"/>
-    <circle cx="0" cy="-100" r="9" fill="${skin}"/>
-    <path d="M-9.5 -101 Q-9 -111 0 -111 Q9 -111 9.5 -101 Q4 -105 0 -105 Q-4 -105 -9.5 -101Z" fill="#2a1a22"/>
-    <circle cx="0" cy="-115" r="5.5" fill="#2a1a22"/>
-    <g class="arm a1" style="transform-origin:-7px -86px"><path d="M-7 -86 Q-32 -92 -40 -116" stroke="${skin}" stroke-width="4" fill="none" stroke-linecap="round"/></g>
-    <g class="arm a2" style="transform-origin:7px -86px"><path d="M7 -86 Q30 -90 50 -84" stroke="${skin}" stroke-width="4" fill="none" stroke-linecap="round"/>${prop||''}</g>
-  </g>`;
-}
-const PROPS = {
-  dramaturg:'<g transform="translate(50,-84)"><path d="M0 -6 L-10 -9 V4 L0 7 L10 4 V-9Z" fill="#f8efe1" stroke="#6b4a8f"/><path d="M0 -6V7" stroke="#6b4a8f"/><path d="M8 -4 L20 -22" stroke="#e3b95a" stroke-width="2"/></g>',
-  choreographer:'<g transform="translate(50,-84)"><path d="M0 0 L8 -46" stroke="#e3b95a" stroke-width="2.5"/><circle cx="8" cy="-48" r="3" fill="#fff"/></g>',
-  critic:'<g transform="translate(48,-84)"><rect x="-2" y="-10" width="18" height="24" rx="2" fill="#fff" stroke="#999"/><path d="M2 -4 l3 3 l6 -7 M2 6 h10" stroke="#e0486a" stroke-width="1.6" fill="none"/></g>',
-  dancer:'<g transform="translate(50,-84)"><circle r="4" fill="#e0486a"/><circle cx="4" cy="-3" r="3" fill="#ff8aa4"/></g>'
-};
-function conductorFig(){
-  return `<g class="body"><path d="M-16 -22 L-19 -66 Q0 -74 19 -66 L16 -22Z" fill="#3a1226" stroke="#e3b95a" stroke-width="1.4"/>
-  <path d="M-16 -22 L-24 -4 L-4 -22Z M16 -22 L24 -4 L4 -22Z" fill="#3a1226"/>
-  <circle cx="0" cy="-80" r="10" fill="#2a1a22"/><path d="M-7 -70 L0 -62 L7 -70Z" fill="#f8efe1"/>
-  <g class="baton"><path d="M14 -58 Q36 -66 44 -88" stroke="#3a1226" stroke-width="6" fill="none" stroke-linecap="round"/><line x1="44" y1="-88" x2="66" y2="-122" stroke="#e3b95a" stroke-width="2.4" stroke-linecap="round"/></g></g>`;
-}
-function directorFig(){
-  return `<g class="body"><path d="M-30 14 Q-26 -14 0 -16 Q26 -14 30 14Z" fill="#17101c"/><path d="M-8 -12 L0 4 L8 -12Z" fill="#f8efe1"/><path d="M-6 -4 h12 l-3 5 h-6z" fill="#e0486a"/>
-  <circle cx="0" cy="-30" r="12" fill="#f6dccd"/><path d="M-12 -32 Q-12 -46 0 -46 Q12 -46 12 -32 Q6 -38 0 -38 Q-6 -38 -12 -32Z" fill="#2a1a22"/>
-  <g stroke="#e3b95a" stroke-width="2.2" fill="#2a1a22"><circle cx="-5" cy="-30" r="4"/><circle cx="5" cy="-30" r="4"/><path d="M-1 -30h2" fill="none"/></g></g>`;
-}
-function stageSvg(){
-  const stars = Array.from({length:34},(_,i)=>{const x=(i*277)%1000,y=(i*131)%210+10;return `<circle class="star" cx="${x}" cy="${y}" r="${1+(i%3)*.5}" fill="#fff" style="animation-delay:${-(i%7)*.5}s"/>`}).join('');
-  const planks = Array.from({length:17},(_,i)=>{const x=-500+i*125,x2=500+(x-500)*.634;return `<line x1="${x}" y1="560" x2="${x2}" y2="300" stroke="rgba(0,0,0,.35)"/>`}).join('');
-  const fringe = Array.from({length:50},(_,i)=>`<circle cx="${i*20+10}" cy="${i%2?60:66}" r="2" fill="#e3b95a" opacity=".8"/>`).join('');
-  const lights = Array.from({length:21},(_,i)=>`<circle class="foot" cx="${70+i*43}" cy="540" r="4" fill="#ffd58a" style="animation-delay:${-(i%5)*.4}s"/>`).join('');
-  const musicians = Array.from({length:11},(_,i)=>i===5?'':`<ellipse cx="${60+i*88}" cy="578" rx="16" ry="19" fill="#0b0510"/><circle cx="${60+i*88}" cy="560" r="9" fill="#0b0510"/><rect x="${44+i*88}" y="583" width="14" height="2" fill="#e3b95a" opacity=".3"/>`).join('');
-  const roles = Object.entries(ROLES).map(([k,r])=>{
-    const fig = k==='conductor'?conductorFig():k==='director'?directorFig():ballerina(r.color,PROPS[k]);
-    return `<g class="role dim" data-role="${k}" transform="translate(${r.x},${r.y}) scale(${r.s})">${fig}
-      ${k==='director'?'':`<text y="${k==='conductor'?-136:24}" text-anchor="middle" font-family="Cormorant Garamond,Georgia,serif" font-size="17" font-style="italic" fill="${r.color}" paint-order="stroke" stroke="#000" stroke-width="3">${r.label}</text>`}</g>`;
-  }).join('');
-  const spots = Object.entries(ROLES).filter(([k])=>k!=='director'&&k!=='conductor').map(([k,r])=>`<g class="spot" data-spot="${k}"><path d="M${r.x-10} 20 L${r.x+10} 20 L${r.x+95*r.s} ${r.y+6} L${r.x-95*r.s} ${r.y+6}Z" fill="url(#spotg)" style="mix-blend-mode:screen"/><ellipse cx="${r.x}" cy="${r.y+3}" rx="${85*r.s}" ry="13" fill="#ffe9b0" opacity=".28"/></g>`).join('')
-   + `<g class="spot" data-spot="conductor"><ellipse cx="500" cy="545" rx="120" ry="40" fill="#ffe9b0" opacity=".25"/></g>`;
-  return `<svg class="stage" id="stage" viewBox="0 0 1000 620" role="img" aria-label="La scène : les rôles de Ballet">
-<defs>
- <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#120a2e"/><stop offset="1" stop-color="#4a1f52"/></linearGradient>
- <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a2330"/><stop offset=".6" stop-color="#6b4630"/><stop offset="1" stop-color="#8a5c3a"/></linearGradient>
- <linearGradient id="velvet" x1="0" y1="0" x2=".11" y2="0" spreadMethod="repeat"><stop offset="0" stop-color="#3f0914"/><stop offset=".5" stop-color="#a21f3d"/><stop offset="1" stop-color="#3f0914"/></linearGradient>
- <linearGradient id="spotg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3c9" stop-opacity=".8"/><stop offset="1" stop-color="#fff3c9" stop-opacity=".08"/></linearGradient>
- <radialGradient id="moon"><stop offset="0" stop-color="#fffbe6"/><stop offset=".55" stop-color="#f3e6b8"/><stop offset="1" stop-color="#f3e6b8" stop-opacity="0"/></radialGradient>
- <radialGradient id="glowred"><stop offset="0" stop-color="#e0486a" stop-opacity=".8"/><stop offset="1" stop-color="#e0486a" stop-opacity="0"/></radialGradient>
-</defs>
-<rect width="1000" height="310" fill="url(#sky)"/>${stars}
-<circle cx="690" cy="120" r="90" fill="url(#moon)" opacity=".7"/><circle cx="690" cy="120" r="34" fill="#fffbe6"/>
-<path d="M0 250 Q250 215 500 250 T1000 240 V310 H0Z" fill="#241038"/>
-<g class="water"><path d="M560 262h260M590 274h200M620 286h150" stroke="#fffbe6" stroke-width="2" opacity=".5"/></g>
-<polygon points="0,300 1000,300 1000,530 0,530" fill="url(#floor)"/>${planks}
-<rect y="300" width="1000" height="230" fill="url(#spotg)" opacity=".05"/>
-<rect y="524" width="1000" height="8" fill="#e3b95a"/>
-<rect y="532" width="1000" height="90" fill="#0b0510"/>${musicians}
-<g id="spots">${spots}</g>
-<ellipse id="redglow" cx="885" cy="130" rx="230" ry="150" fill="url(#glowred)" opacity="0" style="transition:opacity .6s"/>
-<path d="M1000 48 ${Array.from({length:10},(_,i)=>`Q${1000-i*100-50} 86 ${1000-i*100-100} 48`).join(' ')} V0 H1000Z" fill="url(#velvet)"/>${fringe}
-<path d="M0 0 H130 Q80 170 105 330 Q70 420 0 440Z" fill="url(#velvet)"/><path d="M1000 0 H870 Q920 170 895 330 Q930 420 1000 440Z" fill="url(#velvet)"/>
-<path d="M130 0 Q80 170 105 330" stroke="#e3b95a" stroke-width="3" fill="none"/><path d="M870 0 Q920 170 895 330" stroke="#e3b95a" stroke-width="3" fill="none"/>
-<g id="director-box" transform="translate(885,112)"><rect x="-84" y="-92" width="168" height="140" fill="#1a0610" stroke="#e3b95a" stroke-width="4"/><rect x="-84" y="-92" width="168" height="18" fill="url(#velvet)"/></g>
-<g class="role dim" data-role="director" transform="translate(885,112)"><g transform="translate(0,6)">${directorFig()}</g></g>
-<g transform="translate(885,112)"><rect x="-84" y="20" width="168" height="28" fill="#e3b95a"/><rect x="-80" y="22" width="160" height="10" rx="5" fill="#9a1c38"/>
- <circle class="lamp" cx="-62" cy="-56" r="8"/><g class="bell" transform="translate(62,-58)"><path d="M-9 8 Q-9 -8 0 -9 Q9 -8 9 8Z" fill="#e3b95a" stroke="#fff3" /><circle cy="10" r="2.5" fill="#e3b95a"/></g></g>
-<text x="885" y="42" text-anchor="middle" font-family="Cormorant Garamond,Georgia,serif" font-size="16" font-style="italic" fill="#e0486a" paint-order="stroke" stroke="#000" stroke-width="3" transform="translate(0,114)">Director</text>
-${lights}
-<rect y="570" width="1000" height="6" fill="#e3b95a"/><rect y="576" width="1000" height="44" fill="#2a0a14"/>
-<text x="500" y="606" text-anchor="middle" font-family="Pinyon Script,cursive" font-size="22" fill="#e3b95a" opacity=".55">Ballet</text>
-<g id="roles">${roles}</g>
-<g id="ribbons"></g>
-</svg>`;
-}
-function setStage(cast){
-  const svg = $('#stage'); if (!svg) return;
-  for (const g of svg.querySelectorAll('.role')){
-    const k = g.dataset.role, act = cast.active === k, done = cast.mood === 'done';
-    g.classList.toggle('active', act); g.classList.toggle('bow', done && k !== 'director' && k !== 'conductor');
-    g.classList.toggle('dim', !act && !done);
-  }
-  for (const g of svg.querySelectorAll('.spot')) g.classList.toggle('on', g.dataset.spot === cast.active || (cast.mood === 'done' && g.dataset.spot === 'dancer'));
-  $('#redglow').style.opacity = cast.mood === 'escalated' ? 1 : 0;
-  svg.querySelector('#director-box').parentNode.classList.toggle('alarm', cast.mood === 'escalated');
-  svg.classList.toggle('alarm', cast.mood === 'escalated');
-}
-function anchor(k){ const r = ROLES[k]; return k==='conductor' ? [r.x+30,r.y-100] : k==='director' ? [r.x-10,r.y-20] : [r.x, r.y-80*r.s]; }
-function ribbon(from, to, type){
-  const svg = $('#stage'); if (!svg || !ROLES[from] || !ROLES[to] || from === to) return;
-  const [ax,ay] = anchor(from), [bx,by] = anchor(to), cx = (ax+bx)/2, cy = Math.min(ay,by)-90;
-  const g = document.createElementNS('http://www.w3.org/2000/svg','g'); $('#ribbons').appendChild(g);
-  g.innerHTML = `<path d="M${ax} ${ay} Q${cx} ${cy} ${bx} ${by}" fill="none" stroke="${ROLES[from].color}" stroke-width="3" stroke-linecap="round" opacity=".85"/>
-   <g class="rider"><circle r="15" fill="#1a0b22" stroke="${ROLES[from].color}" stroke-width="2"/><text text-anchor="middle" dy="5" font-size="16" fill="#fff">${TYPE_GLYPH[type] || '♪'}</text></g>`;
-  const path = g.firstElementChild, rider = g.lastElementChild, len = path.getTotalLength(), t0 = performance.now(), D = 1700;
-  path.style.strokeDasharray = len;
-  (function step(now){
-    const t = Math.min(1,(now-t0)/D), e = t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2, p = path.getPointAtLength(len*e);
-    path.style.strokeDashoffset = len*(1-e); rider.setAttribute('transform',`translate(${p.x},${p.y})`);
-    if (t < 1) requestAnimationFrame(step); else { g.style.transition = 'opacity .6s'; g.style.opacity = 0; setTimeout(()=>g.remove(),700); }
-  })(t0);
-}
-function pop(k, text){
-  const svg = $('#stage'); if (!svg || !ROLES[k]) return; const [x,y] = anchor(k);
-  const t = document.createElementNS('http://www.w3.org/2000/svg','text'); t.setAttribute('class','pop'); t.setAttribute('text-anchor','middle');
-  t.setAttribute('x',x); t.setAttribute('y',y-20); t.textContent = text; $('#ribbons').appendChild(t); setTimeout(()=>t.remove(),2500);
-}
-function petals(){
-  const box = $('.petals'); if (!box) return;
-  for (let i = 0; i < 42; i++){
-    const p = document.createElement('i'); p.className = 'petal';
-    p.style.cssText = `left:${Math.random()*100}%;--dx:${(Math.random()-.5)*160}px;animation-duration:${3+Math.random()*3}s;animation-delay:${Math.random()*1.5}s;background:${['#f3b8c6','#e0486a','#fff','#e3b95a'][i%4]}`;
-    box.appendChild(p); setTimeout(()=>p.remove(),7500);
-  }
-}
-function fire(e){
-  const d = e.detail || {};
-  if (e.event === 'message'){ ribbon(d.from, d.to, d.type); pop(d.to, TYPE_FR[d.type] || d.type); }
-  else if (e.event === 'wait'){ const c = cueOf(d.done||[]); if (c) ribbon('conductor', c, 'answer'); }
-  else if (e.event === 'diff-size') pop('conductor', `${d.counted} lignes ${d.over?'♯':'♮'}`);
-  else if (e.event === 'escalate'){ pop('director','🔔 Appel !'); toast('Appel du Director', d.reason, true); }
-  else if (e.event === 'done'){ petals(); pop('dancer','Bravo !'); toast('Premiere !', d.reason); }
-}
-function toast(title, text, bad){
-  const t = document.createElement('div'); t.className = 'toast' + (bad?' bad':''); t.innerHTML = `<b>${esc(title)}</b><div>${esc(text||'')}</div>`;
-  $('#toasts').appendChild(t); setTimeout(()=>t.remove(),5200);
-}
+function render(){ renderList(); renderDetail(); }
 
-/* ---------- partition ---------- */
-function scoreSvg(r, cur){
-  const STEP = 46, Y = k => 112 - k*5; let x = 96; const pos = [];
-  r.events.forEach((e,i)=>{
-    if (i){ const gap = Date.parse(e.at)-Date.parse(r.events[i-1].at); if (gap > 10*60e3){ pos.push({caesura:x, gap}); x += 34; } }
-    pos.push({i,e,x}); x += e.event === 'wait' ? 30 : STEP;
-  });
-  const W = x + 60; let s = '';
-  for (let k = 2; k <= 10; k += 2) s += `<line x1="14" x2="${W-14}" y1="${Y(k)}" y2="${Y(k)}" stroke="#3a2230" stroke-width="1.2"/>`;
-  s += `<text x="18" y="108" font-size="72" fill="#7a1a2c" style="font-family:'Apple Symbols','Noto Music','Segoe UI Symbol',serif">𝄞</text>`;
-  s += `<text x="${W-14}" y="14" text-anchor="end" font-size="14" font-style="italic" fill="#7a5a14">${esc(r.id)} — partition du journal</text>`;
-  for (const p of pos){
-    if (p.caesura){ s += `<g stroke="#2a1220" stroke-width="2"><line x1="${p.caesura-4}" y1="${Y(10)-2}" x2="${p.caesura+4}" y2="${Y(2)+2}"/><line x1="${p.caesura+4}" y1="${Y(10)-2}" x2="${p.caesura+12}" y2="${Y(2)+2}"/></g><text x="${p.caesura+4}" y="${Y(10)-10}" text-anchor="middle" font-size="12" fill="#7a5a14">⏸ ${dur(p.gap)}</text>`; continue; }
-    const {i,e,x:px} = p, d = e.detail || {}, who = actorOf(e), k = ROLES[who]?.k ?? 5, y = Y(k), isCur = i === cur;
-    const color = e.event==='escalate' ? '#c8344f' : e.event==='done' ? '#b8892a' : (ROLES[who]?.color === '#f8efe1' ? '#8a8a8a' : ROLES[who]?.color || '#444');
-    let inner = '';
-    if (e.event === 'wait') inner = `<path d="M${px-3} ${Y(6)-5} l6 4 -6 4 6 4" stroke="#8a7380" fill="none" stroke-width="1.4"/><rect x="${px-14}" y="20" width="28" height="130" fill="transparent"/>`;
-    else {
-      const hollow = e.event === 'done';
-      const stemUp = k < 7, sx = stemUp ? px+6 : px-6;
-      inner += (k>=12?`<line x1="${px-10}" x2="${px+10}" y1="${y}" y2="${y}" stroke="#3a2230"/>`:'') + (k<=0?`<line x1="${px-10}" x2="${px+10}" y1="${y}" y2="${y}" stroke="#3a2230"/>`:'');
-      if (!hollow) inner += `<line x1="${sx}" y1="${y}" x2="${sx}" y2="${stemUp?y-30:y+30}" stroke="#2a1220" stroke-width="1.6"/>`;
-      inner += `<ellipse class="head" cx="${px}" cy="${y}" rx="7" ry="5" transform="rotate(-20 ${px} ${y})" fill="${hollow?'#f8efe1':color}" stroke="#2a1220" stroke-width="${hollow?2:1}"/>`;
-      if (e.event === 'diff-size') inner += `<text x="${px-20}" y="${y+5}" font-size="16" fill="${d.over?'#c8344f':'#2e7d4f'}">${d.over?'♯':'♮'}</text>`;
-      if (e.event === 'escalate') inner += `<path d="M${px-11} ${Y(10)-8} Q${px} ${Y(10)-24} ${px+11} ${Y(10)-8}" stroke="#c8344f" stroke-width="2" fill="none"/><circle cx="${px}" cy="${Y(10)-12}" r="2" fill="#c8344f"/>`;
-      const label = e.event==='message' ? (d.type==='verdict'?`verdict R${d.round}`:d.type) : e.event==='diff-size' ? d.counted : e.event==='escalate' ? 'appel' : e.event==='done' ? 'Premiere' : e.event==='begin' ? 'ouverture' : e.event==='director-decision' ? 'décision' : '';
-      inner += `<text x="${px}" y="42" text-anchor="middle" font-size="13" font-style="italic" fill="#4a2a3a">${esc(label)}</text><text x="${px}" y="146" text-anchor="middle" font-size="12" fill="#8a7380">${hhmm(e.at)}</text>`;
-      if (d.type === 'verdict') inner += `<line x1="${px+22}" x2="${px+22}" y1="${Y(10)}" y2="${Y(2)}" stroke="#2a1220" stroke-width="1.6"/>`;
-      if (e.event === 'done') inner += `<line x1="${px+20}" x2="${px+20}" y1="${Y(10)}" y2="${Y(2)}" stroke="#2a1220" stroke-width="1.5"/><line x1="${px+26}" x2="${px+26}" y1="${Y(10)}" y2="${Y(2)}" stroke="#2a1220" stroke-width="4"/>`;
-    }
-    s += `<g class="note" data-i="${i}"><title>${esc(e.event)} · ${hhmm(e.at)}</title>${isCur?`<line class="playhead" x1="${px}" x2="${px}" y1="14" y2="156" stroke="#e0486a" stroke-width="2"/><circle class="playhead" cx="${px}" cy="14" r="5" fill="#e0486a"/>`:''}${inner}</g>`;
-  }
-  return `<svg width="${W}" height="164" viewBox="0 0 ${W} 164">${s}</svg>`;
-}
+addEventListener('hashchange', () => { picked = decodeURIComponent(location.hash.slice(1)); render(); $('#detail').scrollTop = 1e9; });
 
-/* ---------- rendu ---------- */
-const P = () => data.projects[current];
-function selected(p){
-  if (!p.list.length) return null;
-  return p.list.find(r => r.id === pinned) || [...p.list].sort((a,b)=>b.last-a.last)[0];
-}
-function render(){
-  const ps = data.projects;
-  $('#posters').innerHTML = ps.map((p,i)=>{
-    const open = p.list.filter(r=>r.status==='open').length, esca = p.list.filter(r=>r.status==='escalated').length, done = p.list.filter(r=>r.status==='done').length;
-    return `<button class="poster ${i===current?'on':''}" data-p="${i}"><b>${esc(p.name)}</b><small><span class="live ${esca?'red':open?'':'dim'}"></span>${open} en scène · ${esca} appel(s) · ${done} Premiere(s)</small></button>`;
-  }).join('');
-  if (!ps.length || !P().list.length){
-    $('#main').innerHTML = `<div class="empty">Le théâtre est vide…<br><small style="font-size:16px">Lance une Rehearsal : <code>/ballet:hybrid-track #12</code> — elle apparaîtra ici en direct.</small></div>`; stageBuilt = false; return;
-  }
-  const p = P(), r = selected(p), live = index === null, i = live ? r.events.length-1 : index, cast = castAt(r,i);
-  if (!stageBuilt || !$('#stage')){
-    $('#main').innerHTML = `<h2>Le programme</h2><div class="tickets" id="tickets"></div>
-     <div class="grid"><div><div class="stage-wrap">${stageSvg()}<div class="banner" id="banner"></div><div class="petals"></div>
-       <div class="controls"><button id="prev" title="←">⏮</button><button id="play" title="espace">▶</button><button id="next" title="→">⏭</button>
-       <input type="range" id="scrub" min="0" value="0"><span class="t" id="when"></span><button class="direct" id="direct">● Direct</button></div></div>
-       <div class="score-wrap" id="score"></div></div>
-       <aside class="wings"><h3>Les coulisses</h3><div class="feed" id="feed"></div></aside></div>
-     <h2>La saison</h2><div id="season"></div>`;
-    stageBuilt = true;
-  }
-  $('#tickets').innerHTML = [...p.list].reverse().map(x=>`<button class="ticket ${x.id===r.id?'on':''}" data-r="${esc(x.id)}"><small>N° · ${day(x.start)}</small><b>${esc(x.id)}</b><small>${x.state?.pull_request?`PR #${esc(x.state.pull_request)} · `:''}issue #${esc(x.state?.issue||'?')}</small><span class="badge ${x.status}">${STATUS_FR[x.status]}</span></button>`).join('');
-  setStage(cast);
-  $('#banner').innerHTML = `<b>${esc(r.id)}</b><div>${cast.mood==='done'?'Premiere — rideau, applaudissements':cast.mood==='escalated'?'Le Director est appelé dans sa loge':cast.active?`${esc(ROLES[cast.active].label)} en scène`:'—'}</div>${cast.why?`<div class="why">${esc(cast.why)}</div>`:''}`;
-  const sc = $('#scrub'); sc.max = r.events.length-1; sc.value = i;
-  $('#when').textContent = `${live?'En direct · ':''}événement ${i+1}/${r.events.length} · ${hhmm(r.events[i].at)}`;
-  $('#direct').classList.toggle('on', live); $('#play').textContent = timer ? '⏸' : '▶';
-  const box = $('#score'), keep = box.scrollLeft, atEnd = box.scrollLeft + box.clientWidth >= box.scrollWidth - 40;
-  box.innerHTML = scoreSvg(r, i);
-  if (live && (atEnd || firstLoad)) box.scrollLeft = box.scrollWidth; else if (!live){ const h = box.querySelector('.playhead'); box.scrollLeft = keep; if (h){ const x = +h.getAttribute('x1') || +h.getAttribute('cx'); if (x < keep || x > keep + box.clientWidth - 40) box.scrollLeft = x - box.clientWidth/2; } } else box.scrollLeft = keep;
-  const fresh = r._fresh || 0;
-  $('#feed').innerHTML = [...r.events.keys()].reverse().map(n=>{
-    const e = r.events[n], d = describe(e);
-    return `<div class="entry ${d.wait?'wait':''} ${n===i?'cur':''} ${n>i?'future':''} ${n>=r.events.length-fresh?'fresh':''}" data-i="${n}"><div class="ico" style="background:${d.c||'#888'}">${d.g}</div><div><div class="when">${day(e.at)} ${hhmm(e.at)}</div><div class="txt">${d.t}</div>${d.s?`<div class="sub">${d.s}</div>`:''}</div></div>`;
-  }).join('');
-  renderSeason(p, r);
-}
-function renderSeason(p, sel){
-  const L = p.list, done = L.filter(r=>r.status==='done'), sizes = L.map(r=>r.size?.counted).filter(Number.isFinite);
-  const clean = done.filter(r=>!r.escalations).length, roses = done.length ? Math.round(clean/done.length*5) : 0;
-  const avg = done.length ? dur(done.reduce((a,r)=>a+(r.end-r.start),0)/done.length) : '—';
-  const t0 = Math.min(...L.map(r=>r.start)), t1 = Math.max(...L.map(r=>r.end)), span = Math.max(t1-t0, 60000);
-  const pct = t => ((t-t0)/span*100).toFixed(2);
-  $('#season').innerHTML = `<div class="kpis">
-   <div class="kpi"><b>${done.length}</b><span>Premieres</span></div>
-   <div class="kpi"><b>${L.filter(r=>r.status==='open').length}</b><span>en scène</span></div>
-   <div class="kpi"><b>${L.reduce((a,r)=>a+r.escalations,0)}</b><span>appels du Director</span></div>
-   <div class="kpi"><b>${L.reduce((a,r)=>a+r.verdicts,0)}</b><span>verdicts du Critic</span></div>
-   <div class="kpi"><b>${avg}</b><span>durée moyenne d’une Premiere</span></div>
-   <div class="kpi"><b>${sizes.length ? Math.round(sizes.reduce((a,b)=>a+b,0)/sizes.length) : '—'}</b><span>lignes de diff en moyenne</span></div>
-   <div class="kpi"><div class="roses">${'❦'.repeat(roses)}<i>${'❦'.repeat(5-roses)}</i></div><span>Premieres sans escalade</span></div></div>
-   <div class="season"><div class="row head"><span>Rehearsal</span><span>Du ${day(t0)} au ${day(t1)}</span><span>Durée</span><span>Tours</span><span>Diff</span></div>
-   ${[...L].reverse().map(r=>{ const z = r.size, ratio = z?.limit ? Math.min(100, z.counted/z.limit*100) : 0;
-     return `<div class="row ${r.id===sel.id?'on':''}" data-r="${esc(r.id)}"><b>${esc(r.id)}</b>
-      <div class="track"><div class="bar ${r.status}" style="left:${pct(r.start)}%;width:${Math.max(0.8,pct(r.end)-pct(r.start))}%"></div>${r.events.filter(e=>e.event!=='wait').map(e=>`<span class="dot" style="left:${pct(Date.parse(e.at))}%;background:${e.event==='escalate'?'#fff':e.event==='message'?ROLES[e.detail?.from]?.color:'#e3b95a'}" title="${esc(e.event)} ${hhmm(e.at)}"></span>`).join('')}</div>
-      <span>${dur(r.end-r.start)}</span><span>${r.verdicts}</span>
-      <div>${z?`<div class="gauge ${z.over?'over':''}"><i style="width:${ratio}%"></i></div><small>${z.counted}/${z.limit} ${z.over?'♯':''}</small>`:'<small>—</small>'}</div></div>`; }).join('')}
-   <div class="axis"><span>${hhmm(t0)}</span><span>maintenant ≈ ${hhmm(Date.now())}</span></div></div>`;
-}
-
-/* ---------- interactions ---------- */
-function gotoIndex(n, withFire){
-  const r = selected(P()); if (!r) return; n = Math.max(0, Math.min(r.events.length-1, n));
-  index = n >= r.events.length-1 && !timer ? null : n; if (withFire) fire(r.events[n]); render();
-}
-function stop(){ clearInterval(timer); timer = null; }
-function play(){
-  if (timer) { stop(); return render(); }
-  const r = selected(P()); if (!r) return; let n = index === null || index >= r.events.length-1 ? 0 : index; index = n; fire(r.events[n]);
-  timer = setInterval(()=>{ n++; if (n >= r.events.length){ stop(); return render(); } index = n; fire(r.events[n]); render(); }, 1400); render();
-}
-document.addEventListener('click', ev=>{
-  const t = ev.target.closest('[data-p],[data-r],[data-i],#play,#prev,#next,#direct'); if (!t) return;
-  if (t.dataset.p !== undefined){ current = +t.dataset.p; pinned = null; index = null; stop(); stageBuilt = false; render(); }
-  else if (t.dataset.r !== undefined){ pinned = t.dataset.r; index = null; stop(); render(); scrollTo({top:0,behavior:'smooth'}); }
-  else if (t.dataset.i !== undefined){ stop(); gotoIndex(+t.dataset.i, true); }
-  else if (t.id === 'play') play();
-  else if (t.id === 'prev'){ stop(); const r = selected(P()); gotoIndex((index ?? r.events.length-1)-1, true); }
-  else if (t.id === 'next'){ stop(); const r = selected(P()); gotoIndex((index ?? r.events.length-1)+1, true); }
-  else if (t.id === 'direct'){ stop(); index = null; pinned = null; render(); }
-});
-document.addEventListener('input', ev=>{ if (ev.target.id === 'scrub'){ stop(); gotoIndex(+ev.target.value, false); } });
-document.addEventListener('keydown', ev=>{
-  if (!$('#scrub') || ev.target.tagName === 'INPUT' && ev.target.type !== 'range') return;
-  if (ev.key === ' '){ ev.preventDefault(); play(); }
-  else if (ev.key === 'ArrowLeft') $('#prev').click(); else if (ev.key === 'ArrowRight') $('#next').click();
-});
-
-/* ---------- direct : le journal est relu toutes les 1,5 s ---------- */
-function ingest(raw){
-  const models = raw.projects.map(build), fresh = [];
-  for (const p of models) for (const r of p.list){
-    const key = p.home + '|' + r.id, before = seen[key] ?? (firstLoad ? r.events.length : 0);
-    r._fresh = Math.max(0, r.events.length - before);
-    if (!firstLoad && r._fresh) for (const e of r.events.slice(before)) fresh.push({p, r, e});
-    seen[key] = r.events.length;
-  }
-  data = {projects:models}; if (current >= models.length) current = 0;
-  render();
-  if (!firstLoad && index === null) fresh.filter(f => f.p === P() && f.r.id === selected(P())?.id).forEach((f,n)=>setTimeout(()=>fire(f.e), 300 + n*900));
-  else for (const f of fresh) if (f.p === P()) toast(f.r.id, describe(f.e).t.replace(/<[^>]+>/g,''));
-  firstLoad = false;
-}
-function beat(ok, text){ const m = $('#metro'); m.classList.toggle('off', !ok); $('#metro-t').textContent = ok ? (text || 'en direct') : 'théâtre fermé'; }
 async function poll(){
-  try{
-    const res = await fetch('/api/stage?since=' + encodeURIComponent(version), {cache:'no-store'}), d = await res.json();
-    beat(true);
-    if (!d.unchanged){ version = d.version; ingest(d); }
-  } catch { beat(false); }
-  setTimeout(poll, 1500);
+  try {
+    const answer = await (await fetch('/api/stage?since=' + encodeURIComponent(version), {cache:'no-store'})).json();
+    $('#live').textContent = 'journal suivi · ' + new Date().toLocaleTimeString('fr-FR');
+    if (!answer.unchanged){
+      version = answer.version; data = answer;
+      if (!picked){ const first = data.projects.flatMap(rehearsals)[0]; if (first) picked = first.key; }
+      render();
+    }
+  } catch { $('#live').textContent = 'hors ligne'; }
+  setTimeout(poll, 2000);
 }
-setInterval(()=>{ if (data.projects.length && version) { const r = P() && selected(P()); if (r && r.status === 'open') render(); } }, 30000);
-
-/* ---------- lever de rideau ---------- */
-(function curtains(){
-  const c = [$('#cl'),$('#cr'),$('#ct')];
-  const open = () => { c.forEach(e=>e.classList.add('open')); setTimeout(()=>c.forEach(e=>e.classList.add('gone')),2000); };
-  setTimeout(open, 900); c.forEach(e=>e.addEventListener('click', open));
-})();
 poll();
 </script>
 </body>

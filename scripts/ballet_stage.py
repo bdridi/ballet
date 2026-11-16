@@ -4,20 +4,25 @@
     python3 ballet_stage.py --scan <dossier>        # tous les sous-dossiers qui ont un `.ballet/run/`
     python3 ballet_stage.py --port 7700             # le port d'écoute (7700 par défaut)
 
-Lecture seule : le script ne lit que `.ballet/run/` de chaque projet (états `<ID>.json` et `journal.jsonl`).
+Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json` et `journal.jsonl`),
+la distribution du profil (CLI et modèle par rôle) et le titre des issues (`gh issue view`, gardé en mémoire).
 Il n'écoute que sur 127.0.0.1. Sans argument, le projet est le dossier courant.
 """
 
 import json
+import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import ballet_config
+
 PAGE = Path(__file__).resolve().parent.parent / "stage" / "index.html"
 RUN_DIR = Path(".ballet") / "run"
 DEFAULT_PORT = 7700
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+TITLES = {}   # (home, issue) → titre : une issue ne change pas de titre pendant qu'on la regarde
 
 
 class UsageError(Exception):
@@ -53,12 +58,45 @@ def project_homes(folder):
 
 def _project(home):
     run = Path(home) / RUN_DIR
+    states = _states(run)
     return {
         "name": Path(home).resolve().name,
         "home": str(Path(home).resolve()),
-        "rehearsals": _states(run),
+        "cast": _cast(home),
+        "titles": _titles(home, states),
+        "rehearsals": states,
         "journal": _journal(run),
     }
+
+
+def _cast(home):
+    """CLI et modèle de chaque rôle, tels que le profil les route ; rien si le profil est illisible."""
+    try:
+        return ballet_config.effective_config(home).get("roles", {})
+    except (ballet_config.ConfigError, OSError):
+        return {}
+
+
+def _titles(home, states):
+    issues = {state["id"]: str(state.get("issue", "")) for state in states}
+    return {rehearsal: _issue_title(home, issue) for rehearsal, issue in issues.items() if issue}
+
+
+def _issue_title(home, issue):
+    key = (str(Path(home).resolve()), issue)
+    if key not in TITLES:
+        TITLES[key] = _read_title(home, issue)
+    return TITLES[key]
+
+
+def _read_title(home, issue):
+    """Le titre de l'issue sur GitHub ; vide si `gh` n'est pas là ou ne répond pas : la page affiche l'ID."""
+    try:
+        done = subprocess.run(["gh", "issue", "view", issue, "--json", "title", "-q", ".title"],
+                              cwd=home, capture_output=True, text=True, timeout=8)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def _states(run):

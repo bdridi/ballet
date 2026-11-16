@@ -433,7 +433,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 
 - **Sur GitHub**, la trace des échanges : l'issue (plan, amendements, questions et réponses) et la PR (rapports du Dancer, verdicts du Critic).
 - **Dès la V1**, le Conductor écrit un événement par transition (JSON lines) : run, issue, phase, rôle, CLI et modèle, début, fin, résultat, allers-retours, escalades et leur motif.
-- **Concept en place** : la Scène (`scripts/ballet_stage.py`, page `stage/index.html`), une page locale en lecture seule, par projet, qui lit `.ballet/run/` : le direct (rôle actif, messages entre rôles, escalades, Premiere), la partition du journal avec rejeu, et la saison (Rehearsals, durées, tours, taille de diff). C'est une maquette à retravailler, pas un livrable de la V1 (§14).
+- **Concept en place** : la Scène (`scripts/ballet_stage.py`, page `stage/index.html`), une page locale en lecture seule, par projet, qui lit `.ballet/run/`, la distribution du profil et le titre des issues. Volontairement basique : par projet, les Rehearsals en cours et passées, le rôle qui a la main, et le fil du journal (ce que le Conductor remet à chaque worker, les messages reçus en entier, les pas du script), mis à jour en direct. C'est un outil d'observation pour se forger des convictions, pas un livrable de la V1 (§14).
 - **Plus tard**, un vrai tableau de bord par-dessus ces données, à la manière de ce qui était prévu pour Nightshift. Sources complémentaires côté Orca : `orca search` dans les sessions, `worker-list`, `inbox`, hooks de statut des agents.
 - Il sert à piloter, à **comparer les modèles par rôle**, et à décider quand passer une phase de manuel à auto.
 

@@ -174,7 +174,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 
 ## Ensuite (à découper le moment venu)
 
-- [ ] La Scène (monitoring, PRD §12) : le concept existe (`python3 scripts/ballet_stage.py <home>` ou `--scan <dossier>`, puis http://127.0.0.1:7700). À travailler : valider le nom « Scène » au vocabulaire (PRD §3), tester le rejeu et le direct dans un vrai navigateur, ajouter les modèles et CLI par rôle et les temps par phase (comparer les modèles), un registre de projets, une doc d'usage dans le README.
+- [ ] La Scène (monitoring, PRD §12) : le concept existe (`python3 scripts/ballet_stage.py <home>` ou `--scan <dossier>`, puis http://127.0.0.1:7700). v3, volontairement basique après deux maquettes visuelles écartées : par projet, les Rehearsals (en cours d'abord), le rôle en cours, et le fil du journal (passages `handoff` du Conductor vers les workers, messages reçus avec leur texte entier, pas du script). À travailler, une fois l'usage éprouvé : valider le nom « Scène » au vocabulaire (PRD §3), les temps par phase et la comparaison des modèles, un registre de projets.
 - [ ] Dancer Claude puis Dancer Mistral sur les mêmes issues, et comparaison (PRD §15.4).
 - [ ] Workshop auto : `auto-track`.
 - [ ] Déclencheurs d'escalade subtils : désaccord persistant, build instable.
