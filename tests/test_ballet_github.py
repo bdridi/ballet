@@ -311,6 +311,14 @@ class BalletGitHubTest(unittest.TestCase):
         self.assert_merge_refused(mergeable_pull_request(checks=()), "no CI")
         self.assert_merge_refused(mergeable_pull_request(checks=(GREEN_CHECK, RED_CHECK)), "proof")
 
+    def test_une_ci_en_cours_se_distingue_d_une_ci_rouge(self):
+        running = {**GREEN_CHECK, "status": "IN_PROGRESS", "conclusion": ""}
+        with self.assertRaisesRegex(ballet_github.CiPending, "still running: proof"):
+            ballet_github.merge_pull_request("43", run=FakeGh(pull_request=mergeable_pull_request(checks=(GREEN_CHECK, running)), timeline=APPROVED_TIMELINE), git=FakeGit())
+        with self.assertRaises(ballet_github.GitHubError) as raised:
+            ballet_github.merge_pull_request("43", run=FakeGh(pull_request=mergeable_pull_request(checks=(running, RED_CHECK)), timeline=APPROVED_TIMELINE), git=FakeGit())
+        self.assertNotIsInstance(raised.exception, ballet_github.CiPending)
+
     def test_label_cree_les_libelles_pose_le_verdict_et_retire_les_autres(self):
         gh = FakeGh()
         ballet_github.label_pull_request("#43", "approved", run=gh)

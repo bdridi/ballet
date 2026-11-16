@@ -158,7 +158,7 @@ def _critic_dancer_problems(config):
 def _threshold_problems(config):
     escalation = _table(config, "escalation")
     problems = []
-    for key in ("max_round_trips", "max_exchange_rounds", "max_diff_lines"):
+    for key in ("max_round_trips", "max_exchange_rounds", "max_diff_lines", "ci_wait_seconds"):
         value = escalation.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             problems.append(f"[escalation] {key} must be a positive integer")

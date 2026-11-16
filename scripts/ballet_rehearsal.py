@@ -4,7 +4,7 @@
     python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
     python3 ballet_rehearsal.py receive  <ID> --dispatch <ctx-id>                  # le dernier message du worker de ce dispatch
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
-    python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI encore en cours)
+    python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI rouge ou trop longue)
     python3 ballet_rehearsal.py resume   <ID>                                      # applique la décision du Director (libellé de la PR)
     python3 ballet_rehearsal.py status   <ID> [--json]                             # où en est la Rehearsal
 
@@ -20,6 +20,12 @@ ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait rep
 Au-delà de `max_diff_lines`, la PR porte `ballet:oversized` ; en mode strict (`max_diff_strict`), la Rehearsal
 escalade avant le Critic, jusqu'à ce que le Director pose `ballet:size-accepted` et la fasse reprendre.
 
+La Premiere attend une CI en cours (`ci_wait_seconds`, un sondage toutes les 15 s) ; une CI rouge, ou encore
+en cours à l'échéance, refuse le merge et escalade. Ces appels peuvent donc durer plusieurs minutes.
+
+Un worker qui finit son tour sans `worker_done` est relancé une fois pour envoyer son rapport ; s'il recommence,
+ou s'il est tombé en erreur, la Rehearsal escalade.
+
 Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
 et un autre code ≠ 0 n'est qu'une panne du script.
 
@@ -32,6 +38,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +55,9 @@ SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
 WORKER_MESSAGES = ("worker_done", "question", "escalation")
 STATUS_OF_STEP = {"wait": "open", "escalate": "escalated", "done": "done"}
 STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
+CI_POLL_SECONDS = 15
+MAX_NUDGES = 1
+REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
 
 
 class RehearsalError(Exception):
@@ -75,6 +85,7 @@ class Rehearsal:
     size: dict = field(default_factory=dict)         # la dernière mesure du diff
     blocked_on: str = ""                             # "size" : le Critic attend que le Director accepte la taille
     notes: str = ""                                  # "" | "asked" (le Dancer prend les notes) | "reviewed" (le Critic a relu)
+    nudges: dict = field(default_factory=dict)       # rôle → relances sans `worker_done`, remis à zéro à son prochain message
 
     @property
     def branch(self):
@@ -94,10 +105,11 @@ class Step:
 
 
 class Tools:
-    """Les commandes externes (git, gh, orca), remplaçables dans les tests."""
+    """Les commandes externes (git, gh, orca) et l'attente, remplaçables dans les tests."""
 
-    def __init__(self, run=None):
+    def __init__(self, run=None, sleep=None):
         self.run = run or _run
+        self.sleep = sleep or time.sleep
 
     def gh(self, arguments):
         return self.run(["gh", *arguments])
@@ -147,17 +159,21 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
     rehearsal = _load(rehearsal_id, home)
     try:
         message = _orca_message(wanted, by, tools)
-        header, text = _parsed(message.get("body", ""))
-        question_id = message["id"] if message.get("type") == "question" else None
-        step = _handle(rehearsal, header, text, question_id, config, home, tools)
+        if message.get("type") == "escalation":
+            step = _worker_stopped(rehearsal, message, home, tools)
+        else:
+            header, text = _parsed(message.get("body", ""))
+            question_id = message["id"] if message.get("type") == "question" else None
+            step = _handle(rehearsal, header, text, question_id, config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
     return _settle(rehearsal, step, home, tools)
 
 
 def premiere(rehearsal_id, home, tools):
+    config = _checked_config(home)
     rehearsal = _load(rehearsal_id, home)
-    return _settle(rehearsal, _then_premiere(rehearsal, Step("wait"), tools), home, tools)
+    return _settle(rehearsal, _then_premiere(rehearsal, Step("wait"), config, tools), home, tools)
 
 
 def resume(rehearsal_id, home, tools):
@@ -187,6 +203,7 @@ def status(rehearsal_id, home, tools):
 
 def _handle(rehearsal, header, text, question_id, config, home, tools):
     _log(home, rehearsal, "message", header)
+    rehearsal.nudges.pop(header["from"], None)
     return _route(rehearsal, header, text, question_id, config, home, tools)
 
 
@@ -206,6 +223,20 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
     if kind == "escalation":
         return Step("escalate", f"{sender} escalates: see its message")
     raise RehearsalError(f"no transition for a {kind} from the {sender}")
+
+
+def _worker_stopped(rehearsal, message, home, tools):
+    """Un worker a fini son tour sans `worker_done` : relancé pour envoyer son rapport, une fois ; ensuite, ou s'il
+    est tombé en erreur, c'est au Director."""
+    payload = _payload(message)
+    role = next((role for role, dispatch in rehearsal.dispatches.items() if dispatch == payload.get("dispatchId")), None)
+    if not role or payload.get("stopReason") != "finished" or rehearsal.nudges.get(role, 0) >= MAX_NUDGES:
+        raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
+    rehearsal.nudges[role] = rehearsal.nudges.get(role, 0) + 1
+    tools.orca(["orchestration", "send", "--to", f"dispatch:{rehearsal.dispatches[role]}",
+                "--subject", f"{rehearsal.id} · {role}: send your worker_done", "--body", REPORT_REMINDER])
+    _log(home, rehearsal, "nudge", {"role": role, "dispatch": rehearsal.dispatches[role]})
+    return Step("wait", done=[f"the {role} ended its turn without worker_done: asked to send its report"])
 
 
 def _relay_question(rehearsal, header, text, question_id, config, home, tools):
@@ -316,7 +347,7 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
     if verdict == "APPROVED" and notes_of(text) and not rehearsal.notes:
         return _notes_to_the_dancer(rehearsal, len(notes_of(text)), step, config, home, tools)
     if verdict == "APPROVED":
-        return _then_premiere(rehearsal, step, tools)
+        return _then_premiere(rehearsal, step, config, tools)
     rehearsal.round_trips += 1
     if rehearsal.round_trips > config["escalation"]["max_round_trips"]:
         return Step("escalate", f"{rehearsal.round_trips} rejections, over max_round_trips", step.done)
@@ -335,7 +366,7 @@ def _apply_decision(rehearsal, config, home, tools):
     _log(home, rehearsal, "director-decision", decision)
     if decision["verdict"] == "APPROVED":
         rehearsal.label, rehearsal.blocked_on = "APPROVED", ""
-        return _premiere(rehearsal, tools)
+        return _premiere(rehearsal, config, tools)
     if decision["verdict"] == "REJECTED":
         return _back_to_the_dancer(rehearsal, decision["comments"], config, home, tools)
     if decision.get("size_accepted"):
@@ -355,24 +386,38 @@ def _back_to_the_dancer(rehearsal, comments, config, home, tools):
     return Step("wait", done=[f"the Director rejected #{rehearsal.pull_request}: {len(comments)} comment(s) carried to the dancer"])
 
 
-def _then_premiere(rehearsal, step, tools):
+def _then_premiere(rehearsal, step, config, tools):
     """La Premiere après ce qui est déjà fait : un merge refusé escalade sans perdre ces lignes."""
     try:
-        premiere_step = _premiere(rehearsal, tools)
+        premiere_step = _premiere(rehearsal, config, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         return Step("escalate", f"merge refused: {error}", step.done)
     return Step(premiere_step.next, premiere_step.reason, step.done + premiere_step.done)
 
 
-def _premiere(rehearsal, tools):
+def _premiere(rehearsal, config, tools):
     """Merge par rebase (le script GitHub refuse sans `ballet:approved` frais ni CI verte), puis range le worktree."""
     if not rehearsal.pull_request:
         raise RehearsalError("no pull request to merge")
-    ballet_github.merge_pull_request(rehearsal.pull_request, run=tools.gh, git=tools.git(rehearsal.repo))
+    waited = _merge_once_ci_settles(rehearsal, config["escalation"]["ci_wait_seconds"], tools)
     closed = _close_issues(rehearsal, tools)
     tools.orca(["worktree", "rm", "--worktree", f"path:{rehearsal.worktree}", "--delete-branch"])
     return Step("done", f"#{rehearsal.pull_request} merged on main",
-                [f"#{rehearsal.pull_request} merged by rebase, {rehearsal.branch} deleted", closed, "worktree removed"])
+                waited + [f"#{rehearsal.pull_request} merged by rebase, {rehearsal.branch} deleted", closed, "worktree removed"])
+
+
+def _merge_once_ci_settles(rehearsal, wait_seconds, tools):
+    """Une CI en cours se réattend, jusqu'à `ci_wait_seconds` ; une CI rouge, ou trop longue, refuse le merge."""
+    waited = 0
+    while True:
+        try:
+            ballet_github.merge_pull_request(rehearsal.pull_request, run=tools.gh, git=tools.git(rehearsal.repo))
+            return [f"waited {waited}s for the CI"] if waited else []
+        except ballet_github.CiPending as pending:
+            if waited >= wait_seconds:
+                raise RehearsalError(f"{pending} after waiting {waited}s (ci_wait_seconds)") from pending
+            tools.sleep(CI_POLL_SECONDS)
+            waited += CI_POLL_SECONDS
 
 
 def _close_issues(rehearsal, tools):
@@ -462,7 +507,7 @@ Load the skill `/ballet:{role}` and follow it. Its GitHub script is {SKILLS_ROOT
 
 Under the Conductor:
 - A question: one Ballet message (`templates/message.md`, `type: question`), sent with `orca orchestration ask --question "<the whole message>"`. Then end your turn: the answer comes back here, in this session.
-- When you are done: your final message, whole, header line first, is the body of your `worker_done`.
+- When you are done: send your `worker_done`, whose body is your final message, whole, header line first. Ending your turn without sending it stops the Rehearsal.
 - Never push, never run `gh`, never change branch (spikes excepted, for the Choreographer).
 """
 
@@ -681,13 +726,11 @@ def _parsed(body):
 
 def _orca_message(wanted, by, tools):
     """Le message entier, retrouvé dans la boîte d'Orca par son id ou comme le dernier du dispatch d'un worker.
-    Un `escalation` d'Orca (worker arrêté sans rapport) n'est pas un message Ballet : le Director le reçoit tel quel."""
+    Un `escalation` d'Orca (worker arrêté sans rapport) n'est pas un message Ballet : `_worker_stopped` en décide."""
     messages = _find_list(json.loads(tools.orca(["orchestration", "inbox", "--limit", "200", "--full", "--json"])), "messages")
     message = _by_id(messages, wanted) if by == "message" else _latest_from(messages, wanted)
     if not message:
         raise RehearsalError(f"no Orca message {'from dispatch ' if by == 'dispatch' else ''}{wanted} in the inbox")
-    if message.get("type") == "escalation":
-        raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
     return message
 
 

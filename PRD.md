@@ -398,6 +398,7 @@ sensitive_zones = ["**/contract/**"]   # globs, valables dans tous les repos
 [escalation]
 max_diff_lines = 400
 max_diff_strict = true                   # escalade avant le Critic au-delà du seuil (défaut : false)
+ci_wait_seconds = 480                    # la Premiere attend une CI en cours jusque-là (défaut : 480, sous 600)
 diff_exclude = ["*.lock", "**/generated/**"]
 
 [roles.dancer]                            # surcharge : le reste hérite des défauts

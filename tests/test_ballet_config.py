@@ -160,6 +160,10 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_exchange_rounds = 0\n")
         self.assertProblem("max_exchange_rounds must be a positive integer")
 
+    def test_attente_de_la_ci_invalide_est_refusee(self):
+        self.write_project_config(VALID_PROJECT + "\n[escalation]\nci_wait_seconds = 0\n")
+        self.assertProblem("ci_wait_seconds must be a positive integer")
+
     def test_mode_strict_qui_n_est_pas_un_booleen_est_refuse(self):
         self.write_project_config(VALID_PROJECT + '\n[escalation]\nmax_diff_strict = "yes"\n')
         self.assertProblem("max_diff_strict must be true or false")

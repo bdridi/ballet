@@ -28,6 +28,10 @@ def message(sender, to, kind, body, round_=1):
     return f"{json.dumps(header)}\n\n{body}\n"
 
 
+RUNNING_CHECK = {"__typename": "CheckRun", "name": "proof", "status": "IN_PROGRESS", "conclusion": ""}
+FAILED_CHECK = {"__typename": "CheckRun", "name": "proof", "status": "COMPLETED", "conclusion": "FAILURE"}
+
+
 def pull_request_state(verdict="APPROVED", checks=True):
     return {
         "headRefName": "rehearsal/FEAT-001.2",
@@ -148,7 +152,8 @@ class BalletRehearsalTest(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.world = FakeWorld(home=str(self.home))
-        self.tools = ballet_rehearsal.Tools(run=self.world)
+        self.sleeps = []
+        self.tools = ballet_rehearsal.Tools(run=self.world, sleep=self.sleeps.append)
 
     def begin(self):
         return ballet_rehearsal.begin("#3", self.home, self.tools)
@@ -350,6 +355,39 @@ class BalletRehearsalTest(unittest.TestCase):
         self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
         self.world.pull_request = pull_request_state()
         self.assertEqual(ballet_rehearsal.premiere("FEAT-001.2", self.home, self.tools).next, "done")
+
+    def test_une_ci_en_cours_est_attendue_puis_la_premiere_merge(self):
+        self.world.pull_request["statusCheckRollup"] = [RUNNING_CHECK]
+        self.to_the_critic()
+        self.sleeps.clear()
+        self.tools.sleep = lambda seconds: (self.sleeps.append(seconds), self.finish_ci() if len(self.sleeps) == 2 else None)
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(step.next, "done")
+        self.assertEqual(self.sleeps, [ballet_rehearsal.CI_POLL_SECONDS] * 2)
+        self.assertIn("waited 30s for the CI", step.done)
+        self.assertTrue(self.world.ran("gh", "pr", "merge"))
+
+    def test_une_ci_qui_n_en_finit_pas_escalade_apres_ci_wait_seconds(self):
+        self.world.pull_request["statusCheckRollup"] = [RUNNING_CHECK]
+        self.to_the_critic()
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("CI still running: proof", step.reason)
+        self.assertIn("ci_wait_seconds", step.reason)
+        self.assertEqual(sum(self.sleeps), 480)
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        self.assertIn("ballet:approved", self.world.labels())
+
+    def test_une_ci_rouge_escalade_tout_de_suite_sans_attendre(self):
+        self.world.pull_request["statusCheckRollup"] = [FAILED_CHECK, RUNNING_CHECK]
+        self.to_the_critic()
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("CI not green", step.reason)
+        self.assertEqual(self.sleeps, [])
+
+    def finish_ci(self):
+        self.world.pull_request = pull_request_state()
 
     def test_le_critic_qui_escalade_arrete_la_rehearsal(self):
         self.to_the_critic()
@@ -602,7 +640,38 @@ class BalletRehearsalTest(unittest.TestCase):
         step = self.receive_from_orca("msg_nope")
         self.assertEqual((step.next, step.reason), ("escalate", "no Orca message msg_nope in the inbox"))
 
-    def test_un_worker_arrete_sans_rapport_escalade_avec_ce_qu_orca_en_dit(self):
+    def stopped(self, message_id, reason="finished", dispatch="ctx_1"):
+        self.world.inbox.append({"id": message_id, "type": "escalation", "subject": "Worker stopped without reporting", "body": "Worker term_1 exited",
+                                 "payload": json.dumps({"dispatchId": dispatch, "stopReason": reason})})
+        return self.receive_from_orca(message_id)
+
+    def test_un_worker_qui_a_fini_sans_worker_done_est_relance_sans_deranger_le_director(self):
+        self.begin()
+        step = self.stopped("msg_stop")
+        self.assertEqual(step.next, "wait")
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_1")
+        self.assertIn("worker_done", send[send.index("--body") + 1])
+
+    def test_un_worker_relance_qui_s_arrete_encore_sans_rapport_escalade(self):
+        self.begin()
+        self.stopped("msg_stop_1")
+        step = self.stopped("msg_stop_2")
+        self.assertEqual((step.next, step.reason), ("escalate", "Orca: Worker stopped without reporting: Worker term_1 exited"))
+
+    def test_la_relance_est_rendue_au_worker_apres_son_prochain_message(self):
+        self.begin()
+        self.stopped("msg_stop_1")
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual(self.stopped("msg_stop_2").next, "wait")
+
+    def test_un_worker_tombe_en_erreur_escalade_sans_relance(self):
+        self.begin()
+        step = self.stopped("msg_stop", reason="errored")
+        self.assertEqual(step.next, "escalate")
+        self.assertFalse(self.world.ran("orca", "orchestration", "send"))
+
+    def test_un_worker_inconnu_arrete_sans_rapport_escalade_avec_ce_qu_orca_en_dit(self):
         self.begin()
         self.orca_message("msg_stop", "escalation", "Worker term_1 exited", subject="Worker stopped without reporting")
         step = self.receive_from_orca("msg_stop")

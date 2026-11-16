@@ -71,6 +71,10 @@ class GitHubError(Exception):
     """Une opération est refusée, ou `gh` a échoué."""
 
 
+class CiPending(GitHubError):
+    """La CI n'a pas fini et rien n'y est rouge : le merge est refusé pour l'instant, pas pour de bon."""
+
+
 def read_issue(number, run=None):
     return _issue_body(number, run or _run_gh)
 
@@ -567,15 +571,25 @@ def _require_green_ci(pull_request):
     checks = pull_request.get("statusCheckRollup") or []
     if not checks:
         raise GitHubError("no CI check on the pull request: a missing CI is not a green CI")
-    not_green = [_check_name(check) for check in checks if not _is_green(check)]
-    if not_green:
-        raise GitHubError(f"CI not green: {', '.join(not_green)}")
+    failed = [_check_name(check) for check in checks if _is_failed(check)]
+    if failed:
+        raise GitHubError(f"CI not green: {', '.join(failed)}")
+    running = [_check_name(check) for check in checks if not _is_green(check)]
+    if running:
+        raise CiPending(f"CI still running: {', '.join(running)}")
 
 
 def _is_green(check):
     if check.get("__typename") == "StatusContext":
         return check.get("state") == "SUCCESS"
     return check.get("status") == "COMPLETED" and check.get("conclusion") in GREEN_CONCLUSIONS
+
+
+def _is_failed(check):
+    """Rouge, et non simplement pas fini : attendre n'y changerait rien."""
+    if check.get("__typename") == "StatusContext":
+        return check.get("state") in ("FAILURE", "ERROR")
+    return check.get("status") == "COMPLETED" and check.get("conclusion") not in GREEN_CONCLUSIONS
 
 
 def _check_name(check):
