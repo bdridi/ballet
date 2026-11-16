@@ -13,7 +13,7 @@ The script's last line is always one of:
 - `NEXT: escalate <reason>`: stop and tell the Director (see *Escalation*).
 - `NEXT: done`: the Premiere is done. Report and stop.
 
-The lines before it (`- …`) say what the script did. Relay them to the Director in one or two lines.
+The lines before it (`- …`) say what the script did. Relay them to the Director in one or two lines. An escalation is an expected outcome: the script still exits with 0. Exit code 2 means you called it wrongly; any other non-zero code is a crash of the script: tell the Director, with its output.
 
 ## 1. Begin
 
@@ -49,7 +49,7 @@ Tell the Director, in their language: the reason, the issue and pull request lin
 - **The CI was still running**: once it is green, `python3 <path>/scripts/ballet_rehearsal.py premiere <ID>`.
 - Anything else (merge by hand, change the plan, drop the Rehearsal): the Director does it; you only report.
 
-`python3 <path>/scripts/ballet_rehearsal.py status <ID>` shows the state at any time.
+`python3 <path>/scripts/ballet_rehearsal.py status <ID>` shows the state at any time, in plain lines (pull request, last verdict, CI, round trips, pending questions, workers), its last line repeating the last `NEXT`. `--json` prints the raw state.
 
 ## Never
 

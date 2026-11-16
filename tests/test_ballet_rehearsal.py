@@ -291,6 +291,59 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(output.getvalue().strip().splitlines()[-1], "NEXT: wait")
 
+    def run_main(self, *arguments):
+        output = io.StringIO()
+        with redirect_stdout(output), mock.patch("sys.stderr", io.StringIO()):
+            code = ballet_rehearsal.main(["x", *arguments], home=self.home, tools=self.tools)
+        return code, output.getvalue().strip().splitlines()
+
+    def test_une_escalade_est_un_cas_prevu_et_sort_avec_zero(self):
+        self.begin()
+        path = self.home / "incoming.md"
+        path.write_text("not a message\n", encoding="utf-8")
+        code, lines = self.run_main("receive", "FEAT-001.2", str(path))
+        self.assertEqual(code, 0)
+        self.assertTrue(lines[-1].startswith("NEXT: escalate invalid message"))
+
+    def test_un_usage_invalide_sort_avec_deux_sans_rien_faire(self):
+        self.assertEqual(self.run_main("begin")[0], 2)
+        self.assertEqual(self.world.commands, [])
+
+    # --- status ---
+
+    def test_status_resume_la_rehearsal_et_redit_la_derniere_escalade(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: ESCALATE\n\n## Escalation\n\nSize."))
+        code, lines = self.run_main("status", "FEAT-001.2")
+        self.assertEqual(code, 0)
+        self.assertIn("- pull request #8: last verdict APPROVED, CI green", lines)
+        self.assertIn("- Dancer ↔ Critic round trips: 0 of 2", lines)
+        self.assertEqual(lines[-1], "NEXT: escalate the Critic escalates: see its review")
+
+    def test_status_sans_pr_dit_ce_qu_attend_la_rehearsal(self):
+        self.begin()
+        self.receive(message("dancer", "choreographer", "question", "1. A?"), question_id="msg_1")
+        lines = self.run_main("status", "FEAT-001.2")[1]
+        self.assertIn("- no pull request yet", lines)
+        self.assertIn("- the dancer waits for the choreographer's answer (Orca message msg_1)", lines)
+        self.assertEqual(lines[-1], "NEXT: wait")
+
+    def test_status_json_rend_l_etat_brut(self):
+        self.begin()
+        code, lines = self.run_main("status", "FEAT-001.2", "--json")
+        self.assertEqual(json.loads("\n".join(lines))["status"], "open")
+
+    def test_la_reponse_du_director_rouvre_une_rehearsal_escaladee(self):
+        self.begin()
+        self.receive(message("dancer", "director", "question", "1. Touch the CI?"), question_id="msg_3")
+        self.assertEqual(self.state()["status"], "escalated")
+        self.receive(message("director", "dancer", "answer", "1. Yes."))
+        self.assertEqual((self.state()["status"], self.state()["reason"]), ("open", ""))
+
+    def test_le_dossier_d_etat_n_ecrit_plus_son_propre_gitignore(self):
+        self.begin()
+        self.assertFalse((self.home / ".ballet" / "run" / ".gitignore").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

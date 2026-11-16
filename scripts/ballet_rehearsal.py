@@ -3,14 +3,18 @@
     python3 ballet_rehearsal.py begin    <issue>                                   # ouvre la Rehearsal, lance le premier rôle
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message d'un worker, ou du Director
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI encore en cours)
-    python3 ballet_rehearsal.py status   <ID>
+    python3 ballet_rehearsal.py status   <ID> [--json]                             # où en est la Rehearsal
 
 Lancé depuis le home du projet. Le skill `conductor` n'a qu'à appeler ce script et lire sa dernière ligne :
     NEXT: wait               un worker travaille ; Orca réveillera le Conductor
     NEXT: escalate <motif>   le Director décide ; la Rehearsal attend
     NEXT: done               la Premiere est faite
 
-L'état vit dans `.ballet/run/<ID>.json`, le journal dans `.ballet/run/journal.jsonl` (dossier ignoré par git).
+Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
+et un autre code ≠ 0 n'est qu'une panne du script.
+
+L'état vit dans `.ballet/run/<ID>.json`, le journal dans `.ballet/run/journal.jsonl`
+(`init-project` met `.ballet/run/` dans le `.gitignore` du projet).
 """
 
 import json
@@ -30,10 +34,16 @@ RUN_DIR = Path(".ballet") / "run"
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
 ORCA_AGENTS = {"claude": "claude", "codex": "codex", "grok": "grok", "opencode": "opencode"}
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
+STATUS_OF_STEP = {"wait": "open", "escalate": "escalated", "done": "done"}
+STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 
 
 class RehearsalError(Exception):
     """La Rehearsal ne peut pas avancer : le Conductor escalade."""
+
+
+class UsageError(Exception):
+    """La commande est mal formée : rien n'a été fait."""
 
 
 @dataclass
@@ -48,6 +58,7 @@ class Rehearsal:
     dispatches: dict = field(default_factory=dict)   # rôle → dispatch Orca de son worker
     pending: list = field(default_factory=list)      # questions en attente : {id, from, to}
     status: str = "open"                             # open | escalated | done
+    reason: str = ""                                 # le motif de la dernière escalade, ou de la fin
 
     @property
     def branch(self):
@@ -97,9 +108,8 @@ def begin(issue, home, tools):
     first_role = "dancer" if _has_tasks(body) else "choreographer"
     _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal), config, home, tools)
     step.done.append(f"{first_role} started on issue #{rehearsal.issue}")
-    _save(rehearsal, home)
     _log(home, rehearsal, "begin", {"first_role": first_role})
-    return step
+    return _settle(rehearsal, step, home)
 
 
 def receive(rehearsal_id, message_path, question_id, home, tools):
@@ -111,11 +121,7 @@ def receive(rehearsal_id, message_path, question_id, home, tools):
         step = _route(rehearsal, header, text, question_id, config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
-    if step.next == "escalate":
-        rehearsal.status = "escalated"
-    _save(rehearsal, home)
-    _log(home, rehearsal, step.next, {"reason": step.reason, "done": step.done})
-    return step
+    return _settle(rehearsal, step, home)
 
 
 def premiere(rehearsal_id, home, tools):
@@ -124,9 +130,16 @@ def premiere(rehearsal_id, home, tools):
         step = _premiere(rehearsal, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", f"merge refused: {error}")
-    _save(rehearsal, home)
-    _log(home, rehearsal, step.next, {"reason": step.reason, "done": step.done})
-    return step
+    return _settle(rehearsal, step, home)
+
+
+def status(rehearsal_id, home, tools):
+    """Où en est la Rehearsal, en clair : sa dernière ligne `NEXT` est celle du dernier pas."""
+    config = _checked_config(home)
+    rehearsal = _load(rehearsal_id, home)
+    summary = [_where(rehearsal), _pull_request_line(rehearsal, tools), _round_trips_line(rehearsal, config)]
+    summary += _pending_lines(rehearsal) + _workers_line(rehearsal)
+    return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, summary)
 
 
 # --- les transitions ----------------------------------------------------------
@@ -227,9 +240,41 @@ def _premiere(rehearsal, tools):
         raise RehearsalError("no pull request to merge")
     ballet_github.merge_pull_request(rehearsal.pull_request, run=tools.gh, git=tools.git(rehearsal.repo))
     tools.orca(["worktree", "rm", "--worktree", f"path:{rehearsal.worktree}", "--delete-branch"])
-    rehearsal.status = "done"
     return Step("done", f"#{rehearsal.pull_request} merged on main",
                 [f"#{rehearsal.pull_request} merged by rebase, {rehearsal.branch} deleted", "worktree removed"])
+
+
+# --- l'état en clair ----------------------------------------------------------
+
+
+def _where(rehearsal):
+    return f"Rehearsal {rehearsal.id}: issue #{rehearsal.issue}, branch {rehearsal.branch}, worktree {rehearsal.worktree or 'none'}"
+
+
+def _pull_request_line(rehearsal, tools):
+    if not rehearsal.pull_request:
+        return "no pull request yet"
+    try:
+        found = ballet_github.pull_request_status(rehearsal.pull_request, run=tools.gh)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        return f"pull request #{rehearsal.pull_request}: cannot read it ({error})"
+    state = f" ({found['state'].lower()})" if found["state"] else ""
+    return f"pull request #{rehearsal.pull_request}{state}: last verdict {found['verdict'] or 'none yet'}, {found['ci']}"
+
+
+def _round_trips_line(rehearsal, config):
+    return f"Dancer ↔ Critic round trips: {rehearsal.round_trips} of {config['escalation']['max_round_trips']}"
+
+
+def _pending_lines(rehearsal):
+    return [f"the {question['from']} waits for the {question['to']}'s answer (Orca message {question['id']})"
+            for question in rehearsal.pending]
+
+
+def _workers_line(rehearsal):
+    if not rehearsal.dispatches:
+        return []
+    return ["workers: " + ", ".join(f"{role} {dispatch}" for role, dispatch in rehearsal.dispatches.items())]
 
 
 # --- les rôles ----------------------------------------------------------------
@@ -344,6 +389,15 @@ def _write_spec(rehearsal, role, spec, home):
     return path
 
 
+def _settle(rehearsal, step, home):
+    """Le pas fixe le statut de la Rehearsal ; l'état est sauvé et le pas journalisé."""
+    rehearsal.status = STATUS_OF_STEP[step.next]
+    rehearsal.reason = step.reason
+    _save(rehearsal, home)
+    _log(home, rehearsal, step.next, {"reason": step.reason, "done": step.done})
+    return step
+
+
 def _save(rehearsal, home):
     _state_path(rehearsal.id, home).write_text(json.dumps(asdict(rehearsal), indent=2) + "\n", encoding="utf-8")
 
@@ -374,9 +428,6 @@ def _state_path(rehearsal_id, home):
 def _run_dir(home):
     folder = Path(home) / RUN_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    ignore = folder / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8")
     return folder
 
 
@@ -475,27 +526,31 @@ def _run(arguments):
 
 
 def main(argv, home=".", tools=None):
+    """Affiche le pas et sort avec 0, escalade comprise ; 2 sur un usage invalide."""
     tools = tools or Tools()
     command, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
-        step = _command(command, arguments, home, tools)
+        print(_command(command, arguments, home, tools))
+    except UsageError as error:
+        print(error, file=sys.stderr)
+        return 2
     except (RehearsalError, ballet_github.GitHubError) as error:
-        step = Step("escalate", str(error))
-    print(step.render())
-    return 0 if step.next != "escalate" else 1
+        print(Step("escalate", str(error)).render())
+    return 0
 
 
 def _command(command, arguments, home, tools):
     if command == "begin" and len(arguments) == 1:
-        return begin(arguments[0], home, tools)
+        return begin(arguments[0], home, tools).render()
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):
-        return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools)
+        return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools).render()
     if command == "premiere" and len(arguments) == 1:
-        return premiere(arguments[0], home, tools)
+        return premiere(arguments[0], home, tools).render()
     if command == "status" and len(arguments) == 1:
-        rehearsal = _load(arguments[0], home)
-        return Step(rehearsal.status, json.dumps(asdict(rehearsal)))
-    raise RehearsalError("usage: begin <issue> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | status <ID>")
+        return status(arguments[0], home, tools).render()
+    if command == "status" and arguments[1:] == ["--json"]:
+        return json.dumps(asdict(_load(arguments[0], home)), indent=2)
+    raise UsageError("usage: begin <issue> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | status <ID> [--json]")
 
 
 if __name__ == "__main__":

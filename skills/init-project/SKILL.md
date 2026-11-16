@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: Bootstraps a project for Ballet (profile `.ballet/config.toml`, AGENTS.md, CLAUDE.md, `.agents/skills` link). Use once, in a project's home folder, before running the chain, or when the Conductor refuses to start for lack of a profile.
+description: Bootstraps a project for Ballet (profile `.ballet/config.toml`, AGENTS.md, CLAUDE.md, `.agents/skills` link, `.ballet/run/` in `.gitignore`). Use once, in a project's home folder, before running the chain, or when the Conductor refuses to start for lack of a profile.
 ---
 
 # init-project
@@ -18,7 +18,7 @@ You bootstrap the current project, which must be its home folder (single repo, o
    ```
 
    Options: `--specs-language fr` (default: `en`), `--rules tdd,bdd` to choose the common rules (default: `tdd,bdd,ddd,clean-code`), `--repo <name>` to name the repo.
-3. Report to the Director what was created, what already existed (never modified), and the result of the check.
+3. Report to the Director what was created, what was completed (only `.gitignore`, which gets the line `.ballet/run/`: the Rehearsals' local state), what already existed (never modified), and the result of the check.
 4. If `AGENTS.md` already existed, offer to add the instruction to load the common rules (see the template in `scripts/init_project.py`) without overwriting it.
 
 This skill only handles a **single repo**: for a multi-repo project, then add one `[repos.<name>]` section per repo (`path`, `proof`, `needs`) to `.ballet/config.toml` by hand, and check:
@@ -27,4 +27,4 @@ This skill only handles a **single repo**: for a multi-repo project, then add on
 python3 <path>/scripts/ballet_config.py check .
 ```
 
-You change only these files, nothing else in the project.
+You change only these files and `.gitignore`, nothing else in the project.

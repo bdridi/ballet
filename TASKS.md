@@ -125,11 +125,11 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
     - [ ] Section Escalation du skill Conductor : décrire `resume`.
     - [ ] Notes non bloquantes du Critic : reportées par le script dans l'issue de la slice suivante, ou une issue de suivi s'il n'y en a pas.
     - [ ] `receive` lit le message d'Orca par son id au lieu d'une recopie du Conductor dans `inbox.md` (altération, tokens).
-    - [ ] `NEXT: escalate` sort avec 0 (cas prévu, pas une erreur) ; code ≠ 0 réservé aux pannes du script.
-    - [ ] `status` lisible : PR, verdict, CI, taille, prochaine action ; le JSON derrière `--json`.
+    - [x] `NEXT: escalate` sort avec 0 (cas prévu, pas une erreur) ; code ≠ 0 réservé aux pannes du script (0.9.1).
+    - [x] `status` lisible : PR, verdict, CI, allers-retours, questions en attente, workers, dernier `NEXT` ; le JSON derrière `--json` ; le statut repasse à `open` quand une réponse du Director relance la Rehearsal (0.9.1). La taille viendra avec le lot 3.
     - [ ] TDD vérifiable : le rapport du Dancer cite, par tâche, la sortie d'échec du test rouge ; le Critic la contrôle.
-    - [ ] `.ballet/run/` ignoré par `init-project` dans le `.gitignore` du projet, au lieu du `.gitignore` que le script écrit dans le dossier.
-    - [ ] Ménage antimurphy : worktree `rehearsal-FEAT-001-2` et état `escalated` de FEAT-001.2 (par `resume` une fois là, sinon à la main).
+    - [x] `.ballet/run/` ignoré par `init-project` dans le `.gitignore` du projet, au lieu du `.gitignore` que le script écrit dans le dossier (0.9.1).
+    - [x] Ménage antimurphy : worktree `rehearsal-FEAT-001-2` supprimé, FEAT-001.2 passé à `done` avec sa trace au journal, `.ballet/run/` ajouté au `.gitignore` (à la main).
   - [ ] Une liste d'issues à dépiler (`/ballet:hybrid-track #4 #5 #6`) : une Rehearsal après l'autre, la suivante part de `main` après la Premiere de la précédente ; une escalade arrête la liste. À tester sur la fin de FEAT-001.
   - [ ] Partir d'une feature prête (Choreographer qui crée l'issue), Dramaturg consulté.
   - [ ] Multi-repos (v0 : un seul repo).

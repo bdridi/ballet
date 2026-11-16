@@ -156,6 +156,12 @@ def merge_pull_request(pr_number, run=None, git=None):
     _delete_remote_branch(pull_request["headRefName"], git or _run_git)
 
 
+def pull_request_status(pr_number, run=None):
+    """Où en est la PR : son état GitHub, son dernier verdict et sa CI, sans rien refuser."""
+    pull_request = _merge_state(_issue_number(pr_number), run or _run_gh)
+    return {"state": pull_request.get("state", ""), "verdict": _verdict_or_none(pull_request), "ci": _ci_summary(pull_request)}
+
+
 def main(argv):
     operation, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
@@ -233,7 +239,7 @@ def _issue_title(number, run):
 
 
 def _merge_state(number, run):
-    output = run(["pr", "view", number, "--json", "headRefName,reviews,commits,statusCheckRollup"])
+    output = run(["pr", "view", number, "--json", "state,headRefName,reviews,commits,statusCheckRollup"])
     return json.loads(output)
 
 
@@ -358,6 +364,21 @@ def _last_verdict(pull_request):
     if not verdicts:
         raise GitHubError("the pull request has no verdict yet")
     return max(verdicts)
+
+
+def _verdict_or_none(pull_request):
+    try:
+        return _last_verdict(pull_request)[1]
+    except GitHubError:
+        return None
+
+
+def _ci_summary(pull_request):
+    try:
+        _require_green_ci(pull_request)
+    except GitHubError as error:
+        return str(error)
+    return "CI green"
 
 
 def _require_green_ci(pull_request):
