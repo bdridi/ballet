@@ -54,7 +54,7 @@ def main(argv):
     try:
         result = _dispatch(operation, arguments)
     except GitHubError as error:
-        print(f"refusé : {error}", file=sys.stderr)
+        print(f"refused: {error}", file=sys.stderr)
         return 1
     if result is not None:
         print(result)
@@ -73,10 +73,10 @@ def _dispatch(operation, arguments):
         "read-pr": (read_pull_request, 1),
     }
     if operation not in operations:
-        raise GitHubError(f"opération inconnue « {operation} » ; connues : {', '.join(operations)}")
+        raise GitHubError(f"unknown operation '{operation}'; known: {', '.join(operations)}")
     function, arity = operations[operation]
     if len(arguments) != arity:
-        raise GitHubError(f"{operation} attend {arity} argument(s)")
+        raise GitHubError(f"{operation} expects {arity} argument(s)")
     return function(*arguments)
 
 
@@ -125,7 +125,7 @@ def _comments(pull_request):
 def _read_draft(path):
     path = Path(path)
     if not path.is_file():
-        raise GitHubError(f"fichier introuvable : {path}")
+        raise GitHubError(f"file not found: {path}")
     return path.read_text(encoding="utf-8")
 
 
@@ -135,12 +135,12 @@ def _title_and_body(text):
         if line.startswith("# "):
             body = "\n".join(lines[index + 1:]).strip() + "\n"
             return line[2:].strip(), body
-    raise GitHubError("le brouillon n'a pas de titre `# …` ; un fichier qui ne porte que la section ## Plan va à `plan`")
+    raise GitHubError("the draft has no `# …` title; a file holding only the ## Plan section goes to `plan`")
 
 
 def _plan_only(text):
     if any(line.startswith("# ") for line in text.splitlines()):
-        raise GitHubError("c'est un brouillon d'issue complet (titre `# …`) ; `plan` n'attend que la section ## Plan, un brouillon va à `publish` ou `slice`")
+        raise GitHubError("this is a full issue draft (`# …` title); `plan` expects only the ## Plan section, a draft goes to `publish` or `slice`")
     return text
 
 
@@ -148,7 +148,7 @@ def _with_plan(body, plan):
     """Remplace le contenu de la section ## Plan, jusqu'au titre ## suivant."""
     lines = body.splitlines()
     if PLAN_HEADING not in lines:
-        raise GitHubError(f"l'issue n'a pas de section « {PLAN_HEADING} »")
+        raise GitHubError(f"the issue has no '{PLAN_HEADING}' section")
     start = lines.index(PLAN_HEADING) + 1
     end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")), len(lines))
     section = ["", _without_plan_heading(plan).strip(), ""]
@@ -170,14 +170,14 @@ def _linked_to_parent(body, parent_number):
 def _issue_number(value):
     number = str(value).lstrip("#")
     if not number.isdigit():
-        raise GitHubError(f"numéro d'issue ou de PR invalide : {value}")
+        raise GitHubError(f"invalid issue or PR number: {value}")
     return number
 
 
 def _run_gh(arguments):
     completed = subprocess.run(["gh", *arguments], capture_output=True, text=True)
     if completed.returncode != 0:
-        raise GitHubError(completed.stderr.strip() or f"gh {arguments[0]} a échoué")
+        raise GitHubError(completed.stderr.strip() or f"gh {arguments[0]} failed")
     return completed.stdout
 
 

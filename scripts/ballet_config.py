@@ -57,7 +57,7 @@ def _read_toml(path):
     try:
         return tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as error:
-        raise ConfigError(f"{path} : TOML invalide ({error})") from error
+        raise ConfigError(f"{path}: invalid TOML ({error})") from error
 
 
 def _read_project_overrides(project_dir):
@@ -82,21 +82,21 @@ def _merged(defaults, overrides):
 def _project_problems(config):
     project = _table(config, "project")
     if not project.get("specs"):
-        return ["[project] specs manquant : lance /ballet:init-project"]
+        return ["[project] specs missing: run /ballet:init-project"]
     problems = []
     if not isinstance(project["specs"], str):
-        problems.append("[project] specs doit être un texte")
+        problems.append("[project] specs must be a string")
     if not isinstance(project.get("adr"), str) or not project.get("adr"):
-        problems.append("[project] adr doit être un chemin de dossier, ex. docs/ADR/")
+        problems.append("[project] adr must be a folder path, e.g. docs/ADR/")
     if not _is_language_code(project.get("specs_language")):
-        problems.append("[project] specs_language doit être un code de langue, ex. en ou fr")
+        problems.append("[project] specs_language must be a language code, e.g. en or fr")
     return problems
 
 
 def _repo_problems(config):
     repos = _table(config, "repos")
     if not repos:
-        return ["aucun repo déclaré : ajoute une section [repos.<nom>] (ou lance /ballet:init-project)"]
+        return ["no repo declared: add a [repos.<name>] section (or run /ballet:init-project)"]
     problems = []
     for name, repo in repos.items():
         problems += _single_repo_problems(name, repo, known=repos)
@@ -105,14 +105,14 @@ def _repo_problems(config):
 
 def _single_repo_problems(name, repo, known):
     if not isinstance(repo, dict):
-        return [f"[repos.{name}] doit être une table"]
+        return [f"[repos.{name}] must be a table"]
     problems = []
     for field in ("path", "proof"):
         if not repo.get(field):
-            problems.append(f"[repos.{name}] {field} manquant")
+            problems.append(f"[repos.{name}] {field} missing")
     for needed in repo.get("needs", []):
         if needed not in known:
-            problems.append(f"[repos.{name}] needs : repo inconnu « {needed} »")
+            problems.append(f"[repos.{name}] needs: unknown repo '{needed}'")
     return problems
 
 
@@ -123,24 +123,24 @@ def _needs_cycle_problems(repos):
         if isinstance(repo, dict)
     }
     cycle = _find_cycle(needs)
-    return [f"cycle dans needs : {' → '.join(cycle)}"] if cycle else []
+    return [f"cycle in needs: {' → '.join(cycle)}"] if cycle else []
 
 
 def _rule_problems(config, plugin_root):
     known = {path.parent.name for path in (plugin_root / "skills").glob("*/SKILL.md")}
     rules = _table(config, "project").get("rules", [])
-    return [f"[project] rules : règle inconnue « {rule} »" for rule in rules if rule not in known]
+    return [f"[project] rules: unknown rule '{rule}'" for rule in rules if rule not in known]
 
 
 def _role_problems(config):
     roles = _table(config, "roles")
-    problems = [f"[roles.{name}] : rôle inconnu" for name in roles if name not in ROLES]
+    problems = [f"[roles.{name}]: unknown role" for name in roles if name not in ROLES]
     for role in ROLES:
         settings = roles.get(role)
         if not isinstance(settings, dict) or not settings.get("cli"):
-            problems.append(f"[roles.{role}] cli manquant")
+            problems.append(f"[roles.{role}] cli missing")
         elif settings["cli"] not in CLIS:
-            problems.append(f"[roles.{role}] cli inconnu « {settings['cli']} »")
+            problems.append(f"[roles.{role}] unknown cli '{settings['cli']}'")
     return problems
 
 
@@ -152,7 +152,7 @@ def _critic_dancer_problems(config):
         return []
     if dancer.get("cli") != critic.get("cli") or _models_differ(dancer, critic):
         return []
-    return ["Critic ≠ Dancer : même CLI sans deux modèles explicites différents"]
+    return ["Critic ≠ Dancer: same CLI without two different explicit models"]
 
 
 def _threshold_problems(config):
@@ -161,10 +161,10 @@ def _threshold_problems(config):
     for key in ("max_round_trips", "max_exchange_rounds", "max_diff_lines"):
         value = escalation.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-            problems.append(f"[escalation] {key} doit être un entier positif")
+            problems.append(f"[escalation] {key} must be a positive integer")
     zones = _table(config, "policy").get("sensitive_zones", [])
     if not isinstance(zones, list) or not all(isinstance(zone, str) for zone in zones):
-        problems.append("[policy] sensitive_zones doit être une liste de globs")
+        problems.append("[policy] sensitive_zones must be a list of globs")
     return problems
 
 
@@ -224,7 +224,7 @@ def _fail(problems):
 
 
 def _succeed():
-    print("✓ configuration valide")
+    print("✓ valid configuration")
     return 0
 
 

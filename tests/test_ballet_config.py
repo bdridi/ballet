@@ -69,7 +69,7 @@ class ConfigTest(unittest.TestCase):
 
     def test_repo_sans_preuve_est_refuse(self):
         self.write_project_config('[project]\nspecs = "specs/"\n[repos.app]\npath = "."\n')
-        self.assertProblem("[repos.app] proof manquant")
+        self.assertProblem("[repos.app] proof missing")
 
     def test_les_specs_sont_en_anglais_par_defaut(self):
         self.write_project_config(VALID_PROJECT)
@@ -81,17 +81,17 @@ class ConfigTest(unittest.TestCase):
 
     def test_un_dossier_adr_vide_est_refuse(self):
         self.write_project_config(VALID_PROJECT.replace('specs = "specs/"', 'specs = "specs/"\nadr = ""'))
-        self.assertProblem("[project] adr doit être un chemin")
+        self.assertProblem("[project] adr must be a folder path")
 
     def test_une_langue_des_specs_qui_n_est_pas_un_code_est_refusee(self):
         self.write_project_config(VALID_PROJECT.replace('specs = "specs/"', 'specs = "specs/"\nspecs_language = "français"'))
-        self.assertProblem("specs_language doit être un code de langue")
+        self.assertProblem("specs_language must be a language code")
 
     # --- needs
 
     def test_needs_vers_un_repo_inconnu_est_refuse(self):
         self.write_project_config(VALID_PROJECT + '\n[repos.web]\npath = "../web"\nproof = "x"\nneeds = ["api"]\n')
-        self.assertProblem("repo inconnu « api »")
+        self.assertProblem("unknown repo 'api'")
 
     def test_cycle_dans_needs_est_refuse(self):
         self.write_project_config(
@@ -99,7 +99,7 @@ class ConfigTest(unittest.TestCase):
             '[repos.a]\npath = "a"\nproof = "x"\nneeds = ["b"]\n'
             '[repos.b]\npath = "b"\nproof = "x"\nneeds = ["a"]\n'
         )
-        self.assertProblem("cycle dans needs")
+        self.assertProblem("cycle in needs")
 
     def test_dependances_en_diamant_ne_sont_pas_un_cycle(self):
         self.write_project_config(
@@ -140,25 +140,25 @@ class ConfigTest(unittest.TestCase):
 
     def test_cli_inconnu_est_refuse(self):
         self.write_project_config(VALID_PROJECT + '\n[roles.dancer]\ncli = "gpt-3"\n')
-        self.assertProblem("cli inconnu « gpt-3 »")
+        self.assertProblem("unknown cli 'gpt-3'")
 
     def test_role_inconnu_est_refuse(self):
         self.write_project_config(VALID_PROJECT + '\n[roles.pianist]\ncli = "claude"\n')
-        self.assertProblem("rôle inconnu")
+        self.assertProblem("unknown role")
 
     # --- règles et seuils
 
     def test_regle_inconnue_est_refusee(self):
         self.write_project_config(VALID_PROJECT.replace('["tdd"]', '["tdd", "magie"]'))
-        self.assertProblem("règle inconnue « magie »")
+        self.assertProblem("unknown rule 'magie'")
 
     def test_seuil_invalide_est_refuse(self):
         self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_round_trips = 0\n")
-        self.assertProblem("max_round_trips doit être un entier positif")
+        self.assertProblem("max_round_trips must be a positive integer")
 
     def test_plafond_d_echanges_invalide_est_refuse(self):
         self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_exchange_rounds = 0\n")
-        self.assertProblem("max_exchange_rounds doit être un entier positif")
+        self.assertProblem("max_exchange_rounds must be a positive integer")
 
 
 if __name__ == "__main__":

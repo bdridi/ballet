@@ -65,7 +65,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 - **Branche de Rehearsal** (`rehearsal/<ID>`) : la branche courte d'une Rehearsal, dans son propre worktree, créée par le Conductor depuis `main` et supprimée après la Premiere. Le Choreographer et le Dancer y commitent, à tour de rôle ; la PR qui l'intègre porte la validation. Avec des slices, chacune a sa branche, partie de `main` après le merge de la précédente ; les ADR et les règles du plan voyagent avec la première.
 - **Glossary** (`glossary.md`) : la langue du projet ; chaque terme avec son nom de code et son texte affiché.
 
-**Langues.** Le plugin (skills, modèles, règles, README) est en anglais ; le PRD, `TASKS.md` et les ADR restent en français tant que la méthode bouge. Le code est toujours en anglais. Les specs sont dans la langue `[project] specs_language` (anglais par défaut) ; le texte affiché par le produit reste dans la langue du produit, cité tel quel. La conversation avec le Director se fait dans sa langue.
+**Langues.** Le plugin (skills, modèles, règles, README, messages des scripts) est en anglais ; le PRD, `TASKS.md` et les ADR restent en français tant que la méthode bouge. Le code est toujours en anglais. Les specs sont dans la langue `[project] specs_language` (anglais par défaut) ; le texte affiché par le produit reste dans la langue du produit, cité tel quel. La conversation avec le Director se fait dans sa langue.
 
 ## 4. La chaîne
 

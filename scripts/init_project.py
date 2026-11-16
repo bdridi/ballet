@@ -133,9 +133,9 @@ def _parse(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("project_dir")
     parser.add_argument("--specs", required=True, help="espace des specs, ex. specs/")
-    parser.add_argument("--proof", required=True, help="commande de preuve, ex. make test")
-    parser.add_argument("--specs-language", default="en", help="langue des specs (défaut : en)")
-    parser.add_argument("--repo", help="nom du repo (défaut : nom du dossier)")
+    parser.add_argument("--proof", required=True, help="proof command, e.g. make test")
+    parser.add_argument("--specs-language", default="en", help="specs language (default: en)")
+    parser.add_argument("--repo", help="repo name (default: folder name)")
     parser.add_argument("--rules", type=_split_rules, default=DEFAULT_RULES)
     return parser.parse_args(argv[1:])
 
@@ -146,9 +146,9 @@ def _split_rules(text):
 
 def _print(report):
     for path in report["created"]:
-        print(f"créé       {path}")
+        print(f"created        {path}")
     for path in report["kept"]:
-        print(f"existe déjà {path} (non modifié)")
+        print(f"already exists {path} (unchanged)")
 
 
 def _check(project_dir):
@@ -157,7 +157,7 @@ def _check(project_dir):
     for problem in problems:
         print(f"✗ {problem}", file=sys.stderr)
     if not problems:
-        print("✓ configuration valide")
+        print("✓ valid configuration")
     return 1 if problems else 0
 
 

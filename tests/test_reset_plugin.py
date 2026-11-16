@@ -33,7 +33,7 @@ class ResetPluginTest(unittest.TestCase):
     def test_claude_est_desinstalle_puis_reinstalle(self):
         self._register_claude_copy(with_files=True)
         report = reset_plugin.reset_plugin(self.clone)
-        self.assertEqual(report[0], "✓ claude : réinstallé depuis le clone")
+        self.assertEqual(report[0], "✓ claude: reinstalled from the clone")
         self.assertEqual(self.commands[0][:3], ("claude", "plugin", "uninstall"))
         self.assertEqual(self.commands[-1][:3], ("claude", "plugin", "install"))
 
@@ -65,7 +65,7 @@ class ResetPluginTest(unittest.TestCase):
     def test_un_lien_vibe_deja_bon_n_est_pas_refait(self):
         self._only("vibe")
         reset_plugin.reset_plugin(self.clone)
-        self.assertIn("déjà", reset_plugin.reset_plugin(self.clone)[0])
+        self.assertIn("already", reset_plugin.reset_plugin(self.clone)[0])
 
     def test_un_dossier_vibe_plugin_non_vide_n_est_jamais_ecrase(self):
         self._only("vibe")
@@ -84,7 +84,7 @@ class ResetPluginTest(unittest.TestCase):
     def test_grok_absent_est_installe_depuis_le_clone(self):
         self._only("grok")
         self._patch("_run", lambda *command: self._record(*command) and command[2] != "update")
-        self.assertEqual(reset_plugin.reset_plugin(self.clone), ["✓ grok : installé depuis le clone"])
+        self.assertEqual(reset_plugin.reset_plugin(self.clone), ["✓ grok: installed from the clone"])
 
     # --- aides ---
 

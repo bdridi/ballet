@@ -60,9 +60,9 @@ def main(argv):
     for line in report:
         print(line)
     if not report:
-        print("✗ aucun CLI trouvé (claude, vibe, grok)", file=sys.stderr)
+        print("✗ no CLI found (claude, vibe, grok)", file=sys.stderr)
         return 1
-    print("Redémarre les sessions ouvertes pour qu'elles chargent le plugin à jour.")
+    print("Restart the open sessions so they load the updated plugin.")
     return 1 if any(line.startswith("✗") for line in report) else 0
 
 
@@ -74,30 +74,30 @@ def _reset_claude(source):
     if not _run("claude", "plugin", "marketplace", "update", MARKETPLACE):
         _run("claude", "plugin", "marketplace", "add", str(source))
     if not _run("claude", "plugin", "install", f"{PLUGIN}@{MARKETPLACE}"):
-        return "✗ claude : l'installation a échoué (voir `claude plugin list`)"
+        return "✗ claude: install failed (see `claude plugin list`)"
     missing = _missing_in_claude_copy(source)
     if missing:
-        return f"✗ claude : la copie installée n'a pas {', '.join(missing)}"
-    return "✓ claude : réinstallé depuis le clone"
+        return f"✗ claude: the installed copy lacks {', '.join(missing)}"
+    return "✓ claude: reinstalled from the clone"
 
 
 def _write_reset_skill(source):
     skill = CLAUDE_SKILLS / "reset-ballet" / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text(RESET_SKILL.format(script=source / "scripts" / "reset_plugin.py"), encoding="utf-8")
-    return f"✓ skill user reset-ballet : {skill}"
+    return f"✓ user skill reset-ballet: {skill}"
 
 
 def _link_vibe_plugin(source):
-    return _link(VIBE_HOME / "plugins" / PLUGIN, source, "vibe : plugin")
+    return _link(VIBE_HOME / "plugins" / PLUGIN, source, "vibe: plugin")
 
 
 def _reset_grok(source):
     if _run("grok", "plugin", "update", PLUGIN):
-        return "✓ grok : mis à jour"
+        return "✓ grok: updated"
     if _run("grok", "plugin", "install", str(source), "--trust"):
-        return "✓ grok : installé depuis le clone"
-    return "✗ grok : ni mise à jour ni installation (voir `grok plugin list`)"
+        return "✓ grok: installed from the clone"
+    return "✗ grok: neither updated nor installed (see `grok plugin list`)"
 
 
 # --- outils -----------------------------------------------------------------
@@ -106,16 +106,16 @@ def _reset_grok(source):
 def _link(link, target, label):
     """Fait de `link` un lien vers `target`, sans jamais écraser un dossier qui a du contenu."""
     if link.is_symlink() and link.resolve() == target.resolve():
-        return f"✓ {label} : le lien pointe déjà vers {target}"
+        return f"✓ {label}: the link already points to {target}"
     if link.is_dir() and not link.is_symlink():
         if any(link.iterdir()):
-            return f"✗ {label} : {link} est un vrai dossier non vide ; à fusionner à la main"
+            return f"✗ {label}: {link} is a real, non-empty folder; merge it by hand"
         link.rmdir()
     link.unlink(missing_ok=True)
     link.parent.mkdir(parents=True, exist_ok=True)
     target.mkdir(parents=True, exist_ok=True)
     link.symlink_to(target)
-    return f"✓ {label} : lien {link} → {target}"
+    return f"✓ {label}: link {link} → {target}"
 
 
 def _missing_in_claude_copy(source):
