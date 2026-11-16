@@ -25,7 +25,7 @@ en cours à l'échéance, refuse le merge et escalade. Ces appels peuvent donc d
 
 Après chaque passage d'un rôle, la politique (`ballet_policy.py`) vérifie ce qu'il a fait du repo, et le journalise
 (`policy`). Une violation n'est jamais poussée : le rôle la corrige une fois, la deuxième escalade ; un Critic
-ou un Choreographer qui répond au Dancer en violation escalade tout de suite.
+ou un rôle qui répond (Choreographer, Dramaturg) en violation escalade tout de suite.
 
 Un worker qui finit son tour sans `worker_done` est relancé une fois pour envoyer son rapport ; s'il recommence,
 ou s'il est tombé en erreur, la Rehearsal escalade.
@@ -63,6 +63,7 @@ STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 CI_POLL_SECONDS = 15
 MAX_NUDGES = 1
 MAX_POLICY_RESENDS = 1
+ANSWERING_ROLES = ("choreographer", "dramaturg")   # vérifiés à chaque réponse, sur la branche de Rehearsal
 REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
 
 
@@ -94,7 +95,7 @@ class Rehearsal:
     nudges: dict = field(default_factory=dict)       # rôle → relances sans `worker_done`, remis à zéro à son prochain message
     checkpoint: str = ""                             # `HEAD` du worktree quand le dernier rôle a reçu la main
     refs: list = field(default_factory=list)         # branches et tags au dernier passage en règle
-    owned: list = field(default_factory=list)        # les commits du Choreographer sur la branche
+    owned: list = field(default_factory=list)        # les commits du Choreographer et du Dramaturg sur la branche
     violations: dict = field(default_factory=dict)   # rôle → passages refusés par la politique
 
     @property
@@ -143,12 +144,12 @@ def begin(issue, home, tools):
     step = Step("wait")
     rehearsal.worktree = _open_worktree(rehearsal, tools)
     step.done.append(f"worktree {rehearsal.worktree} on {rehearsal.branch}, from origin/main")
+    _log(home, rehearsal, "begin", {})
     first_role = "dancer" if _has_tasks(body) else "choreographer"
     git = tools.git(rehearsal.worktree)
     rehearsal.checkpoint, rehearsal.refs = ballet_policy.head(git), ballet_policy.refs(git)
     _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal), config, home, tools)
     step.done.append(f"{first_role} started on issue #{rehearsal.issue}")
-    _log(home, rehearsal, "begin", {"first_role": first_role})
     return _settle(rehearsal, step, home, tools)
 
 
@@ -214,7 +215,7 @@ def status(rehearsal_id, home, tools):
 
 
 def _handle(rehearsal, header, text, question_id, config, home, tools):
-    _log(home, rehearsal, "message", header)
+    _log(home, rehearsal, "message", {**header, "text": text})
     rehearsal.nudges.pop(header["from"], None)
     return _route(rehearsal, header, text, question_id, config, home, tools)
 
@@ -247,7 +248,7 @@ def _worker_stopped(rehearsal, message, home, tools):
     rehearsal.nudges[role] = rehearsal.nudges.get(role, 0) + 1
     tools.orca(["orchestration", "send", "--to", f"dispatch:{rehearsal.dispatches[role]}",
                 "--subject", f"{rehearsal.id} · {role}: send your worker_done", "--body", REPORT_REMINDER])
-    _log(home, rehearsal, "nudge", {"role": role, "dispatch": rehearsal.dispatches[role]})
+    _log_handoff(rehearsal, role, "nudge", REPORT_REMINDER, home)
     return Step("wait", done=[f"the {role} ended its turn without worker_done: asked to send its report"])
 
 
@@ -270,15 +271,16 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
 def _relay_answer(rehearsal, header, text, config, home, tools):
     """Publie la réponse sur l'issue et la rend au demandeur, qui reprend avec son contexte."""
     question = _pending_question(rehearsal, asker=header["to"], answerer=header["from"])
-    if header["from"] == "choreographer":
-        found = _policy(rehearsal, "choreographer", config, home, tools, answering=True)
+    if header["from"] in ANSWERING_ROLES:
+        found = _policy(rehearsal, header["from"], config, home, tools, answering=True)
         if found:
-            return Step("escalate", f"policy: the choreographer broke the rules while answering: {'; '.join(found)}")
-        _own_choreographer_commits(rehearsal, tools)
+            return Step("escalate", f"policy: the {header['from']} broke the rules while answering: {'; '.join(found)}")
+        _own_commits(rehearsal, tools)
     step = Step("wait")
     _comment_issue(rehearsal, text, home, tools)
     step.done.append(f"answer published on issue #{rehearsal.issue}")
     tools.orca(["orchestration", "reply", "--id", question["id"], "--body", text])
+    _log_handoff(rehearsal, header["to"], "reply", text, home)
     rehearsal.pending.remove(question)
     step.done.append(f"answer handed back to the {header['to']}")
     return step
@@ -288,7 +290,7 @@ def _after_plan(rehearsal, config, home, tools):
     found = _policy(rehearsal, "choreographer", config, home, tools)
     if found:
         return _refused_by_policy(rehearsal, "choreographer", found, config, home, tools)
-    _own_choreographer_commits(rehearsal, tools)
+    _own_commits(rehearsal, tools)
     _, body = _issue(rehearsal.issue, tools)
     if not _has_tasks(body):
         raise RehearsalError(f"the Choreographer reported but issue #{rehearsal.issue} has no tasks (slices?)")
@@ -418,7 +420,7 @@ def _policy(rehearsal, role, config, home, tools, answering=False):
     """Les violations du passage qui s'achève, journalisées à chaque fois ; en règle, ses branches font foi."""
     git = tools.git(rehearsal.worktree)
     passage = ballet_policy.Passage(role, rehearsal.branch, rehearsal.checkpoint, rehearsal.refs, rehearsal.owned, answering)
-    found = ballet_policy.violations(passage, ballet_policy.zones_of(config), git)
+    found = ballet_policy.violations(passage, ballet_policy.policy_of(config), git)
     _log(home, rehearsal, "policy", {"role": role, "violations": found})
     if not found:
         rehearsal.refs = ballet_policy.refs(git)
@@ -435,8 +437,8 @@ def _refused_by_policy(rehearsal, role, found, config, home, tools):
     return Step("wait", done=[f"policy refused the {role}'s work, sent back once: {listed}"])
 
 
-def _own_choreographer_commits(rehearsal, tools):
-    """Les commits du passage du Choreographer lui appartiennent : ils ne comptent pas contre le Dancer."""
+def _own_commits(rehearsal, tools):
+    """Les commits d'un passage vérifié du Choreographer ou du Dramaturg ne comptent pas contre le Dancer."""
     git = tools.git(rehearsal.worktree)
     rehearsal.owned += ballet_policy.commits_since(rehearsal.checkpoint, git)
     rehearsal.checkpoint = ballet_policy.head(git)
@@ -537,6 +539,7 @@ def _ask_role(rehearsal, role, assignment, config, home, tools):
     if dispatch:
         tools.orca(["orchestration", "send", "--to", f"dispatch:{dispatch}",
                     "--subject", f"{rehearsal.id} · {role}", "--body", assignment])
+        _log_handoff(rehearsal, role, "send", assignment, home)
     else:
         _start_worker(rehearsal, role, assignment, config, home, tools)
 
@@ -552,6 +555,14 @@ def _start_worker(rehearsal, role, assignment, config, home, tools):
     if route.get("model"):
         arguments += ["--model", route["model"]]
     rehearsal.dispatches[role] = _dispatch_id(tools.orca(arguments))
+    _log_handoff(rehearsal, role, "start", assignment, home, {"agent": agent, "model": route.get("model", "")})
+
+
+def _log_handoff(rehearsal, role, how, text, home, extra=None):
+    """Ce que le Conductor remet à un worker : `start` (lancé), `send` (relancé dans sa session), `reply` (la réponse
+    à sa question) ou `nudge` (rappel de son `worker_done`), avec le texte entier."""
+    detail = {"role": role, "dispatch": rehearsal.dispatches.get(role, ""), "how": how, **(extra or {}), "text": text}
+    _log(home, rehearsal, "handoff", detail)
 
 
 def _role_spec(rehearsal, role, assignment):

@@ -236,6 +236,49 @@ class BalletRehearsalTest(unittest.TestCase):
         with self.assertRaisesRegex(ballet_rehearsal.RehearsalError, "init-project"):
             self.begin()
 
+    # --- le journal de ce que le Conductor remet aux workers ---
+
+    def handoffs(self):
+        return [(entry["role"], entry["how"], entry["dispatch"]) for entry in self.journal("handoff")]
+
+    def test_begin_ouvre_le_journal_puis_journalise_le_lancement_du_premier_role(self):
+        self.begin()
+        events = [json.loads(line)["event"] for line in (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()]
+        self.assertEqual(events[:2], ["begin", "handoff"])
+        self.assertEqual(self.journal("begin"), [{}])
+        start = self.journal("handoff")[0]
+        self.assertEqual((start["role"], start["how"], start["dispatch"], start["agent"], start["model"]),
+                         ("dancer", "start", "ctx_1", "claude", "sonnet"))
+        self.assertIn("Execute your repo's section of the plan of issue #3", start["text"])
+
+    def test_un_role_deja_lance_relance_dans_sa_session_est_journalise(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.assertEqual(self.handoffs(), [("dancer", "start", "ctx_1"), ("critic", "start", "ctx_2"), ("dancer", "send", "ctx_1")])
+        self.assertIn("read-pr 8", self.journal("handoff")[-1]["text"])
+
+    def test_la_question_portee_et_la_reponse_rendue_sont_journalisees(self):
+        self.begin()
+        self.receive(message("dancer", "choreographer", "question", "1. Which name?"), question_id="msg_42")
+        self.receive(message("choreographer", "dancer", "answer", "1. `Stock`."))
+        self.assertEqual(self.handoffs(), [("dancer", "start", "ctx_1"), ("choreographer", "start", "ctx_2"), ("dancer", "reply", "ctx_1")])
+        self.assertIn("1. Which name?", self.journal("handoff")[1]["text"])
+        self.assertIn("1. `Stock`.", self.journal("handoff")[2]["text"])
+
+    def test_la_relance_sans_worker_done_est_un_passage_journalise(self):
+        self.begin()
+        self.stopped("msg_stop")
+        nudge = self.journal("handoff")[-1]
+        self.assertEqual((nudge["role"], nudge["how"], nudge["text"]), ("dancer", "nudge", ballet_rehearsal.REPORT_REMINDER))
+        self.assertEqual(self.journal("nudge"), [])
+
+    def test_chaque_message_recu_est_journalise_avec_son_texte_entier(self):
+        self.begin()
+        text = message("dancer", "conductor", "report", "- Tasks: all done.")
+        self.receive(text)
+        logged = self.journal("message")[0]
+        self.assertEqual((logged["from"], logged["type"], logged["text"]), ("dancer", "report", text))
+
     # --- le Dancer rend son rapport ---
 
     def test_au_rapport_du_dancer_pousse_ouvre_la_pr_publie_le_rapport_et_lance_le_critic(self):
@@ -305,13 +348,27 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(step.next, "escalate")
         self.assertFalse(self.world.ran("orca", "orchestration", "reply"))
 
+    def test_le_dramaturg_qui_repond_est_verifie_et_ses_specs_lui_appartiennent(self):
+        self.begin()
+        self.receive(message("dancer", "dramaturg", "question", "1. Empty stock?"), question_id="msg_1")
+        self.world.changed, self.world.new_commits = ["specs/features/FEAT-001.md"], ["5bec5ec"]
+        self.receive(message("dramaturg", "dancer", "answer", "1. Rectified in the feature."))
+        self.assertEqual(self.state()["owned"], ["5bec5ec"])
+        self.assertEqual(self.policy_events()[-1], {"role": "dramaturg", "violations": []})
+
+    def test_un_dramaturg_qui_repond_dans_le_code_escalade(self):
+        self.begin()
+        self.receive(message("dancer", "dramaturg", "question", "1. A?"), question_id="msg_1")
+        self.world.changed = ["src/a.rs"]
+        self.assertEqual(self.receive(message("dramaturg", "dancer", "answer", "1. Done.")).next, "escalate")
+
     def test_le_plan_du_choreographer_est_verifie_avant_de_lancer_le_dancer(self):
         self.world.issue_body = UNPLANNED_ISSUE
         self.begin()
         self.world.changed = ["src/a.rs"]
         step = self.receive(message("choreographer", "conductor", "report", "- Plan written."))
         self.assertEqual((step.next, self.world.started_roles()), ("wait", ["Choreographer · FEAT-001.2"]))
-        self.assertIn("src/a.rs: the Choreographer writes only ADRs and AGENTS.md", step.done[0])
+        self.assertIn("src/a.rs: outside the choreographer's perimeter ([policy.roles.choreographer] writes, extra_writes)", step.done[0])
 
     # --- questions et réponses ---
 

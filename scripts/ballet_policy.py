@@ -4,19 +4,24 @@
 
 Le Conductor (`ballet_rehearsal.py`) l'appelle après chaque rôle et applique le résultat tel quel.
 
+Le périmètre d'un rôle vient de `[policy.roles.<rôle>]` : un chemin est permis s'il est dans `writes` ou
+`extra_writes`, et hors de `except` et `extra_except` (`except` l'emporte). Les défauts du plugin sont la méthode :
+- Dramaturg : l'espace specs.
+- Choreographer : le dossier des ADR et `AGENTS.md` ; il peut créer des branches `spike/*`, jamais mergées.
+- Dancer : tout son repo, sauf l'espace specs, les ADR, les zones interdites et les zones sensibles.
+- Critic : rien, `HEAD` ne bouge pas.
+
 Pour tous : rester sur la branche de Rehearsal, ne pas réécrire l'historique (le `HEAD` d'avant reste un ancêtre),
-ne créer ni supprimer de branche ni de tag (sauf `spike/*` pour le Choreographer), laisser l'arbre de travail propre
-(sauf le Choreographer qui répond au Dancer : l'arbre du Dancer est alors en cours).
-- Critic : `HEAD` n'a pas bougé.
-- Choreographer : ses commits ne touchent que le dossier des ADR et `AGENTS.md`.
-- Dancer : la branche, face à `main`, ne change ni l'espace specs, ni les ADR, ni `AGENTS.md` (sauf par les commits
-  du Choreographer), ni une zone interdite ; aucun test présent sur `main` n'a disparu ni changé de nom.
+ne créer ni supprimer de branche ni de tag, laisser l'arbre de travail propre (sauf un rôle qui répond au Dancer :
+l'arbre du Dancer est alors en cours). Le Dancer est jugé sur le diff net de sa branche face à `main`, hors des
+fichiers que seuls les commits des autres rôles ont touchés ; aucun test présent sur `main` ne doit y disparaître
+ni changer de nom.
 
+Les données viennent de la config (`[policy]` du plugin, surchargé par le projet) : `forbidden_zones`,
+`sensitive_zones`, `roles` (le périmètre de la méthode, remplaçable, et l'extension du projet) et, par langage, `test_names` (extensions et motif du nom).
 Une zone est un glob `fnmatch` : `*` traverse aussi les `/`. Un glob sans `/` vaut à toute profondeur (`CLAUDE.md`),
-un glob avec `/` part de la racine du repo (`.github/*`).
-
-Un test est reconnu par son nom, selon le langage : `it("…")` ou `test("…")` (JS, TS), `#[test] fn …` (Rust),
-`def test_…` (Python), `Scenario: …` (Gherkin). Le corps d'un test existant modifié reste à la charge du Critic.
+un glob avec `/` part de la racine du repo (`.github/*`). `@specs`, `@adr`, `@forbidden` et `@sensitive` nomment
+l'espace specs, le dossier des ADR, `forbidden_zones` et `sensitive_zones`. Le corps d'un test modifié reste au Critic.
 """
 
 import re
@@ -30,29 +35,30 @@ from pathlib import PurePosixPath
 import ballet_config
 
 BASE = "origin/main"
-ROLES = ("dancer", "choreographer", "critic")
+ROLES = ("dramaturg", "choreographer", "dancer", "critic")
+PROFILE = ".ballet/config.toml"
 
-# Le harnais, la CI et les hooks git : interdits à tous les rôles, quel que soit le projet.
-HARNESS_ZONES = (
-    "AGENTS.md", "CLAUDE.md", ".ballet/*", ".claude/*", ".agents/*", ".vibe/*", ".codex/*", ".grok/*", ".mcp.json",
-    ".github/*", ".gitlab-ci.yml", ".circleci/*", ".husky/*", ".githooks/*", "lefthook.yml", ".pre-commit-config.yaml",
-)
-CHOREOGRAPHER_FILES = ("AGENTS.md",)
 
-TEST_NAMES = {
-    (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"): re.compile(r"\b(?:it|test)(?:\.\w+)?\(\s*(['\"`])(.+?)\1"),
-    (".rs",): re.compile(r"#\[(?:[\w:]+::)?test\b[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)"),
-    (".py",): re.compile(r"^\s*(?:async\s+)?def\s+(test\w*)", re.MULTILINE),
-    (".feature",): re.compile(r"^\s*(?:Scenario|Scenario Outline|Scenario Template|Example):\s*(.+?)\s*$", re.MULTILINE),
+@dataclass
+class Perimeter:
+    writes: list = field(default_factory=list)
+    excepted: list = field(default_factory=list)
+    branches: list = field(default_factory=list)     # les branches qu'il peut créer
+
+WHY = {
+    "@specs": "the specs space",
+    "@adr": "the ADR folder",
+    "@forbidden": "a forbidden zone of [policy] forbidden_zones",
+    "@sensitive": "a sensitive zone of [policy] sensitive_zones",
 }
 
 
 @dataclass
-class Zones:
-    """Les chemins protégés d'un projet : espace specs, ADR et zones sensibles du profil, en plus du harnais."""
-    specs: str
-    adr: str
-    sensitive: list = field(default_factory=list)
+class Policy:
+    """Les données de la politique : les périmètres (méthode et projet réunis), les lieux nommés, les tests."""
+    perimeters: dict                                       # rôle → Perimeter
+    places: dict                                           # `@specs`, `@adr`… → leurs globs
+    test_names: list = field(default_factory=list)         # (extensions, motif compilé) par langage
 
 
 @dataclass
@@ -62,28 +68,37 @@ class Passage:
     branch: str
     checkpoint: str = ""                          # `HEAD` quand le rôle a reçu la main
     refs: list = field(default_factory=list)      # branches et tags à ce moment
-    owned: list = field(default_factory=list)     # les commits du Choreographer sur la branche
-    answering: bool = False                       # le Choreographer répond pendant que le Dancer attend
+    owned: list = field(default_factory=list)     # les commits des autres rôles, vérifiés à leur passage
+    answering: bool = False                       # le rôle répond pendant que le Dancer attend
 
 
-def zones_of(config):
-    project = config.get("project", {})
-    return Zones(specs=project.get("specs", ""), adr=project.get("adr", ""),
-                 sensitive=list(config.get("policy", {}).get("sensitive_zones", [])))
+def policy_of(config):
+    project, policy = config.get("project", {}), config.get("policy", {})
+    places = {"@specs": _folder_globs(project.get("specs", "")), "@adr": _folder_globs(project.get("adr", "")),
+              "@forbidden": list(policy.get("forbidden_zones", [])), "@sensitive": list(policy.get("sensitive_zones", []))}
+    return Policy(perimeters={role: _perimeter(policy.get("roles", {}).get(role, {})) for role in ROLES},
+                  places=places,
+                  test_names=[(tuple(language["extensions"]), re.compile(language["pattern"]))
+                              for language in policy.get("test_names", {}).values()])
 
 
-def violations(passage, zones, git):
+def violations(passage, policy, git):
     """La liste des violations du passage, vide s'il est en règle."""
-    found = _stayed_on_branch(passage, git) + _kept_history(passage, git) + _kept_refs(passage, git)
+    found = _stayed_on_branch(passage, git) + _kept_history(passage, git) + _kept_refs(passage, policy, git)
     if not passage.answering:
         found += _clean_tree(git)
     if passage.role == "critic":
         found += _head_unmoved(passage, git)
-    if passage.role == "choreographer":
-        found += _choreographer_files(passage, zones, git)
-    if passage.role == "dancer":
-        found += _dancer_files(passage, zones, git) + _kept_tests(git)
+    elif passage.role == "dancer":
+        found += _branch_within_perimeter(passage, policy, git) + _kept_tests(policy, git)
+    else:
+        found += _passage_within_perimeter(passage, policy, git)
     return found
+
+
+def roles_writing_the_profile(policy):
+    """Les rôles dont le périmètre couvre le profil : la config qui les permet est refusée."""
+    return [role for role in ROLES if role != "critic" and not _refusal(PROFILE, role, policy)]
 
 
 def head(git):
@@ -105,7 +120,7 @@ def main(argv):
         return 2
     git = _git(argv[2])
     passage = Passage("dancer", git(["rev-parse", "--abbrev-ref", "HEAD"]).strip())
-    found = violations(passage, zones_of(ballet_config.effective_config(argv[1])), git)
+    found = violations(passage, policy_of(ballet_config.effective_config(argv[1])), git)
     print("\n".join(f"- {violation}" for violation in found) or "no violation")
     return 1 if found else 0
 
@@ -126,17 +141,14 @@ def _kept_history(passage, git):
     return [f"history rewritten: {lost} commit(s) before {passage.checkpoint[:7]} no longer on the branch"] if lost else []
 
 
-def _kept_refs(passage, git):
+def _kept_refs(passage, policy, git):
     if not passage.refs:
         return []
     before, after = set(passage.refs), set(refs(git))
-    created = {ref for ref in after - before if not _allowed_ref(passage.role, ref)}
+    branches = policy.perimeters[passage.role].branches
+    created = {ref for ref in after - before if not any(fnmatch(ref, f"refs/heads/{glob}") for glob in branches)}
     return ([f"branch or tag created: {ref}" for ref in sorted(created)]
             + [f"branch or tag deleted: {ref}" for ref in sorted(before - after)])
-
-
-def _allowed_ref(role, ref):
-    return role == "choreographer" and ref.startswith("refs/heads/spike/")
 
 
 def _clean_tree(git):
@@ -151,30 +163,31 @@ def _head_unmoved(passage, git):
     return [] if head(git) == passage.checkpoint else [f"HEAD moved from {passage.checkpoint[:7]}: the Critic is read-only"]
 
 
-def _choreographer_files(passage, zones, git):
+def _passage_within_perimeter(passage, policy, git):
+    """Le Dramaturg et le Choreographer : chaque fichier changé par leurs commits du passage."""
     changed = git(["diff", "--name-only", f"{passage.checkpoint}..HEAD"]).split() if passage.checkpoint else []
-    return [f"{path}: the Choreographer writes only ADRs and AGENTS.md"
-            for path in changed if not _is_choreographer_file(path, zones)]
+    return [f"{path}: {refusal}" for path in changed if (refusal := _refusal(path, passage.role, policy))]
 
 
-def _dancer_files(passage, zones, git):
-    """Ce que la branche change face à `main`, au net : un changement annulé par un commit suivant n'en est plus un."""
+def _branch_within_perimeter(passage, policy, git):
+    """Le Dancer : ce que la branche change face à `main`, au net (un changement annulé n'en est plus un),
+    hors des fichiers que seuls les commits des autres rôles ont touchés."""
     base = _base(git)
     found = []
     for path in git(["diff", "--name-only", "--no-renames", f"{base}..HEAD"]).split():
-        zone = _forbidden_zone(path, zones)
-        if zone and not (_is_choreographer_file(path, zones) and _only_choreographer_commits(path, base, passage.owned, git)):
-            found.append(f"{path}: {zone}")
+        refusal = _refusal(path, "dancer", policy)
+        if refusal and not _only_owned_commits(path, base, passage.owned, git):
+            found.append(f"{path}: {refusal}")
     return found
 
 
-def _kept_tests(git):
+def _kept_tests(policy, git):
     """Chaque test présent sur `main` existe encore sous le même nom."""
     base = _base(git)
     found = []
     for status, path in _modified_or_deleted(base, git):
-        before = _test_names(path, git(["show", f"{base}:{path}"]))
-        after = _test_names(path, git(["show", f"HEAD:{path}"]) if status == "M" else "")
+        before = _test_names(path, policy, git(["show", f"{base}:{path}"]))
+        after = _test_names(path, policy, git(["show", f"HEAD:{path}"]) if status == "M" else "")
         found += [f"{path}: existing test removed or renamed: {name}" for name in sorted((before - after).elements())]
     return found
 
@@ -182,24 +195,29 @@ def _kept_tests(git):
 # --- détails ------------------------------------------------------------------
 
 
-def _forbidden_zone(path, zones):
-    """La zone qui interdit ce chemin au Dancer, en clair ; `None` s'il est libre."""
-    if _in_folder(path, zones.specs):
-        return "the specs space"
-    if _in_folder(path, zones.adr):
-        return "the ADR folder"
-    if any(_matches(path, glob) for glob in HARNESS_ZONES):
-        return "the harness, the CI or the git hooks"
-    if any(_matches(path, glob) for glob in zones.sensitive):
-        return "a sensitive zone of [policy] sensitive_zones"
-    return None
+def _perimeter(settings):
+    """La méthode (`writes`, `except`) et ce que le projet y ajoute (`extra_writes`, `extra_except`)."""
+    return Perimeter(writes=settings.get("writes", []) + settings.get("extra_writes", []),
+                     excepted=settings.get("except", []) + settings.get("extra_except", []),
+                     branches=settings.get("branches", []))
 
 
-def _is_choreographer_file(path, zones):
-    return _in_folder(path, zones.adr) or path in CHOREOGRAPHER_FILES
+def _refusal(path, role, policy):
+    """Pourquoi ce chemin est refusé au rôle, en clair ; `None` s'il est permis."""
+    perimeter = policy.perimeters[role]
+    for entry in perimeter.excepted:
+        if _covers(path, entry, policy):
+            return WHY.get(entry, f"excepted by [policy.roles.{role}]")
+    if any(_covers(path, entry, policy) for entry in perimeter.writes):
+        return None
+    return f"outside the {role}'s perimeter ([policy.roles.{role}] writes, extra_writes)"
 
 
-def _only_choreographer_commits(path, base, owned, git):
+def _covers(path, entry, policy):
+    return any(_matches(path, glob) for glob in policy.places.get(entry, [entry]))
+
+
+def _only_owned_commits(path, base, owned, git):
     authors = git(["log", "--format=%H", f"{base}..HEAD", "--", path]).split()
     return bool(authors) and set(authors) <= set(owned)
 
@@ -210,9 +228,9 @@ def _matches(path, glob):
     return fnmatch(PurePosixPath(path).name, glob)
 
 
-def _in_folder(path, folder):
+def _folder_globs(folder):
     folder = folder.strip("/")
-    return bool(folder) and (path == folder or path.startswith(folder + "/"))
+    return [folder, f"{folder}/*"] if folder else []
 
 
 def _base(git):
@@ -226,8 +244,8 @@ def _modified_or_deleted(base, git):
             yield status, path
 
 
-def _test_names(path, text):
-    for extensions, pattern in TEST_NAMES.items():
+def _test_names(path, policy, text):
+    for extensions, pattern in policy.test_names:
         if path.endswith(extensions):
             return Counter(match.groups()[-1] for match in pattern.finditer(text))
     return Counter()

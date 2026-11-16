@@ -143,7 +143,7 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
   - **Choreographer** : sur la branche de Rehearsal, tous les fichiers modifiés sont dans le dossier des ADR ou sont `AGENTS.md` ; seules des branches `spike/*` ont été créées ; il est revenu sur la branche de Rehearsal ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dramaturg** : tous les fichiers modifiés sont dans l'espace specs, aucun dans une zone interdite ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dancer** : il est resté sur la branche de Rehearsal ; aucun fichier modifié par ses commits n'est dans l'espace specs, dans le dossier des ADR ni dans une zone interdite ; l'arbre de travail est propre ; le nouveau `HEAD` descend de l'ancien (pas de réécriture d'historique) ; aucune branche ni aucun tag créé ou supprimé ; aucun test présent sur `main` n'a disparu ni changé de nom (reconnu par son nom : `it`/`test` en JS et TS, `#[test]` en Rust, `def test_` en Python, `Scenario:` en Gherkin). Le corps d'un test existant modifié reste au Critic : au premier run, chaque Rehearsal a retouché les imports d'un fichier de test, une règle à la ligne aurait tout bloqué.
-  - **v0 (0.15.0)** : `scripts/ballet_policy.py`, appelé par le Conductor au rapport du Dancer (avant le push), au verdict du Critic (avant sa publication), au plan et à chaque réponse du Choreographer. Le contrôle de l'état GitHub n'y est pas encore.
+  - **v0 (0.15.0)** : `scripts/ballet_policy.py`, appelé par le Conductor au rapport du Dancer (avant le push), au verdict du Critic (avant sa publication), au plan et à chaque réponse du Choreographer. Ses données vivent dans `[policy]` (défauts du plugin, surchargés par le projet). Le périmètre de chaque rôle, `[policy.roles.<rôle>]` : un chemin est permis s'il est dans `writes` ou `extra_writes` et hors de `except` et `extra_except` (`except` l'emporte), plus `branches`, les branches qu'il peut créer. `writes` et `except` portent la méthode, qu'un projet peut remplacer ; `extra_writes` et `extra_except`, vides par défaut, l'étendent sans la recopier (donner `docs/*` au Choreographer, interdire `migrations/*` au Dancer). `@specs`, `@adr`, `@forbidden` et `@sensitive` y nomment l'espace specs, le dossier des ADR, `forbidden_zones` et `sensitive_zones`. Les tests se reconnaissent par `test_names` (par langage : extensions et motif du nom ; un projet ajoute le sien par `[policy.test_names.<langage>]`). Une config qui laisse un rôle écrire `.ballet/config.toml` est refusée. Le Dramaturg consulté pendant une Rehearsal commite sur la branche de Rehearsal ; ses commits, comme ceux du Choreographer, sont vérifiés à sa réponse et ne comptent pas contre le Dancer. Le contrôle de l'état GitHub n'y est pas encore.
   - **tous les rôles** : l'état GitHub de l'issue et de la PR (corps, libellés, commentaires, reviews, état) est identique avant et après leur passage ; seule exception, le Choreographer, qui crée l'issue de sa feature et ses slices (liées à la parente) et peut réécrire leur section `## Plan`.
 - Les zones interdites sont des motifs de chemins (globs), pour que la vérification reste mécanique.
 - **Un commit appartient au rôle pendant le passage duquel il est apparu** : le Choreographer et le Dancer partagent la branche de Rehearsal, mais jamais en même temps, et l'état avant et après chaque passage suffit à les départager.
@@ -394,7 +394,14 @@ proof = "npm test"
 needs = ["gateway"]
 
 [policy]
-sensitive_zones = ["**/contract/**"]   # globs, valables dans tous les repos
+sensitive_zones = ["*/contract/*"]     # globs, valables dans tous les repos (`*` traverse les `/`)
+
+[policy.roles.choreographer]
+extra_writes = ["docs/*"]              # s'ajoute à la méthode (ADR, AGENTS.md), sans la recopier
+
+[policy.test_names.go]                 # un langage de plus : la politique y reconnaît les tests par leur nom
+extensions = [".go"]
+pattern = 'func (Test\w+)'
 
 [escalation]
 max_diff_lines = 400

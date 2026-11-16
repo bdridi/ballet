@@ -1,16 +1,19 @@
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import ballet_config  # noqa: E402
 import ballet_policy  # noqa: E402
-from ballet_policy import Passage, Zones  # noqa: E402
+from ballet_policy import Passage  # noqa: E402
 
 BRANCH = "rehearsal/FEAT-001.2"
-ZONES = Zones(specs="specs/", adr="docs/ADR/", sensitive=["*/contract/*"])
+PROFILE = '[project]\nspecs = "specs/"\n\n[policy]\nsensitive_zones = ["*/contract/*"]\n'
 SPEC = 'import { it } from "vitest";\n\nit("lists the stock", () => {});\nit("sorts by deadline", () => {});\n'
 
 
@@ -19,6 +22,7 @@ class ToyRepo:
 
     def __init__(self, folder):
         self.path = Path(folder)
+        self.profile = PROFILE
         self.git(["init", "-q", "-b", "main"])
         self.git(["config", "user.email", "t@t"])
         self.git(["config", "user.name", "t"])
@@ -49,7 +53,14 @@ class ToyRepo:
         return Passage(role, BRANCH, checkpoint=ballet_policy.head(self.git), refs=ballet_policy.refs(self.git), **fields)
 
     def violations(self, passage):
-        return ballet_policy.violations(passage, ZONES, self.git)
+        return ballet_policy.violations(passage, self.policy(), self.git)
+
+    def policy(self):
+        """Les défauts du plugin, surchargés par le profil du projet, écrit hors du repo pour ne pas le salir."""
+        home = self.path.parent / (self.path.name + "-home")
+        (home / ".ballet").mkdir(parents=True, exist_ok=True)
+        (home / ".ballet" / "config.toml").write_text(self.profile, encoding="utf-8")
+        return ballet_policy.policy_of(ballet_config.effective_config(home))
 
 
 class BalletPolicyTest(unittest.TestCase):
@@ -68,9 +79,9 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.commit({"specs/backlog.md": "x\n", "docs/ADR/0001.md": "x\n", ".github/workflows/proof.yml": "x\n",
                           "apps/web/CLAUDE.md": "x\n", "api/contract/stock.json": "{}\n"})
         self.assertEqual(self.repo.violations(passage), [
-            ".github/workflows/proof.yml: the harness, the CI or the git hooks",
+            ".github/workflows/proof.yml: a forbidden zone of [policy] forbidden_zones",
             "api/contract/stock.json: a sensitive zone of [policy] sensitive_zones",
-            "apps/web/CLAUDE.md: the harness, the CI or the git hooks",
+            "apps/web/CLAUDE.md: a forbidden zone of [policy] forbidden_zones",
             "docs/ADR/0001.md: the ADR folder",
             "specs/backlog.md: the specs space",
         ])
@@ -91,7 +102,7 @@ class BalletPolicyTest(unittest.TestCase):
         rule = self.repo.commit({"AGENTS.md": "rules\nand one more\n"})
         passage = self.repo.passage("dancer", owned=[rule])
         self.repo.commit({"AGENTS.md": "rules\nand mine\n"})
-        self.assertEqual(self.repo.violations(passage), ["AGENTS.md: the harness, the CI or the git hooks"])
+        self.assertEqual(self.repo.violations(passage), ["AGENTS.md: a forbidden zone of [policy] forbidden_zones"])
 
     def test_un_test_existant_supprime_ou_renomme_est_une_violation(self):
         passage = self.repo.passage("dancer")
@@ -113,9 +124,10 @@ class BalletPolicyTest(unittest.TestCase):
         rust = "#[test]\nfn keeps_days() {}\n\n#[tokio::test]\n#[ignore]\nasync fn reads() {}\n"
         python = "def test_reads():\n    pass\n\ndef helper():\n    pass\n"
         gherkin = "Feature: Stock\n  Scenario: Empty stock\n  Scenario Outline: A status <s>\n"
-        self.assertEqual(sorted(ballet_policy._test_names("lib.rs", rust)), ["keeps_days", "reads"])
-        self.assertEqual(sorted(ballet_policy._test_names("test_a.py", python)), ["test_reads"])
-        self.assertEqual(sorted(ballet_policy._test_names("a.feature", gherkin)), ["A status <s>", "Empty stock"])
+        policy = self.repo.policy()
+        self.assertEqual(sorted(ballet_policy._test_names("lib.rs", policy, rust)), ["keeps_days", "reads"])
+        self.assertEqual(sorted(ballet_policy._test_names("test_a.py", policy, python)), ["test_reads"])
+        self.assertEqual(sorted(ballet_policy._test_names("a.feature", policy, gherkin)), ["A status <s>", "Empty stock"])
 
     def test_tout_role_laisse_un_arbre_propre(self):
         passage = self.repo.passage("dancer")
@@ -152,7 +164,7 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.git(["branch", "spike/02-wasm"])
         self.assertEqual(self.repo.violations(passage), [])
         self.repo.commit({"src/a.ts": "mine\n"})
-        self.assertEqual(self.repo.violations(passage), ["src/a.ts: the Choreographer writes only ADRs and AGENTS.md"])
+        self.assertEqual(self.repo.violations(passage), ["src/a.ts: outside the choreographer's perimeter ([policy.roles.choreographer] writes, extra_writes)"])
 
     def test_le_choreographer_qui_repond_laisse_l_arbre_du_dancer_en_cours(self):
         self.repo.write({"src/wip.ts": "wip\n"})
@@ -162,12 +174,48 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.git(["commit", "-q", "-m", "adr"])
         self.assertEqual(self.repo.violations(passage), [])
 
+    def test_le_projet_ajoute_un_langage_sans_perdre_ceux_du_plugin(self):
+        self.repo.profile = PROFILE + '\n[policy.test_names.go]\nextensions = [".go"]\npattern = \'func (Test\\w+)\'\n'
+        self.repo.commit({"a_test.go": "func TestReads(t *testing.T) {}\n"})
+        self.repo.git(["update-ref", "refs/remotes/origin/main", "HEAD"])
+        passage = self.repo.passage("dancer")
+        self.repo.commit({"a_test.go": "func TestRead(t *testing.T) {}\n", "src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
+        self.assertEqual(self.repo.violations(passage), ["a_test.go: existing test removed or renamed: TestReads",
+                                                         "src/a.test.ts: existing test removed or renamed: sorts by deadline"])
+
+    def test_le_projet_etend_le_choreographer_sans_recopier_la_methode(self):
+        self.repo.profile = PROFILE + '\n[policy.roles.choreographer]\nextra_writes = ["docs/*"]\n'
+        passage = self.repo.passage("choreographer")
+        self.repo.commit({"docs/architecture.md": "x\n", "docs/ADR/0002.md": "adr\n", "AGENTS.md": "rules\nmore\n"})
+        self.assertEqual(self.repo.violations(passage), [])
+
+    def test_le_projet_interdit_un_chemin_de_plus_au_dancer(self):
+        self.repo.profile = PROFILE + '\n[policy.roles.dancer]\nextra_except = ["migrations/*"]\n'
+        passage = self.repo.passage("dancer")
+        self.repo.commit({"migrations/0002.sql": "x\n"})
+        self.assertEqual(self.repo.violations(passage), ["migrations/0002.sql: excepted by [policy.roles.dancer]"])
+
+    def test_le_projet_peut_remplacer_la_methode(self):
+        self.repo.profile = PROFILE + '\n[policy.roles.dramaturg]\nwrites = ["product/*"]\n'
+        passage = self.repo.passage("dramaturg")
+        self.repo.commit({"product/vision.md": "x\n", "specs/backlog.md": "x\n"})
+        self.assertEqual(self.repo.violations(passage), [
+            "specs/backlog.md: outside the dramaturg's perimeter ([policy.roles.dramaturg] writes, extra_writes)"])
+
+    def test_le_projet_remplace_les_zones_interdites(self):
+        self.repo.profile = PROFILE + 'forbidden_zones = [".ballet/*", "Makefile"]\n'
+        passage = self.repo.passage("dancer")
+        self.repo.commit({"Makefile": "x\n", "CLAUDE.md": "x\n"})
+        self.assertEqual(self.repo.violations(passage), ["Makefile: a forbidden zone of [policy] forbidden_zones"])
+
     def test_la_ligne_de_commande_audite_la_branche_comme_un_dancer(self):
         (self.repo.path / ".ballet").mkdir()
         (self.repo.path / ".ballet" / "config.toml").write_text('[project]\nspecs = "specs/"\n', encoding="utf-8")
         self.repo.git(["add", "-A"])
         self.repo.git(["commit", "-q", "-m", "profile"])
-        self.assertEqual(ballet_policy.main(["ballet_policy.py", str(self.repo.path), str(self.repo.path)]), 1)
+        with redirect_stdout(io.StringIO()) as output:
+            code = ballet_policy.main(["ballet_policy.py", str(self.repo.path), str(self.repo.path)])
+        self.assertEqual((code, output.getvalue()), (1, "- .ballet/config.toml: a forbidden zone of [policy] forbidden_zones\n"))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,64 @@ cli = "claude"
 model = "opus"
 
 [policy]
-sensitive_zones = []             # globs, valables dans tous les repos
+# Une zone est un glob fnmatch (`*` traverse les `/`) : sans `/`, il vaut à toute profondeur ; avec, il part de la racine.
+# Une liste surchargée remplace celle du plugin : la recopier pour y ajouter.
+sensitive_zones = []             # zones propres au projet (contrat d'API, sécurité…), en plus des zones interdites
+forbidden_zones = [              # le harnais, la CI et les hooks git
+  "AGENTS.md", "CLAUDE.md", ".ballet/*", ".claude/*", ".agents/*", ".vibe/*", ".codex/*", ".grok/*", ".mcp.json",
+  ".github/*", ".gitlab-ci.yml", ".circleci/*", ".husky/*", ".githooks/*", "lefthook.yml", ".pre-commit-config.yaml",
+]
+
+# Le périmètre de chaque rôle : un chemin est permis s'il est dans `writes` (ou `extra_writes`) et hors de `except`
+# (et `extra_except`) ; `except` l'emporte. `writes` et `except` sont la méthode : un projet peut les remplacer.
+# `extra_writes` et `extra_except` sont à lui : il y ajoute sans recopier la méthode (`extra_writes = ["docs/*"]`).
+# `@specs`, `@adr`, `@forbidden` et `@sensitive` nomment [project] specs, [project] adr, forbidden_zones et sensitive_zones.
+# `branches` : les branches que le rôle peut créer. Aucun rôle ne peut écrire `.ballet/config.toml`.
+[policy.roles.dramaturg]
+writes = ["@specs"]
+except = []
+extra_writes = []
+extra_except = []
+branches = []
+
+[policy.roles.choreographer]
+writes = ["@adr", "AGENTS.md"]
+except = []
+extra_writes = []
+extra_except = []
+branches = ["spike/*"]           # ses spikes, jamais mergés
+
+[policy.roles.dancer]
+writes = ["*"]
+except = ["@specs", "@adr", "@forbidden", "@sensitive"]
+extra_writes = []
+extra_except = []
+branches = []
+
+[policy.roles.critic]
+writes = []                      # lecture seule : HEAD ne bouge pas
+except = []
+extra_writes = []
+extra_except = []
+branches = []
+
+# Un test existant se reconnaît par son nom : par langage, ses extensions et un motif dont le dernier groupe est le nom.
+# Un projet ajoute un langage par sa propre table ([policy.test_names.go]).
+[policy.test_names.javascript]
+extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
+pattern = '''\b(?:it|test)(?:\.\w+)?\(\s*(['"`])(.+?)\1'''
+
+[policy.test_names.rust]
+extensions = [".rs"]
+pattern = '''#\[(?:[\w:]+::)?test\b[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)'''
+
+[policy.test_names.python]
+extensions = [".py"]
+pattern = '''(?m)^\s*(?:async\s+)?def\s+(test\w*)'''
+
+[policy.test_names.gherkin]
+extensions = [".feature"]
+pattern = '''(?m)^\s*(?:Scenario|Scenario Outline|Scenario Template|Example):\s*(.+?)\s*$'''
 
 [escalation]
 max_round_trips = 2              # allers-retours Dancer ↔ Critic

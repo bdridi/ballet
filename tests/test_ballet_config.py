@@ -152,6 +152,29 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT.replace('["tdd"]', '["tdd", "magie"]'))
         self.assertProblem("unknown rule 'magie'")
 
+    def test_les_defauts_de_la_politique_sont_valides(self):
+        self.write_project_config(VALID_PROJECT)
+        self.assertEqual(self.problems(), [])
+
+    def test_aucun_role_ne_peut_ecrire_le_profil(self):
+        self.write_project_config(VALID_PROJECT + '\n[policy]\nforbidden_zones = ["CLAUDE.md"]\n')
+        self.assertProblem("[policy.roles.dancer] lets the dancer write .ballet/config.toml")
+
+    def test_une_extension_du_projet_qui_ouvre_le_profil_est_refusee(self):
+        self.write_project_config(VALID_PROJECT + '\n[policy.roles.choreographer]\nextra_writes = [".ballet/*"]\n')
+        self.assertProblem("[policy.roles.choreographer] lets the choreographer write .ballet/config.toml")
+
+    def test_un_perimetre_mal_forme_est_refuse(self):
+        self.write_project_config(VALID_PROJECT + '\n[policy.roles.dancer]\nextra_except = "migrations/*"\n\n[policy.roles.mime]\nwrites = []\n')
+        self.assertProblem("[policy.roles.dancer] extra_except must be a list of globs")
+        self.assertProblem("[policy.roles.mime]: unknown role")
+
+    def test_un_langage_de_test_sans_groupe_ou_mal_forme_est_refuse(self):
+        self.write_project_config(VALID_PROJECT + "\n[policy.test_names.go]\nextensions = ['.go']\npattern = 'func Test'\n"
+                                  "\n[policy.test_names.kotlin]\nextensions = ['.kt']\npattern = '(unclosed'\n")
+        self.assertProblem("[policy.test_names.go] pattern needs a group")
+        self.assertProblem("[policy.test_names.kotlin] pattern is not a valid regular expression")
+
     def test_seuil_invalide_est_refuse(self):
         self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_round_trips = 0\n")
         self.assertProblem("max_round_trips must be a positive integer")

@@ -5,12 +5,14 @@
 """
 
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 PROJECT_CONFIG = Path(".ballet") / "config.toml"
+PERIMETER_KEYS = ("writes", "except", "extra_writes", "extra_except", "branches")
 
 ROLES = ("dramaturg", "choreographer", "dancer", "critic")
 CLIS = ("claude", "grok", "mistral-vibe", "codex", "opencode", "gemini-cli", "kimi")
@@ -34,6 +36,7 @@ def find_problems(config, plugin_root=PLUGIN_ROOT):
         + _role_problems(config)
         + _critic_dancer_problems(config)
         + _threshold_problems(config)
+        + _policy_problems(config)
     )
 
 
@@ -166,10 +169,49 @@ def _threshold_problems(config):
         problems.append("[escalation] max_diff_strict must be true or false")
     if not _is_glob_list(escalation.get("diff_exclude")):
         problems.append("[escalation] diff_exclude must be a list of globs")
-    zones = _table(config, "policy").get("sensitive_zones", [])
-    if not _is_glob_list(zones):
-        problems.append("[policy] sensitive_zones must be a list of globs")
     return problems
+
+
+def _policy_problems(config):
+    """Les données de la politique ; `.ballet/*` reste interdit, sinon un rôle pourrait réécrire la politique elle-même."""
+    policy = _table(config, "policy")
+    problems = [f"[policy] {key} must be a list of globs"
+                for key in ("sensitive_zones", "forbidden_zones") if not _is_glob_list(policy.get(key, []))]
+    problems += _perimeter_problems(_table(policy, "roles"))
+    for language, settings in _table(policy, "test_names").items():
+        problems += _test_names_problems(language, settings)
+    return problems or _profile_protection_problems(config)
+
+
+def _perimeter_problems(roles):
+    problems = [f"[policy.roles.{name}]: unknown role" for name in roles if name not in ROLES]
+    for role in ROLES:
+        settings = roles.get(role)
+        if not isinstance(settings, dict):
+            problems.append(f"[policy.roles.{role}] missing")
+            continue
+        problems += [f"[policy.roles.{role}] {key} must be a list of globs"
+                     for key in PERIMETER_KEYS if not _is_glob_list(settings.get(key, []))]
+    return problems
+
+
+def _profile_protection_problems(config):
+    """Aucun rôle ne peut écrire le profil : il porte la politique elle-même."""
+    import ballet_policy  # ici : ballet_policy lit sa config par ce module
+    roles = ballet_policy.roles_writing_the_profile(ballet_policy.policy_of(config))
+    return [f"[policy.roles.{role}] lets the {role} write {ballet_policy.PROFILE}: the profile holds the policy" for role in roles]
+
+
+def _test_names_problems(language, settings):
+    where = f"[policy.test_names.{language}]"
+    if not isinstance(settings, dict) or not _is_glob_list(settings.get("extensions")) or not settings.get("extensions"):
+        return [f"{where} extensions must be a non-empty list, e.g. [\".go\"]"]
+    try:
+        if re.compile(settings.get("pattern", "")).groups < 1:
+            return [f"{where} pattern needs a group: its last one is the test name"]
+    except (re.error, TypeError) as error:
+        return [f"{where} pattern is not a valid regular expression ({error})"]
+    return []
 
 
 def _is_glob_list(value):
