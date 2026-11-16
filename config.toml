@@ -1,7 +1,6 @@
 # Défauts de Ballet. Un projet les surcharge clé par clé dans .ballet/config.toml.
 
 [project]
-merge = "trunk"                  # ou "pr"
 specs_language = "en"            # langue des specs ; le code est toujours en anglais
 adr = "docs/ADR/"                # décisions d'architecture : seul le Choreographer y écrit
 rules = []                       # règles communes appliquées (noms de skills), à choisir par le projet

@@ -33,7 +33,7 @@ def publish_issue(draft_path, run=None):
 def write_plan(number, plan_path, run=None):
     run = run or _run_gh
     body = _issue_body(number, run)
-    plan = _read_draft(plan_path)
+    plan = _plan_only(_read_draft(plan_path))
     _edit_issue(number, _with_plan(body, plan), run)
 
 
@@ -102,7 +102,13 @@ def _title_and_body(text):
         if line.startswith("# "):
             body = "\n".join(lines[index + 1:]).strip() + "\n"
             return line[2:].strip(), body
-    raise GitHubError("le brouillon n'a pas de titre `# …`")
+    raise GitHubError("le brouillon n'a pas de titre `# …` ; un fichier qui ne porte que la section ## Plan va à `plan`")
+
+
+def _plan_only(text):
+    if any(line.startswith("# ") for line in text.splitlines()):
+        raise GitHubError("c'est un brouillon d'issue complet (titre `# …`) ; `plan` n'attend que la section ## Plan, un brouillon va à `publish` ou `slice`")
+    return text
 
 
 def _with_plan(body, plan):

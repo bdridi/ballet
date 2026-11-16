@@ -14,7 +14,6 @@ PROJECT_CONFIG = Path(".ballet") / "config.toml"
 
 ROLES = ("dramaturg", "choreographer", "dancer", "critic")
 CLIS = ("claude", "grok", "mistral-vibe", "codex", "opencode", "gemini-cli", "kimi")
-MERGE_POLICIES = ("trunk", "pr")
 
 
 class ConfigError(Exception):
@@ -87,8 +86,6 @@ def _project_problems(config):
     problems = []
     if not isinstance(project["specs"], str):
         problems.append("[project] specs doit être un texte")
-    if project.get("merge") not in MERGE_POLICIES:
-        problems.append(f"[project] merge doit valoir {' ou '.join(MERGE_POLICIES)}")
     if not isinstance(project.get("adr"), str) or not project.get("adr"):
         problems.append("[project] adr doit être un chemin de dossier, ex. docs/ADR/")
     if not _is_language_code(project.get("specs_language")):

@@ -63,6 +63,17 @@ class BalletGitHubTest(unittest.TestCase):
         with self.assertRaises(ballet_github.GitHubError):
             ballet_github.write_plan("7", self.file("p.md", "x"), run=gh)
 
+    def test_refuse_un_brouillon_complet_a_la_place_du_plan(self):
+        gh = FakeGh()
+        draft = self.file("d.md", "# FEAT-001 · Sign in\n\n## Plan\n\n- a → b.\n")
+        with self.assertRaisesRegex(ballet_github.GitHubError, "publish"):
+            ballet_github.write_plan("7", draft, run=gh)
+        self.assertFalse([call for call in gh.calls if call[:2] == ["issue", "edit"]])
+
+    def test_un_brouillon_sans_titre_renvoie_vers_plan(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "plan"):
+            ballet_github.publish_issue(self.file("d.md", "## Plan\n\n- a → b.\n"), run=FakeGh())
+
     def test_une_slice_pointe_vers_sa_parente(self):
         gh = FakeGh()
         draft = self.file("s.md", "# FEAT-001.1 · Skeleton\n\n## Plan\n\nx\n")

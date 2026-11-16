@@ -71,10 +71,6 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config('[project]\nspecs = "specs/"\n[repos.app]\npath = "."\n')
         self.assertProblem("[repos.app] proof manquant")
 
-    def test_merge_inconnu_est_refuse(self):
-        self.write_project_config(VALID_PROJECT.replace('specs = "specs/"', 'specs = "specs/"\nmerge = "rebase"'))
-        self.assertProblem("merge doit valoir")
-
     def test_les_specs_sont_en_anglais_par_defaut(self):
         self.write_project_config(VALID_PROJECT)
         self.assertEqual(ballet_config.effective_config(self.project)["project"]["specs_language"], "en")

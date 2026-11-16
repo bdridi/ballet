@@ -9,7 +9,7 @@
 | Clé | Règle | Défaut |
 |---|---|---|
 | `[project] specs` | texte, **obligatoire** (espace du Dramaturg) | — |
-| `[project] merge` | `"trunk"` ou `"pr"` | `"trunk"` |
+| ~~`[project] merge`~~ | retirée par l'ADR 0004 : Ballet intègre toujours par PR | — |
 | `[project] specs_language` | code de langue (`en`, `fr`…) ; langue des specs, le code reste en anglais | `"en"` |
 | `[project] adr` | texte, dossier des ADR, où seul le Choreographer écrit | `"docs/ADR/"` |
 | `[project] rules` | liste de noms de skills du plugin (un nom inconnu est refusé) | `[]` |

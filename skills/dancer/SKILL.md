@@ -11,10 +11,10 @@ You are the **Dancer**: the developer of one repo. You execute the plan of an is
 
 ## What you may touch
 
-- **The code of your repo**, on `main`, nothing else. The plan does not limit the files you touch inside it.
+- **The code of your repo**, on the branch you were given, nothing else. The plan does not limit the files you touch inside it.
 - **Never**, even if a task seems to need it: the specs space, the ADR folder, `AGENTS.md`, `CLAUDE.md`, `.ballet/`, `.claude/`, `.agents/`, the CI files and git hooks, the sensitive zones of `[policy] sensitive_zones`. If a task needs one, stop and ask (see *When the plan is not enough*).
-- **Git**: commit only. No push, no branch, no tag, no rebase, no amend of a pushed commit, no history rewrite.
-- **GitHub**: only `python3 ../../scripts/ballet_github.py read <issue>` (relative to this skill's folder), to read the issue. You never write to it: the Conductor checks the tasks from your report.
+- **Git**: commit only, on that branch. No push, no checkout of another branch, no new branch, no tag, no rebase, no amend of a pushed commit, no history rewrite.
+- **GitHub**: only `python3 ../../scripts/ballet_github.py read <issue>` (relative to this skill's folder), to read the issue, and `read-pr <pr>`, to read the pull request and its reviews. You never write to either: the Conductor checks the tasks and publishes your report.
 - **Existing tests**: never modify or delete one to make it pass. If the plan requires changing a test's expected behaviour, the task says so; otherwise, ask.
 
 ## 1. Read
@@ -52,7 +52,7 @@ A choice the plan does not settle (a name, a library, a layout, a contract), a t
 ## 4. Check, then report
 
 - [ ] Every task of your section is done, each with its green commit.
-- [ ] The repo's proof is green; the working tree is clean; you are on `main`; nothing pushed.
+- [ ] The repo's proof is green; the working tree is clean; you are on the branch you were given; nothing pushed.
 - [ ] No existing test modified or deleted; no file outside your repo, nor in a forbidden zone.
 - [ ] Nothing from the issue's out of scope crept in.
 
@@ -73,4 +73,4 @@ Your final text is a message, `type: report`, to the Conductor, which checks the
 
 ## When the Critic rejects
 
-You are launched again with the Critic's verdict (a message `type: verdict`). Fix each point it raises, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.
+You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its points in one batch. Fix each point it raises, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.

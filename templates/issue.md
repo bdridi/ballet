@@ -21,4 +21,5 @@ What this issue does not do.
 
 ## Plan
 
-<!-- Decisions, then one `### <repo>` section per repo touched. For a feature cut into slices: the list of slices, by issue number. -->
+<!-- Decisions, then one `### <repo>` section per repo touched, then Amendments (empty at publication, one line per later rewrite).
+     For a feature cut into slices: the list of slices, by issue number. -->
