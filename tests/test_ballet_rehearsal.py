@@ -1092,7 +1092,10 @@ class PlanningTest(unittest.TestCase):
         state = json.loads((self.home / ".ballet" / "run" / "FEAT-002.1.json").read_text())
         self.assertEqual((state["issue"], state["worktree"], state["owned"]), ("14", "/wt/FEAT-002", ["adr1"]))
         self.assertEqual(state["dispatches"]["choreographer"], "ctx_1")
-        self.assertEqual(json.loads((self.home / ".ballet" / "run" / "FEAT-002.json").read_text())["status"], "done")
+        self.assertEqual(state["planned_by"], "FEAT-002")
+        planning = json.loads((self.home / ".ballet" / "run" / "FEAT-002.json").read_text())
+        self.assertEqual((planning["status"], planning["issue"]), ("done", "13"))
+        self.assertEqual(self.journal("handover"), [{"to": "FEAT-002.1", "issue": "14", "planned": "13"}])
         self.assertEqual((self.queue()["current"], self.queue()["items"]), ("FEAT-002.1", ["#15"]))
         self.assertEqual(self.queue()["played"], [{"item": "FEAT-002", "rehearsal": "FEAT-002.1"}])
 

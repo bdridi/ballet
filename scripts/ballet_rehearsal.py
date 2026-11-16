@@ -120,6 +120,7 @@ class Rehearsal:
     plan: str = ""                                   # review (le Director approuve le plan) | auto
     feature: str = ""                                # la feature d'une Rehearsal de planification, sans issue au départ
     plan_issue: str = ""                             # l'issue dont le plan attend `ballet:plan-approved`
+    planned_by: str = ""                             # la Rehearsal de planification dont elle a pris le worktree
 
     @property
     def branch(self):
@@ -438,7 +439,7 @@ def _after_plan(rehearsal, report, config, home, tools):
     _own_commits(rehearsal, tools)
     planned, issues = _planned_issues(rehearsal, report, tools)
     step = Step("wait", done=[_plan_line(planned, issues)])
-    step.done += _hand_over(rehearsal, issues[0], home, tools)
+    step.done += _hand_over(rehearsal, planned, issues[0], home, tools)
     _queue_first([f"#{number}" for number, _, _ in issues[1:]], home)
     if (rehearsal.plan or _default_plan(config)) == "review":
         return _await_plan_approval(rehearsal, planned, step, tools)
@@ -461,21 +462,23 @@ def _planned_issues(rehearsal, report, tools):
     return planned, issues
 
 
-def _hand_over(rehearsal, first, home, tools):
+def _hand_over(rehearsal, planned, first, home, tools):
     """La Rehearsal joue la première issue du plan. Si c'est une slice, la planification lui laisse son worktree :
-    la branche prend le nom de la slice, les commits du Choreographer restent à son nom (`owned`)."""
+    la branche prend le nom de la slice, les commits du Choreographer restent à son nom (`owned`). La planification
+    reste dans l'état, terminée, sur l'issue planifiée ; la slice la nomme (`planned_by`) : la Scène relie leurs fils."""
     number, title, _ = first
     rehearsal_id = _rehearsal_id(title)
-    rehearsal.issue = number
     if rehearsal_id == rehearsal.id:
+        rehearsal.issue = number
         return []
     previous, old_branch = rehearsal.id, rehearsal.branch
     _refuse_if_already_open(Rehearsal(id=rehearsal_id, issue=number, repo=rehearsal.repo), home)
-    _save(Rehearsal(**{**asdict(rehearsal), "status": "done", "reason": f"planned: its worktree plays {rehearsal_id}"}), home)
-    _log(home, rehearsal, "handover", {"to": rehearsal_id, "issue": number})
+    _save(Rehearsal(**{**asdict(rehearsal), "issue": planned, "status": "done", "reason": f"planned: its worktree plays {rehearsal_id}"}), home)
+    _log(home, rehearsal, "handover", {"to": rehearsal_id, "issue": number, "planned": planned})
     git = tools.git(rehearsal.worktree)
     git(["branch", "-m", old_branch, f"rehearsal/{rehearsal_id}"])
-    rehearsal.id, rehearsal.refs = rehearsal_id, ballet_policy.refs(git)
+    rehearsal.id, rehearsal.issue, rehearsal.planned_by = rehearsal_id, number, previous
+    rehearsal.refs = ballet_policy.refs(git)
     _rename_in_queue(previous, rehearsal_id, home)
     return [f"now playing: Rehearsal {rehearsal_id} (issue #{number}) in the worktree of {previous}, branch {rehearsal.branch}"]
 

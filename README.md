@@ -75,14 +75,14 @@ Everything is sequential: one Rehearsal at a time, each from `main` after the pr
 
 ## Watch the Rehearsals (concept)
 
-A local, read-only page that shows what happens in a project, live and in history: the Rehearsals, the role at work in each, and its journal as a thread (what the Conductor hands to each worker, every message received in full, every step of the script). It reads `.ballet/run/` and listens on 127.0.0.1 only.
+A local, read-only page that shows what happens in a project, live and in history: the queue of the Piece (what was played, what plays, what is next), the Rehearsals and the role at work in each, what the Director must do on an escalation (a plan to approve, a pull request to decide), the phase reached (plan, code, review, Premiere), the round trips and the diff size against their limits, and the journal as a thread (what the Conductor hands to each worker, every message received in full, the policy and every step of the script), the planning of a feature joined to its first slice. It reads `.ballet/run/` and listens on 127.0.0.1 only.
 
 ```
 python3 <path-to-ballet>/scripts/ballet_stage.py <project-folder>
 python3 <path-to-ballet>/scripts/ballet_stage.py --scan <folder-of-projects>
 ```
 
-Then open http://127.0.0.1:7700 (`--port` to change it). It is a first sketch: see the Stage item in `TASKS.md`.
+Then open http://127.0.0.1:7700 (`--port` to change it). See the Stage item in `TASKS.md` for what comes next.
 
 ## Languages
 

@@ -5,68 +5,240 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ballet Stage</title>
 <style>
-  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6e6e73; --line:#e5e5ea; --panel:#f5f5f7; --pick:#e8f0fe;
-          --open:#0a7d32; --escalated:#b25000; --done:#6e6e73; --worker:#3b5bdb; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#161618; --fg:#ececf0; --muted:#9a9aa2; --line:#2c2c30; --panel:#1f1f23; --pick:#22304d;
-            --open:#4cc76f; --escalated:#f0a050; --done:#9a9aa2; --worker:#8ea6ff; }
+  :root {
+    --bg:#fbfbfc; --surface:#ffffff; --panel:#f3f4f6; --fg:#16171a; --muted:#6b6f78; --faint:#9aa0a9; --line:#e6e7eb;
+    --pick:#eef2ff; --pick-line:#c7d2fe; --focus:#4f46e5;
+    --open:#15803d; --open-bg:#dcfce7; --escalated:#b45309; --escalated-bg:#fef3c7; --done:#6b7280; --done-bg:#eef0f3;
+    --bad:#b91c1c; --bad-bg:#fee2e2;
+    --dramaturg:#9333ea; --choreographer:#0d9488; --dancer:#2563eb; --critic:#ea580c; --conductor:#52525b; --director:#be123c;
+    --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
   }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, sans-serif; }
-  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; }
-  header b { font-size:15px; }
-  #live { color:var(--muted); font-size:12px; }
-  main { display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 43px); }
-  nav { border-right:1px solid var(--line); overflow:auto; padding:8px 0; }
-  nav h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:12px 16px 4px; }
-  nav a { display:block; padding:6px 16px; color:inherit; text-decoration:none; }
-  nav a:hover { background:var(--panel); }
-  nav a.picked { background:var(--pick); }
-  nav small { display:block; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  section { overflow:auto; padding:16px; }
-  .status { font-size:12px; font-weight:600; }
-  .status.open { color:var(--open); } .status.escalated { color:var(--escalated); } .status.done { color:var(--done); }
-  .head { background:var(--panel); border-radius:8px; padding:12px; margin-bottom:12px; }
-  .head h1 { font-size:16px; margin:0 0 4px; }
-  .head p { margin:2px 0; color:var(--muted); }
-  .now { font-weight:600; color:var(--fg); }
-  ol { list-style:none; margin:0; padding:0; }
-  li { border-bottom:1px solid var(--line); padding:6px 0; display:grid; grid-template-columns:70px 1fr; gap:8px; }
-  li time { color:var(--muted); font-variant-numeric:tabular-nums; }
-  li.step { color:var(--muted); }
-  li.step div div { font-size:13px; }
-  .who { font-weight:600; }
-  .who.worker { color:var(--worker); }
-  details summary { cursor:pointer; color:var(--muted); }
-  pre { white-space:pre-wrap; word-break:break-word; background:var(--panel); padding:8px; border-radius:6px; margin:6px 0 0; font:12px/1.4 ui-monospace, monospace; }
-  .empty { color:var(--muted); padding:24px; }
-  @media (max-width: 700px) {
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0f1012; --surface:#17181b; --panel:#1e2024; --fg:#ececef; --muted:#9a9ea7; --faint:#6b6f78; --line:#2a2c31;
+      --pick:#1f2440; --pick-line:#3b4485; --focus:#818cf8;
+      --open:#4ade80; --open-bg:#14301f; --escalated:#fbbf24; --escalated-bg:#352a0e; --done:#9ca3af; --done-bg:#24262b;
+      --bad:#f87171; --bad-bg:#3a1717;
+      --dramaturg:#c084fc; --choreographer:#2dd4bf; --dancer:#60a5fa; --critic:#fb923c; --conductor:#a1a1aa; --director:#fb7185;
+      --shadow:none;
+    }
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
+  button { font:inherit; color:inherit; }
+  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+  code, pre, .mono { font-family:ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* --- en-tête --- */
+  .top { height:52px; display:flex; align-items:center; gap:14px; padding:0 20px; border-bottom:1px solid var(--line); background:var(--surface); }
+  .brand { display:flex; align-items:baseline; gap:8px; }
+  .brand b { font-size:16px; letter-spacing:-.01em; }
+  .brand span { color:var(--muted); }
+  .live { margin-left:auto; display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--open); box-shadow:0 0 0 0 var(--open); animation:pulse 2s infinite; }
+  .live.off .dot { background:var(--bad); animation:none; }
+  @keyframes pulse { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--open) 50%, transparent); } 70% { box-shadow:0 0 0 6px transparent; } 100% { box-shadow:0 0 0 0 transparent; } }
+
+  main { display:grid; grid-template-columns:340px minmax(0, 1fr); height:calc(100vh - 52px); }
+
+  /* --- colonne des projets --- */
+  aside { border-right:1px solid var(--line); overflow:auto; padding:12px 12px 24px; background:var(--surface); }
+  .project + .project { margin-top:20px; }
+  .project-head { display:flex; align-items:center; gap:8px; margin:4px 4px 8px; }
+  .project-head h2 { font-size:13px; margin:0; letter-spacing:.02em; }
+  .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:0 7px; }
+  .stopped { margin:0 4px 8px; padding:8px 10px; border-radius:8px; background:var(--escalated-bg); color:var(--escalated); font-size:12px; }
+  .card-link { display:block; text-decoration:none; color:inherit; padding:10px 12px; border:1px solid transparent; border-radius:10px; margin-bottom:4px; }
+  .card-link:hover { background:var(--panel); }
+  .card-link.picked { background:var(--pick); border-color:var(--pick-line); }
+  .card-row { display:flex; align-items:center; gap:8px; }
+  .card-row b { font-size:13px; font-variant-numeric:tabular-nums; }
+  .card-title { color:var(--fg); font-size:13px; margin:2px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card-meta { color:var(--muted); font-size:12px; display:flex; gap:8px; }
+  .card-link.is-done { opacity:.72; }
+  .group-label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); margin:12px 4px 4px; }
+
+  /* --- pastilles --- */
+  .pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  .pill.open { color:var(--open); background:var(--open-bg); }
+  .pill.escalated { color:var(--escalated); background:var(--escalated-bg); }
+  .pill.done { color:var(--done); background:var(--done-bg); }
+  .role { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--r); }
+  .role::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--r); }
+  .r-dramaturg { --r:var(--dramaturg); } .r-choreographer { --r:var(--choreographer); } .r-dancer { --r:var(--dancer); }
+  .r-critic { --r:var(--critic); } .r-conductor { --r:var(--conductor); } .r-director { --r:var(--director); }
+  .badge { font-size:11px; font-weight:600; padding:0 6px; border-radius:4px; background:var(--panel); color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .badge.ok { background:var(--open-bg); color:var(--open); } .badge.warn { background:var(--escalated-bg); color:var(--escalated); }
+  .badge.bad { background:var(--bad-bg); color:var(--bad); }
+
+  /* --- la file --- */
+  .queue { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:0 4px 8px; }
+  .q { font-size:11px; font-variant-numeric:tabular-nums; padding:2px 7px; border-radius:6px; border:1px solid var(--line); color:var(--muted); background:var(--surface); white-space:nowrap; }
+  .q.done { color:var(--done); background:var(--done-bg); border-color:transparent; }
+  .q.done::before { content:"✓ "; }
+  .q.now { color:var(--fg); border-color:var(--focus); font-weight:600; }
+  .q.now.escalated { border-color:var(--escalated); color:var(--escalated); }
+  .q.next { border-style:dashed; }
+  .q-arrow { color:var(--faint); font-size:11px; }
+
+  /* --- détail --- */
+  section#detail { overflow:auto; padding:24px clamp(16px, 3vw, 40px) 48px; }
+  .wrap { max-width:980px; margin:0 auto; }
+  .hero h1 { font-size:22px; letter-spacing:-.015em; margin:6px 0 4px; }
+  .hero h1 .id { color:var(--muted); font-weight:500; margin-right:8px; font-variant-numeric:tabular-nums; }
+  .hero-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px; color:var(--muted); font-size:13px; }
+  .hero-line .sep { color:var(--faint); }
+  .callout { margin:16px 0 0; padding:12px 14px; border-radius:10px; border:1px solid color-mix(in srgb, var(--escalated) 35%, transparent); background:var(--escalated-bg); }
+  .callout b { color:var(--escalated); display:block; margin-bottom:2px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .callout p { margin:2px 0; }
+  .callout.done { border-color:color-mix(in srgb, var(--open) 30%, transparent); background:var(--open-bg); }
+  .callout.done b { color:var(--open); }
+
+  .stepper { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin:20px 0; }
+  .phase { padding:8px 10px 9px; border-radius:8px; background:var(--panel); position:relative; overflow:hidden; }
+  .phase::before { content:""; position:absolute; left:0; top:0; right:0; height:3px; background:var(--line); }
+  .phase small { display:block; color:var(--muted); font-size:11px; }
+  .phase span { font-weight:600; font-size:13px; }
+  .phase.done::before { background:var(--open); }
+  .phase.now::before { background:var(--focus); }
+  .phase.wait::before { background:var(--escalated); }
+  .phase.skip span, .phase.todo span { color:var(--muted); font-weight:500; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
+  .metric { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; box-shadow:var(--shadow); }
+  .metric small { color:var(--muted); font-size:12px; display:block; }
+  .metric b { font-size:18px; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  .metric b em { font-style:normal; font-size:13px; color:var(--muted); font-weight:500; }
+  .bar { height:5px; border-radius:3px; background:var(--panel); margin-top:6px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--open); border-radius:3px; }
+  .bar.over i { background:var(--bad); }
+
+  .block { margin-top:24px; }
+  .block > h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px; display:flex; align-items:center; gap:8px; }
+  .cast { display:flex; flex-wrap:wrap; gap:8px; }
+  .actor { border:1px solid var(--line); border-radius:10px; padding:7px 11px; background:var(--surface); font-size:12px; }
+  .actor .role { font-size:13px; }
+  .actor small { display:block; color:var(--muted); }
+  .actor.idle { opacity:.6; }
+
+  .qlist { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--surface); }
+  .qrow { display:grid; grid-template-columns:22px 110px minmax(0,1fr) auto; gap:10px; align-items:center; padding:8px 12px; border-top:1px solid var(--line); text-decoration:none; color:inherit; }
+  .qrow:first-child { border-top:0; }
+  a.qrow:hover { background:var(--panel); }
+  .qrow.now { background:var(--pick); }
+  .qrow .n { color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; text-align:right; }
+  .qrow .t { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .qrow .muted { color:var(--muted); }
+
+  /* --- le fil --- */
+  .tabs { display:inline-flex; background:var(--panel); border-radius:8px; padding:2px; margin-left:auto; text-transform:none; letter-spacing:0; }
+  .tabs button { border:0; background:none; padding:3px 10px; border-radius:6px; font-size:12px; color:var(--muted); cursor:pointer; }
+  .tabs button[aria-pressed="true"] { background:var(--surface); color:var(--fg); box-shadow:var(--shadow); }
+  ol.thread { list-style:none; margin:0; padding:0; position:relative; }
+  ol.thread::before { content:""; position:absolute; left:15px; top:6px; bottom:6px; width:2px; background:var(--line); }
+  .ev { position:relative; display:grid; grid-template-columns:32px minmax(0, 1fr); gap:12px; padding:6px 0; }
+  .avatar { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; color:#fff; background:var(--r); position:relative; z-index:1; border:3px solid var(--bg); }
+  .tick { width:32px; display:flex; justify-content:center; align-items:flex-start; padding-top:11px; position:relative; z-index:1; }
+  .tick i { width:10px; height:10px; border-radius:50%; background:var(--bg); border:2px solid var(--faint); }
+  .ev.escalate .tick i { border-color:var(--escalated); background:var(--escalated); }
+  .ev.final .tick i { border-color:var(--open); background:var(--open); }
+  .ev.bad .tick i { border-color:var(--bad); background:var(--bad); }
+  .bubble { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:9px 12px; box-shadow:var(--shadow); min-width:0; }
+  .bubble.handoff { background:transparent; box-shadow:none; border-style:dashed; }
+  .meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; }
+  .meta .to { color:var(--muted); }
+  .meta time { margin-left:auto; color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; }
+  .line { font-size:13px; color:var(--muted); padding-top:6px; min-width:0; }
+  .line b { color:var(--fg); font-weight:600; }
+  .line time { float:right; color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; margin-left:8px; }
+  .ev.escalate .line { color:var(--escalated); }
+  .ev.escalate .line b { color:var(--escalated); }
+  .steps { margin:4px 0 0; padding:0; list-style:none; font-size:12px; color:var(--muted); }
+  .steps li::before { content:"· "; color:var(--faint); }
+  pre.text { white-space:pre-wrap; word-break:break-word; margin:8px 0 0; padding:10px 12px; border-radius:8px; background:var(--panel); font-size:12px; line-height:1.5; }
+  pre.text.clamp { max-height:9.2em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 60%, transparent); mask-image:linear-gradient(#000 60%, transparent); }
+  .more { border:0; background:none; color:var(--focus); font-size:12px; padding:4px 0 0; cursor:pointer; }
+  .sep-day, .sep-phase { display:flex; align-items:center; gap:10px; margin:14px 0 6px 44px; font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.06em; }
+  .sep-day::after, .sep-phase::after { content:""; flex:1; height:1px; background:var(--line); }
+  .sep-phase { color:var(--choreographer); }
+  .empty { color:var(--muted); padding:48px 0; text-align:center; }
+  .muted { color:var(--muted); }
+
+  @media (max-width: 820px) {
     main { grid-template-columns:1fr; height:auto; }
-    nav { border-right:0; border-bottom:1px solid var(--line); max-height:40vh; }
-    li { grid-template-columns:1fr; gap:0; }
+    aside { border-right:0; border-bottom:1px solid var(--line); max-height:45vh; }
+    section#detail { padding:16px; }
+    .stepper { grid-template-columns:repeat(2, 1fr); }
+    .qrow { grid-template-columns:22px 90px minmax(0,1fr); }
+    .qrow > :last-child { display:none; }
   }
 </style>
 </head>
 <body>
-<header><b>Ballet Stage</b><span id="live">…</span></header>
-<main><nav id="list"></nav><section id="detail"><p class="empty">Choisis une Rehearsal.</p></section></main>
+<header class="top">
+  <div class="brand"><b>Ballet</b><span>Scène</span></div>
+  <div class="live" id="live"><span class="dot"></span><span id="live-text">connexion…</span></div>
+</header>
+<main>
+  <aside id="list" aria-label="Projets et Rehearsals"></aside>
+  <section id="detail"><p class="empty">Choisis une Rehearsal.</p></section>
+</main>
 <script>
-const ROLES = ['choreographer', 'dancer', 'critic'];
-let data = null, version = '', picked = decodeURIComponent(location.hash.slice(1));
+const ROLES = ['dramaturg', 'choreographer', 'dancer', 'critic'];
+const PHASES = [['plan', 'Plan', 'Choreographer'], ['code', 'Code', 'Dancer'], ['review', 'Revue', 'Critic'], ['premiere', 'Premiere', 'merge sur main']];
+const PHASE_OF_ROLE = {choreographer:'plan', dancer:'code', critic:'review'};
+const STATUS = {open:'en cours', escalated:'escaladée', done:'terminée'};
+const TALK = new Set(['message', 'handoff', 'nudge', 'handover', 'director-decision']);
+
+let data = null, version = '', picked = decodeURIComponent(location.hash.slice(1)), shown = '';
+let filter = remembered('ballet-stage-filter') || 'all';
+const opened = new Set();
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[c]));
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
-const time = at => `<time title="${esc(new Date(at).toLocaleString('fr-FR'))}">${new Date(at).toLocaleTimeString('fr-FR')}</time>`;
+const clock = at => new Date(at).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+const day = at => new Date(at).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+const time = at => `<time datetime="${esc(at)}" title="${esc(new Date(at).toLocaleString('fr-FR'))}">${clock(at)}</time>`;
+const role = name => `<span class="role r-${esc(name)}">${esc(cap(name))}</span>`;
+const pill = status => `<span class="pill ${esc(status)}">${esc(STATUS[status] || status)}</span>`;
 
-/* Une Rehearsal : son état, ses entrées de journal et son rôle en cours. */
-function rehearsals(project){
-  return project.rehearsals.map(state => {
-    const events = project.journal.filter(e => e.rehearsal === state.id);
-    return {key:`${project.name}/${state.id}`, project, state, events, title:(project.titles?.[state.id] || '').replace(state.id, '').replace(/^\s*[·:-]\s*/, ''),
-            last:events.at(-1)?.at || '', current:currentRole(state, events)};
-  }).sort((a, b) => (a.state.status === 'done') - (b.state.status === 'done') || b.last.localeCompare(a.last));
+function remembered(key){ try { return localStorage.getItem(key); } catch { return null; } }
+function remember(key, value){ try { localStorage.setItem(key, value); } catch {} }
+
+function ago(at){
+  if (!at) return '';
+  const minutes = Math.round((Date.now() - new Date(at)) / 60000);
+  if (minutes < 1) return "à l'instant";
+  if (minutes < 60) return `il y a ${minutes} min`;
+  if (minutes < 60 * 24) return `il y a ${Math.round(minutes / 60)} h`;
+  return `il y a ${Math.round(minutes / 1440)} j`;
 }
+
+function span(from, to){
+  const minutes = Math.max(0, Math.round((new Date(to) - new Date(from)) / 60000));
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
+}
+
+/* --- le modèle : les Rehearsals d'un projet, la planification rattachée à la slice qui a pris son worktree --- */
+
+function rehearsals(project){
+  const states = project.rehearsals;
+  const absorbed = new Set(states.map(s => s.planned_by).filter(Boolean));
+  return states.filter(s => !absorbed.has(s.id)).map(state => {
+    const planning = state.planned_by ? states.find(s => s.id === state.planned_by) : null;
+    const events = project.journal.filter(e => e.rehearsal === state.id || (planning && e.rehearsal === planning.id));
+    return {
+      key:`${project.name}/${state.id}`, project, state, planning, events,
+      title:cleanTitle(project.titles?.[state.id], state.id) || (state.feature ? `planification de ${state.feature}` : ''),
+      first:events[0]?.at || '', last:events.at(-1)?.at || '', current:currentRole(state, events),
+    };
+  }).sort((a, b) => order(a) - order(b) || b.last.localeCompare(a.last));
+}
+
+const order = r => ({escalated:0, open:1, done:2}[r.state.status] ?? 3);
+const cleanTitle = (title, id) => (title || '').replace(/^(FEAT|BUG|TASK)-\d{3}(\.\d+)?\s*[·:-]?\s*/, '');
 
 /* Qui a la main : le Director sur une escalade ; sinon le dernier worker à qui le Conductor a remis quelque chose,
    tant qu'il n'a pas répondu. Les vieux journaux sans `handoff` : le rôle cité dans la dernière ligne du script. */
@@ -82,69 +254,270 @@ function currentRole(state, events){
   return 'conductor';
 }
 
-function renderList(){
-  $('#list').innerHTML = data.projects.map(project => `<h2>${esc(project.name)}</h2>` + rehearsals(project).map(r =>
-    `<a href="#${esc(r.key)}" class="${r.key === picked ? 'picked' : ''}">
-       <b>${esc(r.state.id)}</b> <span class="status ${r.state.status}">${r.state.status}</span>
-       ${r.current ? ` · <span class="now">${cap(r.current)}</span>` : ''}
-       <small>${esc(r.title || '#' + r.state.issue)}</small></a>`).join('') || '<p class="empty">Aucune Rehearsal.</p>').join('');
+/* Où en est la Rehearsal : la phase la plus avancée qu'un rôle a reçue, la Premiere une fois terminée. */
+function phases(r){
+  const seen = new Set(r.events.filter(e => e.event === 'handoff').map(e => PHASE_OF_ROLE[e.detail.role]).filter(Boolean));
+  const reached = r.state.status === 'done' ? 4 : Math.max(0, ...PHASES.map(([key], i) => seen.has(key) ? i : 0));
+  return PHASES.map(([key, label, who], i) => {
+    let state = i < reached ? 'done' : i === reached ? (r.state.status === 'escalated' ? 'wait' : 'now') : 'todo';
+    if (key === 'plan' && !seen.has('plan') && !r.planning && state === 'done') state = 'skip';
+    const note = {done:'fait', now:'en cours', wait:'attend le Director', todo:'à venir', skip:'plan déjà prêt'}[state];
+    return {key, label, who, state, note};
+  });
 }
+
+function queueEntries(project){
+  const queue = project.queue || {items:[], played:[]};
+  const states = Object.fromEntries(project.rehearsals.map(s => [s.id, s]));
+  const played = (queue.played || []).map(entry => ({
+    kind:'played', item:entry.item, id:entry.rehearsal, state:states[entry.rehearsal],
+    now:entry.rehearsal === queue.current, title:cleanTitle(project.titles?.[entry.rehearsal], entry.rehearsal),
+  }));
+  const next = (queue.items || []).map(item => ({
+    kind:'next', item, title:cleanTitle(project.queue_titles?.[item], item) || (item.startsWith('#') ? '' : 'feature à planifier'),
+  }));
+  return [...played, ...next];
+}
+
+/* --- la colonne : chaque projet, sa file, ses Rehearsals --- */
+
+function renderList(){
+  $('#list').innerHTML = data.projects.map(project => {
+    const all = rehearsals(project), live = all.filter(r => r.state.status !== 'done'), past = all.filter(r => r.state.status === 'done');
+    const queue = project.queue || {};
+    const stopped = !queue.current && (queue.items || []).length
+      ? `<div class="stopped">File arrêtée avant ${esc(queue.items[0])} : à corriger, puis <code>resume</code>.</div>` : '';
+    return `<div class="project">
+      <div class="project-head"><h2>${esc(project.name)}</h2>${queue.plan ? `<span class="tag">plan ${esc(queue.plan)}</span>` : ''}</div>
+      ${miniQueue(project)}${stopped}
+      ${live.map(card).join('')}
+      ${past.length ? `<div class="group-label">Terminées</div>${past.map(card).join('')}` : ''}
+      ${all.length ? '' : '<p class="empty">Aucune Rehearsal.</p>'}
+    </div>`;
+  }).join('');
+}
+
+function miniQueue(project){
+  const entries = queueEntries(project);
+  if (entries.length < 2) return '';
+  return `<div class="queue" aria-label="File">${entries.map(e => {
+    const cls = e.kind === 'next' ? 'next' : e.now ? `now ${e.state?.status || ''}` : e.state?.status === 'done' ? 'done' : '';
+    return `<span class="q ${cls}" title="${esc(e.title || e.item)}">${esc(e.id || e.item)}</span>`;
+  }).join('<span class="q-arrow">›</span>')}</div>`;
+}
+
+function card(r){
+  const s = r.state;
+  return `<a href="#${esc(r.key)}" class="card-link ${r.key === picked ? 'picked' : ''} ${s.status === 'done' ? 'is-done' : ''}">
+    <div class="card-row"><b>${esc(s.id)}</b>${pill(s.status)}${r.current ? `<span style="margin-left:auto">${role(r.current)}</span>` : ''}</div>
+    <div class="card-title">${esc(r.title || (s.issue ? '#' + s.issue : ''))}</div>
+    <div class="card-meta">${s.issue ? `<span>#${esc(s.issue)}</span>` : ''}${s.pull_request ? `<span>PR #${esc(s.pull_request)}</span>` : ''}<span>${esc(ago(r.last))}</span></div>
+  </a>`;
+}
+
+/* --- le détail --- */
 
 function renderDetail(){
   const r = data.projects.flatMap(rehearsals).find(r => r.key === picked);
-  if (!r) return $('#detail').innerHTML = '<p class="empty">Choisis une Rehearsal.</p>';
-  const s = r.state, cast = r.project.cast || {};
-  const box = $('#detail'), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.innerHTML = `<div class="head">
-      <h1>${esc(s.id)} ${esc(r.title)}</h1>
-      <p><span class="status ${s.status}">${s.status}</span>${r.current ? ` · en cours : <span class="now">${cap(r.current)}</span>` : ''}${s.reason ? ` · ${esc(s.reason)}` : ''}</p>
-      <p>issue #${esc(s.issue)}${s.pull_request ? ` · PR #${esc(s.pull_request)}` : ''} · ${esc(s.branch || 'rehearsal/' + s.id)}</p>
-      <p>${ROLES.map(role => `${cap(role)} : ${esc(cast[role]?.cli || '?')}${cast[role]?.model ? ' ' + esc(cast[role].model) : ''}${s.dispatches?.[role] ? ` (${esc(s.dispatches[role])})` : ''}`).join(' · ')}</p>
-    </div><ol>${r.events.map(line).join('')}</ol>`;
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  const box = $('#detail');
+  if (!r){ box.innerHTML = '<p class="empty">Choisis une Rehearsal.</p>'; return; }
+  /* Une Rehearsal qu'on ouvre se lit d'en haut ; en bas du fil, on suit ce qui arrive. */
+  const fresh = shown !== r.key, atBottom = box.scrollTop > 0 && box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  const scroll = box.scrollTop;
+  box.innerHTML = `<div class="wrap">${hero(r)}${callout(r)}${stepper(r)}${metrics(r)}${cast(r)}${queueBlock(r)}${thread(r)}</div>`;
+  box.scrollTop = fresh ? 0 : atBottom ? box.scrollHeight : scroll;
+  shown = r.key;
 }
 
-/* Une ligne du fil : qui parle à qui, et le texte entier dépliable quand le journal le garde. */
-function line(e){
+function hero(r){
+  const s = r.state;
+  const bits = [pill(s.status), r.current ? `en main : ${role(r.current)}` : '',
+    s.issue ? `issue #${esc(s.issue)}` : `feature ${esc(s.feature)}`, s.pull_request ? `PR #${esc(s.pull_request)}` : '',
+    `<span class="mono">rehearsal/${esc(s.id)}</span>`, r.planning ? `planifiée dans ${esc(r.planning.id)}` : '',
+    s.plan ? `plan ${esc(s.plan)}` : ''].filter(Boolean);
+  return `<div class="hero">
+    <h1><span class="id">${esc(s.id)}</span>${esc(r.title)}</h1>
+    <div class="hero-line">${bits.join('<span class="sep">·</span>')}</div>
+  </div>`;
+}
+
+/* Ce que le Director doit faire, dit simplement ; la ligne du script en dessous. */
+function callout(r){
+  const s = r.state;
+  if (s.status === 'done') return s.reason ? `<div class="callout done"><b>Premiere</b><p>${esc(s.reason)}</p></div>` : '';
+  if (s.status !== 'escalated') return '';
+  const toDirector = (s.pending || []).find(q => q.to === 'director');
+  const action = s.blocked_on === 'plan'
+    ? `Lis le plan de <b>#${esc(s.plan_issue)}</b> et ses slices, pose <code>ballet:plan-approved</code> sur #${esc(s.plan_issue)}, puis demande au Conductor de reprendre.`
+    : s.blocked_on === 'size'
+      ? `Le diff dépasse le seuil : pose <code>ballet:size-accepted</code> sur la PR #${esc(s.pull_request)}, ou <code>ballet:rejected</code> avec un commentaire, puis reprends.`
+      : toDirector
+        ? `Le ${esc(cap(toDirector.from))} te pose une question : réponds-lui par le Conductor (un message <code>answer</code>).`
+        : s.pull_request
+          ? `Tranche sur la PR #${esc(s.pull_request)} : <code>ballet:approved</code>, ou <code>ballet:rejected</code> avec un commentaire, puis reprends.`
+          : 'Lis le motif et dis au Conductor comment continuer.';
+  return `<div class="callout"><b>Au Director</b><p>${action}</p><p class="muted">${esc(s.reason)}</p></div>`;
+}
+
+function stepper(r){
+  return `<div class="stepper">${phases(r).map(p =>
+    `<div class="phase ${p.state}"><span>${p.label}</span><small>${esc(p.who)} · ${p.note}</small></div>`).join('')}</div>`;
+}
+
+function metrics(r){
+  const s = r.state, limits = r.project.limits || {}, size = s.size || {};
+  const percent = size.limit ? Math.min(100, Math.round(size.counted / size.limit * 100)) : 0;
+  const escalations = r.events.filter(e => e.event === 'escalate').length;
+  const end = s.status === 'done' ? r.last : new Date().toISOString();
+  return `<div class="grid">
+    <div class="metric"><small>Allers-retours Dancer ↔ Critic</small><b>${s.round_trips ?? 0}<em> / ${esc(limits.max_round_trips ?? '?')}</em></b></div>
+    <div class="metric"><small>Diff ${size.over ? (size.strict ? '· au-dessus, strict' : '· au-dessus') : ''}</small>
+      ${size.limit ? `<b>${size.counted}<em> / ${size.limit} lignes</em></b><div class="bar ${size.over ? 'over' : ''}"><i style="width:${percent}%"></i></div>` : '<b><em>pas encore mesuré</em></b>'}</div>
+    <div class="metric"><small>Questions en attente</small><b>${(s.pending || []).length}</b></div>
+    <div class="metric"><small>Escalades</small><b>${escalations}</b></div>
+    <div class="metric"><small>Durée</small><b>${r.first ? span(r.first, end) : '—'}</b></div>
+  </div>`;
+}
+
+function cast(r){
+  const cast = r.project.cast || {}, dispatches = r.state.dispatches || {};
+  return `<div class="block"><h3>Distribution</h3><div class="cast">${ROLES.map(name => `
+    <div class="actor ${dispatches[name] ? '' : 'idle'}" title="${esc(dispatches[name] || 'pas lancé dans cette Rehearsal')}">
+      ${role(name)}<small>${esc(cast[name]?.cli || '?')}${cast[name]?.model ? ' · ' + esc(cast[name].model) : ''}${dispatches[name] ? ' · lancé' : ''}</small>
+    </div>`).join('')}</div></div>`;
+}
+
+function queueBlock(r){
+  const entries = queueEntries(r.project);
+  if (entries.length < 2 || !entries.some(e => e.id === r.state.id || e.now)) return '';
+  const plan = r.project.queue?.plan;
+  return `<div class="block"><h3>File${plan ? ` <span class="tag">plan ${esc(plan)}</span>` : ''}</h3><div class="qlist">${entries.map((e, i) => {
+    const status = e.kind === 'next' ? '<span class="muted">à venir</span>' : e.state ? pill(e.state.status) : '';
+    const inner = `<span class="n">${i + 1}</span><b class="mono">${esc(e.id || e.item)}</b>
+      <span class="t">${esc(e.title || '')}${e.id && e.item !== '#' + (e.state?.issue || '') ? ` <span class="muted">← ${esc(e.item)}</span>` : ''}</span>${status}`;
+    return e.id ? `<a class="qrow ${e.now ? 'now' : ''}" href="#${esc(r.project.name + '/' + e.id)}">${inner}</a>` : `<div class="qrow">${inner}</div>`;
+  }).join('')}</div></div>`;
+}
+
+/* --- le fil : les échanges entre rôles, et ce que le script a fait --- */
+
+function thread(r){
+  const tabs = [['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([key, label]) =>
+    `<button type="button" data-filter="${key}" aria-pressed="${filter === key}">${label}</button>`).join('');
+  let lastDay = '', lastRehearsal = '';
+  const rows = r.events.map((e, i) => {
+    if (filter === 'talk' && !TALK.has(e.event)) return '';
+    if (filter === 'script' && TALK.has(e.event)) return '';
+    let head = '';
+    if (day(e.at) !== lastDay){ lastDay = day(e.at); head += `<li class="sep-day">${esc(lastDay)}</li>`; }
+    if (r.planning && e.rehearsal !== lastRehearsal){
+      lastRehearsal = e.rehearsal;
+      head += `<li class="sep-phase">${e.rehearsal === r.planning.id ? `Planification de ${esc(r.planning.feature || r.planning.id)}` : `${esc(r.state.id)} dans le même worktree`}</li>`;
+    }
+    return head + event(e, `${r.key}|${i}`);
+  }).join('');
+  return `<div class="block"><h3>Fil <span class="muted" style="text-transform:none;letter-spacing:0">${r.events.length} entrées</span><span class="tabs">${tabs}</span></h3>
+    <ol class="thread">${rows || '<li class="empty">Rien à montrer ici.</li>'}</ol></div>`;
+}
+
+function event(e, key){
   const d = e.detail || {};
-  const row = (cls, head, body) => `<li class="${cls}">${time(e.at)}<div>${head}${body || ''}</div></li>`;
-  const text = t => t ? `<details><summary>texte</summary><pre>${esc(t)}</pre></details>` : '';
   switch (e.event){
-    case 'handoff':
-      return row('', `<span class="who">Conductor</span> → <span class="who worker">${cap(d.role)}</span> · ${esc(d.how)}${d.agent ? ` (${esc(d.agent)}${d.model ? ' ' + esc(d.model) : ''})` : ''}`, text(d.text));
-    case 'nudge':
-      return row('', `<span class="who">Conductor</span> → <span class="who worker">${cap(d.role)}</span> · nudge`);
-    case 'message':
-      return row('', `<span class="who worker">${cap(d.from)}</span> → <span class="who">${cap(d.to)}</span> · ${esc(d.type)} · ${esc(d.subject)} round ${esc(d.round)}`, text(d.text));
-    case 'wait': case 'escalate': case 'done':
-      return row('step', `script → <b>${e.event}</b>${d.reason ? ' : ' + esc(d.reason) : ''}`, (d.done || []).map(x => `<div>- ${esc(x)}</div>`).join(''));
-    case 'diff-size':
-      return row('step', `diff : ${d.counted} lignes (limite ${d.limit})${d.over ? ' · au-dessus' : ''}`);
-    case 'policy':
-      return row('step', `policy ${esc(d.role)} : ${d.violations?.length ? esc(d.violations.join('; ')) : 'en règle'}`);
-    case 'begin':
-      return row('step', '<b>begin</b>');
-    default:
-      return row('step', `${esc(e.event)}`, text(JSON.stringify(d, null, 2)));
+    case 'message': return message(e, d, key);
+    case 'handoff': return bubble('conductor', 'handoff', `${role('conductor')}<span class="to">→</span>${role(d.role)}
+      <span class="badge">${esc(HOW[d.how] || d.how)}</span>${d.agent ? `<span class="muted">${esc(d.agent)}${d.model ? ' ' + esc(d.model) : ''}</span>` : ''}${time(e.at)}`, text(d.text, key, d.how === 'start' ? 3 : 0));
+    case 'nudge': return line(e, '', `${role('conductor')} relance ${role(d.role)}`);
+    case 'handover': return line(e, 'final', `<b>Passage de main</b> : le worktree de la planification joue <b>${esc(d.to)}</b> (#${esc(d.issue)})${d.planned ? `, slice de #${esc(d.planned)}` : ''}`);
+    case 'director-decision': return line(e, 'final', `${role('director')} ${decision(d)}`);
+    case 'begin': return line(e, '', `<b>Ouverture</b>${d.item ? ` de ${esc(d.item)}` : ''}${d.plan ? ` · plan ${esc(d.plan)}` : ''}`);
+    case 'wait': case 'escalate': case 'done': return step(e, d, key);
+    case 'diff-size': return line(e, d.over ? 'escalate' : '', `<b>Diff</b> : ${esc(d.counted)} lignes sur ${esc(d.limit)}${d.excluded ? `, ${esc(d.excluded)} exclues` : ''}${d.over ? ' · au-dessus' : ''}`);
+    case 'policy': return line(e, d.violations?.length ? 'bad' : '', `<b>Politique</b> · ${role(d.role)} ${d.violations?.length
+      ? `: ${d.violations.length} violation(s)<ul class="steps">${d.violations.map(v => `<li>${esc(v)}</li>`).join('')}</ul>` : 'en règle'}`);
+    default: return line(e, '', `<b>${esc(e.event)}</b>`, text(JSON.stringify(d, null, 2), key, 0));
   }
 }
 
-function render(){ renderList(); renderDetail(); }
+const HOW = {start:'lancé', send:'relancé', reply:'réponse', nudge:'relance'};
+const KIND = {question:'warn', answer:'', report:'', verdict:'', escalation:'bad'};
 
-addEventListener('hashchange', () => { picked = decodeURIComponent(location.hash.slice(1)); render(); $('#detail').scrollTop = 1e9; });
+function message(e, d, key){
+  const verdict = d.type === 'verdict' && (String(d.text || '').match(/VERDICT:\s*(APPROVED|REJECTED|ESCALATE)/) || [])[1];
+  const outcome = d.type === 'report' && (String(d.text || '').match(/^- Outcome:\s*(\w+)/m) || [])[1];
+  const tone = verdict ? {APPROVED:'ok', REJECTED:'bad', ESCALATE:'warn'}[verdict] : KIND[d.type] || '';
+  const label = verdict || (outcome ? `${d.type} · ${outcome}` : d.type);
+  return bubble(d.from, '', `${role(d.from)}<span class="to">→</span>${role(d.to)}<span class="badge ${tone}">${esc(label)}</span>
+    <span class="muted">${esc(d.subject)}${d.round > 1 ? ` · tour ${esc(d.round)}` : ''}</span>${time(e.at)}`, text(withoutHeader(d.text), key, 6));
+}
+
+/* L'en-tête JSON du message est déjà dans la ligne du dessus : le texte commence après. */
+const withoutHeader = t => String(t || '').replace(/^\{"ballet":[^\n]*\n+/, '');
+
+function decision(d){
+  if ('approved' in d) return d.approved ? `approuve le plan de #${esc(d.plan)}` : `n'a pas encore approuvé le plan de #${esc(d.plan)}`;
+  return d.verdict ? `décide <b>${esc(d.verdict)}</b>${d.comments?.length ? ` avec ${d.comments.length} commentaire(s)` : ''}` : "n'a encore rien décidé";
+}
+
+function step(e, d, key){
+  const tone = {escalate:'escalate', done:'final'}[e.event] || '';
+  const label = {wait:'attend', escalate:'escalade', done:'terminé'}[e.event];
+  const done = d.done || [], shown = opened.has(key) ? done : done.slice(0, 3);
+  const more = done.length > 3 ? `<button type="button" class="more" data-open="${esc(key)}">${opened.has(key) ? 'moins' : `+ ${done.length - 3} étape(s)`}</button>` : '';
+  return line(e, tone, `<b>Script · ${label}</b>${d.reason ? ` : ${esc(d.reason)}` : ''}`,
+    (shown.length ? `<ul class="steps">${shown.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '') + more);
+}
+
+function bubble(who, cls, meta, body){
+  const initials = {dramaturg:'Dr', choreographer:'Ch', dancer:'Da', critic:'Cr', conductor:'Co', director:'Di'}[who] || '?';
+  return `<li class="ev"><span class="avatar r-${esc(who)}">${initials}</span><div class="bubble ${cls}"><div class="meta">${meta}</div>${body || ''}</div></li>`;
+}
+
+function line(e, tone, html, extra = ''){
+  return `<li class="ev ${tone}"><span class="tick"><i></i></span><div class="line">${time(e.at)}${html}${extra}</div></li>`;
+}
+
+/* Le texte entier, replié au-delà de quelques lignes ; `lines` = 0 : replié tant qu'on ne l'ouvre pas. */
+function text(t, key, lines){
+  if (!t) return '';
+  const count = String(t).split('\n').length, open = opened.has(key);
+  if (!lines && !open) return `<button type="button" class="more" data-open="${esc(key)}">voir le texte (${count} lignes)</button>`;
+  const long = count > lines;
+  return `<pre class="text ${long && !open ? 'clamp' : ''}">${esc(t)}</pre>` +
+    (long || !lines ? `<button type="button" class="more" data-open="${esc(key)}">${open ? 'replier' : `tout afficher (${count} lignes)`}</button>` : '');
+}
+
+/* --- vie de la page --- */
+
+function render(){ if (data){ renderList(); renderDetail(); } }
+
+document.addEventListener('click', event => {
+  const toggle = event.target.closest('[data-open]'), tab = event.target.closest('[data-filter]');
+  if (toggle){ const key = toggle.dataset.open; opened.has(key) ? opened.delete(key) : opened.add(key); renderDetail(); }
+  if (tab){ filter = tab.dataset.filter; remember('ballet-stage-filter', filter); renderDetail(); }
+});
+
+addEventListener('hashchange', () => { picked = decodeURIComponent(location.hash.slice(1)); render(); });
 
 async function poll(){
   try {
     const answer = await (await fetch('/api/stage?since=' + encodeURIComponent(version), {cache:'no-store'})).json();
-    $('#live').textContent = 'journal suivi · ' + new Date().toLocaleTimeString('fr-FR');
+    $('#live').classList.remove('off');
+    $('#live-text').textContent = 'en direct · ' + new Date().toLocaleTimeString('fr-FR');
     if (!answer.unchanged){
       version = answer.version; data = answer;
-      if (!picked){ const first = data.projects.flatMap(rehearsals)[0]; if (first) picked = first.key; }
+      if (!data.projects.flatMap(rehearsals).some(r => r.key === picked)){
+        const first = data.projects.flatMap(rehearsals)[0];
+        picked = first ? first.key : '';
+      }
       render();
     }
-  } catch { $('#live').textContent = 'hors ligne'; }
+  } catch {
+    $('#live').classList.add('off');
+    $('#live-text').textContent = 'hors ligne';
+  }
   setTimeout(poll, 2000);
 }
+setInterval(renderList, 30000);   // les « il y a … » vieillissent
 poll();
 </script>
 </body>

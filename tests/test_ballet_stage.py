@@ -50,6 +50,22 @@ class BalletStageTest(unittest.TestCase):
         cast = ballet_stage.snapshot([self.home])["projects"][0]["cast"]
         self.assertEqual(cast["dancer"]["cli"], "claude")
 
+    def test_donne_les_seuils_d_escalade_du_profil(self):
+        limits = ballet_stage.snapshot([self.home])["projects"][0]["limits"]
+        self.assertEqual((limits["max_round_trips"], limits["max_diff_lines"]), (2, 400))
+
+    def test_donne_la_file_et_le_titre_des_issues_qui_y_attendent(self):
+        queue = {"plan": "review", "items": ["#15", "FEAT-003"], "current": "FEAT-002.1",
+                 "played": [{"item": "FEAT-002", "rehearsal": "FEAT-002.1"}]}
+        (self.run / "queue.json").write_text(json.dumps(queue), encoding="utf-8")
+        project = ballet_stage.snapshot([self.home])["projects"][0]
+        self.assertEqual(project["queue"], queue)
+        self.assertEqual(project["queue_titles"], {"#15": "FEAT-001.2 · Issue 15"})
+        self.assertEqual(project["rehearsals"], [])
+
+    def test_sans_file_la_file_est_vide(self):
+        self.assertEqual(ballet_stage.snapshot([self.home])["projects"][0]["queue"]["items"], [])
+
     def test_saute_une_ligne_a_moitie_ecrite(self):
         self._journal(json.dumps(ENTRY), '{"at": "2026-11-16T12:3')
         self.assertEqual(ballet_stage.snapshot([self.home])["projects"][0]["journal"], [ENTRY])

@@ -4,8 +4,9 @@
     python3 ballet_stage.py --scan <dossier>        # tous les sous-dossiers qui ont un `.ballet/run/`
     python3 ballet_stage.py --port 7700             # le port d'écoute (7700 par défaut)
 
-Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json` et `journal.jsonl`),
-la distribution du profil (CLI et modèle par rôle) et le titre des issues (`gh issue view`, gardé en mémoire).
+Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json`, la file `queue.json` et
+`journal.jsonl`), le profil (CLI et modèle par rôle, seuils d'escalade) et le titre des issues, celles des Rehearsals
+comme celles qui attendent dans la file (`gh issue view`, gardé en mémoire).
 Il n'écoute que sur 127.0.0.1. Sans argument, le projet est le dossier courant.
 """
 
@@ -20,6 +21,8 @@ import ballet_config
 
 PAGE = Path(__file__).resolve().parent.parent / "stage" / "index.html"
 RUN_DIR = Path(".ballet") / "run"
+QUEUE_FILE = "queue.json"
+LIMITS = ("max_round_trips", "max_diff_lines", "max_diff_strict", "max_exchange_rounds")
 DEFAULT_PORT = 7700
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 TITLES = {}   # (home, issue) → titre : une issue ne change pas de titre pendant qu'on la regarde
@@ -58,28 +61,48 @@ def project_homes(folder):
 
 def _project(home):
     run = Path(home) / RUN_DIR
-    states = _states(run)
+    states, queue, profile = _states(run), _queue(run), _profile(home)
     return {
         "name": Path(home).resolve().name,
         "home": str(Path(home).resolve()),
-        "cast": _cast(home),
+        "cast": profile.get("roles", {}),
+        "limits": _limits(profile),
         "titles": _titles(home, states),
         "rehearsals": states,
+        "queue": queue,
+        "queue_titles": _queue_titles(home, queue),
         "journal": _journal(run),
     }
 
 
-def _cast(home):
-    """CLI et modèle de chaque rôle, tels que le profil les route ; rien si le profil est illisible."""
+def _profile(home):
+    """Le profil effectif du projet ; rien s'il est illisible : la page fait sans."""
     try:
-        return ballet_config.effective_config(home).get("roles", {})
+        return ballet_config.effective_config(home)
     except (ballet_config.ConfigError, OSError):
         return {}
+
+
+def _limits(profile):
+    escalation = profile.get("escalation", {})
+    return {key: escalation[key] for key in LIMITS if key in escalation}
 
 
 def _titles(home, states):
     issues = {state["id"]: str(state.get("issue", "")) for state in states}
     return {rehearsal: _issue_title(home, issue) for rehearsal, issue in issues.items() if issue}
+
+
+def _queue(run):
+    """La file de la Piece en cours ; une file vide quand il n'y en a pas."""
+    queue = _json(run / QUEUE_FILE) if (run / QUEUE_FILE).is_file() else None
+    return queue or {"plan": "", "items": [], "current": "", "played": []}
+
+
+def _queue_titles(home, queue):
+    """Le titre des issues qui attendent dans la file (`#15`) ; une feature (`FEAT-003`) n'a pas encore d'issue."""
+    waiting = [item for item in queue.get("items", []) if item.startswith("#")]
+    return {item: _issue_title(home, item[1:]) for item in waiting}
 
 
 def _issue_title(home, issue):
