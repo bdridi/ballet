@@ -1,7 +1,8 @@
 """Le Conductor déterministe : l'état d'une Rehearsal, ses transitions, et chaque action qu'elles déclenchent.
 
     python3 ballet_rehearsal.py begin    <issue>                                   # ouvre la Rehearsal, lance le premier rôle
-    python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message d'un worker, ou du Director
+    python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
+    python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI encore en cours)
     python3 ballet_rehearsal.py resume   <ID>                                      # applique la décision du Director (libellé de la PR)
     python3 ballet_rehearsal.py status   <ID> [--json]                             # où en est la Rehearsal
@@ -37,7 +38,7 @@ from pathlib import Path
 import ballet_config
 import ballet_github
 import ballet_size
-from ballet_message import MessageError, read_message, verdict_of
+from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
 
 RUN_DIR = Path(".ballet") / "run"
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
@@ -71,6 +72,7 @@ class Rehearsal:
     label: str = ""                                  # le dernier verdict posé en libellé par le script
     size: dict = field(default_factory=dict)         # la dernière mesure du diff
     blocked_on: str = ""                             # "size" : le Critic attend que le Director accepte la taille
+    notes: str = ""                                  # "" | "asked" (le Dancer prend les notes) | "reviewed" (le Critic a relu)
 
     @property
     def branch(self):
@@ -125,12 +127,25 @@ def begin(issue, home, tools):
 
 
 def receive(rehearsal_id, message_path, question_id, home, tools):
+    """Un message écrit dans un fichier : celui du Director (une réponse)."""
     config = _checked_config(home)
     rehearsal = _load(rehearsal_id, home)
     try:
         header, text = _message(message_path)
-        _log(home, rehearsal, "message", header)
-        step = _route(rehearsal, header, text, question_id, config, home, tools)
+        step = _handle(rehearsal, header, text, question_id, config, home, tools)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        step = Step("escalate", str(error))
+    return _settle(rehearsal, step, home, tools)
+
+
+def receive_from_orca(rehearsal_id, message_id, home, tools):
+    """Le message d'un worker, lu chez Orca par son id : le Conductor ne le recopie pas."""
+    config = _checked_config(home)
+    rehearsal = _load(rehearsal_id, home)
+    try:
+        kind, body = _orca_message(message_id, tools)
+        header, text = _parsed(body)
+        step = _handle(rehearsal, header, text, message_id if kind == "question" else None, config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
     return _settle(rehearsal, step, home, tools)
@@ -168,6 +183,11 @@ def status(rehearsal_id, home, tools):
 
 
 # --- les transitions ----------------------------------------------------------
+
+
+def _handle(rehearsal, header, text, question_id, config, home, tools):
+    _log(home, rehearsal, "message", header)
+    return _route(rehearsal, header, text, question_id, config, home, tools)
 
 
 def _route(rehearsal, header, text, question_id, config, home, tools):
@@ -246,9 +266,21 @@ def _after_code(rehearsal, report, config, home, tools):
     return _to_the_critic(rehearsal, step, config, home, tools)
 
 
+def _notes_to_the_dancer(rehearsal, count, step, config, home, tools):
+    """Approuvé avec des notes : le Dancer les prend en un seul commit, le Critic ne relit que celui-ci.
+    Ce tour ne compte pas dans `max_round_trips`, et n'a lieu qu'une fois."""
+    rehearsal.notes = "asked"
+    _ask_role(rehearsal, "dancer", _notes_assignment(rehearsal), config, home, tools)
+    step.done.append(f"approved with {count} note(s): dancer asked to take them in one commit")
+    return step
+
+
 def _to_the_critic(rehearsal, step, config, home, tools):
-    _ask_role(rehearsal, "critic", _critic_assignment(rehearsal), config, home, tools)
-    step.done.append(f"critic asked to review #{rehearsal.pull_request}, round {rehearsal.round_trips + 1}")
+    assignment = _notes_review_assignment(rehearsal) if rehearsal.notes == "asked" else _critic_assignment(rehearsal)
+    if rehearsal.notes == "asked":
+        rehearsal.notes = "reviewed"
+    _ask_role(rehearsal, "critic", assignment, config, home, tools)
+    step.done.append(f"critic asked to review #{rehearsal.pull_request}, round {_review_round(rehearsal)}")
     return step
 
 
@@ -281,6 +313,8 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
     step.done.append(f"verdict {verdict} published on #{rehearsal.pull_request}, labelled, Verdicts comment updated")
     if verdict == "ESCALATE":
         return Step("escalate", "the Critic escalates: see its review", step.done)
+    if verdict == "APPROVED" and notes_of(text) and not rehearsal.notes:
+        return _notes_to_the_dancer(rehearsal, len(notes_of(text)), step, config, home, tools)
     if verdict == "APPROVED":
         premiere_step = _premiere(rehearsal, tools)
         return Step(premiere_step.next, premiere_step.reason, step.done + premiere_step.done)
@@ -431,9 +465,25 @@ def _first_assignment(role, rehearsal):
     return f"Issue #{rehearsal.issue} has no plan yet: write it (`plan`), commit your ADRs on this branch, then report."
 
 
+def _review_round(rehearsal):
+    """Le numéro du prochain tour de review ; le tour des notes en prend un, hors `max_round_trips`."""
+    return rehearsal.round_trips + 1 + (1 if rehearsal.notes else 0)
+
+
 def _critic_assignment(rehearsal):
-    return (f"Review pull request #{rehearsal.pull_request} of issue #{rehearsal.issue}, round {rehearsal.round_trips + 1}: "
+    return (f"Review pull request #{rehearsal.pull_request} of issue #{rehearsal.issue}, round {_review_round(rehearsal)}: "
             f"the branch `{rehearsal.branch}` against the plan.")
+
+
+def _notes_assignment(rehearsal):
+    return (f"The Critic approved pull request #{rehearsal.pull_request} with notes. Read its review "
+            f"(`read-pr {rehearsal.pull_request}`) and take its notes in one single commit, then report again.")
+
+
+def _notes_review_assignment(rehearsal):
+    return (f"Notes round of pull request #{rehearsal.pull_request}, round {_review_round(rehearsal)}: you approved it, "
+            "and the Dancer took your notes in one commit. Review only the commits since your approval: the notes "
+            "taken or declined with a reason, nothing broken, the proof green. No new notes in this round.")
 
 
 def _director_fix_assignment(rehearsal, comments):
@@ -447,8 +497,9 @@ def _quote(text):
 
 
 def _fix_assignment(rehearsal):
-    return (f"Round {rehearsal.round_trips + 1}: the Critic rejected pull request #{rehearsal.pull_request}. "
-            f"Read its review (`read-pr {rehearsal.pull_request}`), fix each blocking point, then report again.")
+    return (f"Round {_review_round(rehearsal)}: the Critic rejected pull request #{rehearsal.pull_request}. "
+            f"Read its review (`read-pr {rehearsal.pull_request}`), fix each blocking point, then take its notes "
+            "in one last commit, then report again.")
 
 
 # --- état, journal et publication ---------------------------------------------
@@ -613,6 +664,33 @@ def _message(path):
         raise RehearsalError(f"invalid message, send it back to its author: {error}") from error
 
 
+def _parsed(body):
+    try:
+        return parse_message(body)
+    except MessageError as error:
+        raise RehearsalError(f"invalid message, send it back to its author: {error}") from error
+
+
+def _orca_message(message_id, tools):
+    """Le type Orca (`question`, `worker_done`…) et le corps entier du message, retrouvé dans la boîte par son id.
+    Un `escalation` d'Orca (worker arrêté sans rapport) n'est pas un message Ballet : le Director le reçoit tel quel."""
+    found = json.loads(tools.orca(["orchestration", "inbox", "--limit", "200", "--full", "--json"]))
+    message = next((item for item in _find_list(found, "messages") if item.get("id") == message_id), None)
+    if not message:
+        raise RehearsalError(f"no Orca message {message_id} in the inbox")
+    if message.get("type") == "escalation":
+        raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
+    return message.get("type"), message.get("body", "")
+
+
+def _find_list(value, key):
+    if isinstance(value, dict):
+        if isinstance(value.get(key), list):
+            return value[key]
+        return next((found for item in value.values() if (found := _find_list(item, key))), [])
+    return []
+
+
 def _open_worktree(rehearsal, tools):
     git = tools.git(rehearsal.repo)
     git(["fetch", "origin", "main"])
@@ -677,6 +755,8 @@ def main(argv, home=".", tools=None):
 def _command(command, arguments, home, tools):
     if command == "begin" and len(arguments) == 1:
         return begin(arguments[0], home, tools).render()
+    if command == "receive" and len(arguments) == 3 and arguments[1] == "--message":
+        return receive_from_orca(arguments[0], arguments[2], home, tools).render()
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):
         return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools).render()
     if command == "premiere" and len(arguments) == 1:
@@ -687,7 +767,7 @@ def _command(command, arguments, home, tools):
         return status(arguments[0], home, tools).render()
     if command == "status" and arguments[1:] == ["--json"]:
         return json.dumps(asdict(_load(arguments[0], home)), indent=2)
-    raise UsageError("usage: begin <issue> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | resume <ID> | status <ID> [--json]")
+    raise UsageError("usage: begin <issue> | receive <ID> --message <msg-id> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | resume <ID> | status <ID> [--json]")
 
 
 if __name__ == "__main__":

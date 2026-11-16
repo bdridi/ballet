@@ -21,7 +21,11 @@ class MessageError(Exception):
 
 def read_message(path):
     """Renvoie l'en-tête vérifié et le texte entier du message."""
-    text = _read(path)
+    return parse_message(_read(path))
+
+
+def parse_message(text):
+    """Comme `read_message`, pour un message déjà en main (lu chez Orca)."""
     header = _parse_header(text.split("\n", 1)[0])
     _check_header(header)
     if header["type"] == "verdict":
@@ -34,6 +38,14 @@ def verdict_of(text):
     if not match:
         raise MessageError("a verdict needs a `VERDICT: APPROVED|REJECTED|ESCALATE` line")
     return match.group(1)
+
+
+def notes_of(text):
+    """Les notes d'un verdict : les points de sa section `## Notes`, que le Dancer prend en un commit."""
+    section = re.search(r"^## Notes[ \t]*\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+    if not section:
+        return []
+    return [item.strip() for item in re.findall(r"^(?:-|\d+\.)\s+(.+)$", section.group(1), re.MULTILINE)]
 
 
 def main(argv):

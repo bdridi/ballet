@@ -30,6 +30,7 @@ Run the repo's proof yourself; never trust the report. Then check, task by task:
 
 - **The plan**: every task of the repo's section is done, one commit each, in order; nothing the plan does not ask for; the *Decisions* (and amendments) are followed; no dependency the plan does not name.
 - **The criteria**: every covered criterion has its `.feature` scenarios tagged `@FEAT-NNN-Cn`, and they pass; each test proves its one behaviour (it would fail without the code).
+- **The red**: each task of the report quotes its red test and the failure line; the failure is the expected one (an assertion on the task's behaviour, not a typo or a missing import). A task without it is a blocking point: TDD cannot be checked.
 - **The tests**: no existing test modified or deleted (`git diff --diff-filter=MD main...HEAD`), unless a task says so.
 - **The domain**: names come from the glossary; behaviour lives in the model, use cases only orchestrate (rule `ballet:ddd` if the project applies it).
 - **The code**: the common rules and the project's `AGENTS.md`, including rules added on this branch.
@@ -38,10 +39,12 @@ Run the repo's proof yourself; never trust the report. Then check, task by task:
 ## 3. Decide
 
 - **Blocking point**: a fact you can show, that the Dancer must fix before the merge: a failing proof, a missing or wrong task, a criterion not proven, a broken rule, a *Decision* not followed, a modified test, out of scope code. Each one **starts with** its place (`` `file:line` `` or `` `file:start-end` ``, else a commit) and gives its reference (task, criterion, rule, decision), and says what is expected. A point that starts with a place in the diff is published as a comment on that line; the rest stays in the review's body.
-- **Note**: anything else worth saying (a taste, a later improvement, a doubt that does not block). Optional: the Dancer does not have to act on it. Never turn a note into a blocking point in a later round.
+- **Note**: anything else worth saying (a taste, a later improvement, a doubt that does not block). The Dancer takes the notes in one commit after the blocking points, or declines each with why; with `APPROVED`, the Conductor sends them back for that one commit before the merge. So keep a note small enough for one commit. Never turn a note into a blocking point in a later round.
 - **`VERDICT: APPROVED`**: no blocking point.
 - **`VERDICT: REJECTED`**: at least one blocking point. **All of them at once**, in one batch: never hold one back for the next round.
 - **`VERDICT: ESCALATE`**: the Director must decide. You doubt your own verdict; the change leaves the feature's scope; it touches a sensitive zone; or the code is right but a *Decision* of the plan looks wrong (the Choreographer's call, not the Dancer's).
+
+**On a notes round** (the Conductor says so): you approved, the Dancer took your notes in one commit. Review only that commit: each note taken or declined with a reason, nothing broken, the proof green. No new notes; a blocking point only if the commit broke something.
 
 **On a later round**: check each point of your previous review, one by one (fixed or not), then review only what changed since. A new blocking point in code that has not changed is allowed only if you missed it, and you say so.
 

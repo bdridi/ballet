@@ -51,6 +51,7 @@ class FakeWorld:
         self.timeline = []
         self.issue_state = "OPEN"
         self.numstat = "10\t2\tsrc/a.rs\n"
+        self.inbox = []
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -63,6 +64,8 @@ class FakeWorld:
             return self.numstat
         if tool == "git" and "worktree" in arguments:
             return f"worktree {self.home}\nbranch refs/heads/main\n\nworktree /wt/FEAT-001.2\nbranch refs/heads/rehearsal/FEAT-001.2\n"
+        if arguments[:2] == ["orchestration", "inbox"]:
+            return json.dumps({"ok": True, "result": {"messages": self.inbox}})
         if arguments[:2] == ["orchestration", "worker-start"]:
             self.dispatches += 1
             return json.dumps({"ok": True, "result": {"worker": {"dispatchId": f"ctx_{self.dispatches}"}}})
@@ -509,6 +512,85 @@ class BalletRehearsalTest(unittest.TestCase):
     def test_status_montre_la_derniere_mesure(self):
         self.to_the_critic()
         self.assertIn("- diff: 12 lines counted, 0 excluded, limit 400: within the limit", self.run_main("status", "FEAT-001.2")[1])
+
+    # --- notes du Critic ---
+
+    def critic_says(self, verdict, notes=""):
+        notes_section = f"\n\n## Notes\n\n{notes}" if notes else ""
+        return self.receive(message("critic", "conductor", "verdict", f"VERDICT: {verdict}\n\n## Blocking\n\nNone.{notes_section}"))
+
+    def last_send_body(self):
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        return send[send.index("--to") + 1], send[send.index("--body") + 1]
+
+    def test_approuve_avec_des_notes_le_dancer_les_prend_en_un_commit(self):
+        self.to_the_critic()
+        step = self.critic_says("APPROVED", "- `a.rs:1`: private fields.\n- Cache the key.")
+        self.assertEqual(step.next, "wait")
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        to, body = self.last_send_body()
+        self.assertEqual(to, "dispatch:ctx_1")
+        self.assertIn("one single commit", body)
+        self.assertIn("approved with 2 note(s): dancer asked to take them in one commit", step.done)
+
+    def test_le_critic_ne_relit_que_le_commit_des_notes_puis_la_premiere(self):
+        self.to_the_critic()
+        self.critic_says("APPROVED", "- Cache the key.")
+        self.receive(message("dancer", "conductor", "report", "- Notes taken.\n\n## Fixed\n\n- Note `a.rs:1`: abc1234", round_=2))
+        to, body = self.last_send_body()
+        self.assertEqual(to, "dispatch:ctx_2")
+        self.assertIn("Notes round of pull request #8, round 2", body)
+        step = self.critic_says("APPROVED", "- Another idea.")
+        self.assertEqual(step.next, "done")
+        self.assertEqual(self.state()["round_trips"], 0)
+
+    def test_approuve_sans_note_merge_directement(self):
+        self.to_the_critic()
+        self.assertEqual(self.critic_says("APPROVED").next, "done")
+
+    def test_un_refus_demande_les_notes_en_un_dernier_commit(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.assertIn("then take its notes in one last commit", self.last_send_body()[1])
+
+    # --- messages lus chez Orca ---
+
+    def orca_message(self, message_id, kind, body, subject="s"):
+        self.world.inbox.append({"id": message_id, "type": kind, "subject": subject, "body": body})
+
+    def receive_from_orca(self, message_id):
+        return ballet_rehearsal.receive_from_orca("FEAT-001.2", message_id, self.home, self.tools)
+
+    def test_un_rapport_lu_chez_orca_par_son_id_ouvre_la_pr(self):
+        self.begin()
+        self.orca_message("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual(self.receive_from_orca("msg_1").next, "wait")
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+
+    def test_une_question_lue_chez_orca_garde_son_id_pour_la_reponse(self):
+        self.begin()
+        self.orca_message("msg_q", "question", message("dancer", "choreographer", "question", "1. A?"))
+        self.receive_from_orca("msg_q")
+        self.receive(message("choreographer", "dancer", "answer", "1. B."))
+        reply = self.world.ran("orca", "orchestration", "reply")[0]
+        self.assertEqual(reply[reply.index("--id") + 1], "msg_q")
+
+    def test_un_id_inconnu_escalade(self):
+        self.begin()
+        step = self.receive_from_orca("msg_nope")
+        self.assertEqual((step.next, step.reason), ("escalate", "no Orca message msg_nope in the inbox"))
+
+    def test_un_worker_arrete_sans_rapport_escalade_avec_ce_qu_orca_en_dit(self):
+        self.begin()
+        self.orca_message("msg_stop", "escalation", "Worker term_1 exited", subject="Worker stopped without reporting")
+        step = self.receive_from_orca("msg_stop")
+        self.assertEqual(step.reason, "Orca: Worker stopped without reporting: Worker term_1 exited")
+
+    def test_la_ligne_de_commande_lit_le_message_chez_orca(self):
+        self.begin()
+        self.orca_message("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."))
+        code, lines = self.run_main("receive", "FEAT-001.2", "--message", "msg_1")
+        self.assertEqual((code, lines[-1]), (0, "NEXT: wait"))
 
     # --- ligne de commande ---
 

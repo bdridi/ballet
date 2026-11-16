@@ -39,5 +39,17 @@ class BalletMessageTest(unittest.TestCase):
         self.assertEqual(ballet_message.verdict_of(text), "APPROVED")
 
 
+class NotesTest(unittest.TestCase):
+    def test_les_points_de_la_section_notes(self):
+        text = "VERDICT: APPROVED\n\n## Blocking\n\nNone.\n\n## Notes\n\n- `a.rs:1`: one.\n- two.\n\n## Escalation\n\n- not a note.\n"
+        self.assertEqual(ballet_message.notes_of(text), ["`a.rs:1`: one.", "two."])
+
+    def test_sans_section_notes_aucune_note(self):
+        self.assertEqual(ballet_message.notes_of("VERDICT: APPROVED\n\n## Blocking\n\nNone.\n"), [])
+
+    def test_une_section_notes_vide_n_en_a_aucune(self):
+        self.assertEqual(ballet_message.notes_of("VERDICT: APPROVED\n\n## Notes\n\nNone.\n"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

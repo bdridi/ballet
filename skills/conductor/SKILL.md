@@ -25,19 +25,17 @@ It checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `
 
 ## 2. On every wake
 
-Orca wakes you with a worker's message: a `worker_done` (a report or a verdict) or a `question` (from `ask`, with a message id).
+Orca wakes you with a worker's message: a `worker_done` (a report or a verdict), a `question` (from `ask`), or an `escalation` (a worker stopped without reporting). Each has a message id (`msg_…`).
 
-1. Write the message **exactly as the worker sent it**, header line first, to `.ballet/run/inbox.md` (the Write tool, never `echo`). Change nothing: no summary, no fix.
-2. Run:
+1. Run, with that id only: the script reads the whole message from Orca itself. Never copy, summarize or fix it.
 
    ```sh
-   python3 <path>/scripts/ballet_rehearsal.py receive <ID> .ballet/run/inbox.md            # a worker_done
-   python3 <path>/scripts/ballet_rehearsal.py receive <ID> .ballet/run/inbox.md --question <message-id>   # a question
+   python3 <path>/scripts/ballet_rehearsal.py receive <ID> --message <message-id>
    ```
 
-3. Follow its last line.
+2. Follow its last line.
 
-A worker that stops without `worker_done` (Orca `escalation` with `stopReason`, `exited`, `lost`): do not restart it yourself; tell the Director, with what Orca said.
+A worker that stopped without reporting escalates through the same command: do not restart it yourself.
 
 ## 3. Escalation
 
@@ -48,7 +46,7 @@ Once a pull request exists, the script labels it `ballet:escalated`. The verdict
 Tell the Director, in their language: the reason, the issue and pull request links, and what they must decide. Then wait. What happens next is theirs:
 
 - **A decision on the pull request**: the Director sets `ballet:approved` to accept it, or `ballet:rejected` with a pull request comment saying what to fix. When they tell you to go on, run `python3 <path>/scripts/ballet_rehearsal.py resume <ID>`: on `approved` it runs the Premiere, on `rejected` it sends their comments to the Dancer, in its session. After a size escalation, `ballet:size-accepted` sends the pull request to the Critic. With no decision yet it escalates again: tell the Director what is missing.
-- **An answer to a question** (to the Director): write it as a Ballet message (`from: director`, `type: answer`, to the asker, same subject, the question's round), then `receive <ID> .ballet/run/inbox.md`. The asker resumes in its own session.
+- **An answer to a question** (to the Director): the only message you write yourself. Write it, with the Write tool, as a Ballet message (`from: director`, `type: answer`, to the asker, same subject, the question's round), then `receive <ID> .ballet/run/inbox.md`. The asker resumes in its own session.
 - **The CI was still running**: once it is green, `python3 <path>/scripts/ballet_rehearsal.py premiere <ID>`.
 - Anything else (change the plan, drop the Rehearsal): the Director does it; you only report. Never merge by hand in their place, never set a label yourself.
 

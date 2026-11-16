@@ -30,7 +30,7 @@ If the working tree is not clean or the proof is red before you start, stop and 
 
 In the order of the plan. For each unchecked task:
 
-1. **Red**: write the test the task names, for its one behaviour; run it, see it fail for the expected reason. The first task turns the covered scenarios into `.feature` files tagged `@FEAT-NNN-Cn`, red.
+1. **Red**: write the test the task names, for its one behaviour; run it, see it fail for the expected reason. Keep its failure line for your report: the Critic checks it. The first task turns the covered scenarios into `.feature` files tagged `@FEAT-NNN-Cn`, red.
 2. **Green**: the minimal code that makes it pass, where the plan says it lives, with the names it gives.
 3. **Refactor**, tests green (rule `ballet:clean-code`).
 4. Run the repo's proof. Green: commit `<type>(FEAT-NNN): [Cn] <the task>` (`feat`, `fix`, `test`, `refactor`, `chore`; the ID of the issue's source). Red: fix it inside the task, never by touching an existing test.
@@ -65,6 +65,7 @@ Your final text is a message, `type: report`, to the Conductor, which checks the
 - Repo: <name>
 - Tasks:
   - [x] [C1] <task> — <commit sha>
+    - Red: `<test name>`: <the failure line, as the test runner printed it>
   - [ ] [C2] <task> — not done: <why>
 - Proof: `<command>` green | red: <the failure>
 - Questions asked: <n>, <what changed in the plan> — or none
@@ -73,7 +74,7 @@ Your final text is a message, `type: report`, to the Conductor, which checks the
 
 ## When the Critic rejects
 
-You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its blocking points in one batch, then optional notes; a point placed on a line shows under the review as `` ### `file:line` ``. Fix each blocking point, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again, with the round of the review, and a `## Fixed` section at the end of the report: one line per point fixed, with its commit. The Conductor answers each line in the point's thread on the pull request and marks it resolved:
+You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its blocking points in one batch, then optional notes; a point placed on a line shows under the review as `` ### `file:line` ``. Fix each blocking point, one green commit per point (`fix(FEAT-NNN): <point>`), then take the review's notes in **one last commit** (`refactor(FEAT-NNN): Critic notes`, or the type that fits), nothing else, then report again, with the round of the review, and a `## Fixed` section at the end of the report: one line per point fixed, with its commit. The Conductor answers each line in the point's thread on the pull request and marks it resolved:
 
 ```markdown
 ## Fixed
@@ -82,4 +83,8 @@ You are launched again with the pull request's number. Read the Critic's review 
 - Note `<file:line>`: <commit sha>
 ```
 
-A point you did not fix is not listed. A note is optional: act on it only if it fits inside a blocking point's fix or is a one-line change; otherwise leave it. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.
+A point you did not fix is not listed. A note you decline (out of the plan's scope, a bigger change than a note, a disagreement) goes in a `## Notes declined` section, one line each, with why. A blocking point you disagree with: say why in your report, do not ignore it; the Conductor decides.
+
+## When the Critic approves with notes
+
+You are launched again with the same pull request: take the review's notes in **one single commit**, proof green, then report again with its `## Fixed` and `## Notes declined` sections, as above. Nothing else: no task, no fix the review did not ask for.
