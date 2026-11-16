@@ -21,21 +21,107 @@ PULL_REQUEST = {
 }
 
 
+VERDICT_HEADER = '{"ballet": "message", "from": "critic", "to": "conductor", "type": "verdict", "subject": "#2", "round": 1}'
+REPORT_HEADER = '{"ballet": "message", "from": "dancer", "to": "conductor", "type": "report", "subject": "#2", "round": 1}'
+
+GREEN_CHECK = {"__typename": "CheckRun", "name": "proof", "status": "COMPLETED", "conclusion": "SUCCESS"}
+RED_CHECK = {"__typename": "CheckRun", "name": "proof", "status": "COMPLETED", "conclusion": "FAILURE"}
+
+
+def mergeable_pull_request(verdict="APPROVED", checks=(GREEN_CHECK,), reviewed_at="2026-11-16T12:00:00Z"):
+    return {
+        "headRefName": "rehearsal/FEAT-001.1",
+        "reviews": [
+            {"author": {"login": "bilel"}, "body": f"{VERDICT_HEADER}\n\nVERDICT: REJECTED\n\n1. Fix it.", "submittedAt": "2026-11-16T10:00:00Z"},
+            {"author": {"login": "bilel"}, "body": f"{VERDICT_HEADER}\n\nVERDICT: {verdict}\n", "submittedAt": reviewed_at},
+        ],
+        "commits": [{"committedDate": "2026-11-16T11:00:00Z"}],
+        "statusCheckRollup": list(checks),
+    }
+
+
+PR_DIFF = """diff --git a/e2e/package.json b/e2e/package.json
+--- a/e2e/package.json
++++ b/e2e/package.json
+@@ -14,3 +14,3 @@
+   "x": 1,
+-  "wrangler": "4",
++  "y": 2
+ }
+diff --git a/apps/worker/vitest.config.ts b/apps/worker/vitest.config.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/worker/vitest.config.ts
+@@ -0,0 +1,3 @@
++import a from "a";
++
++export default a;
+"""
+
+API_REVIEWS = [
+    {"id": 11, "user": {"login": "bilel"}, "body": "VERDICT: REJECTED\n\n## Blocking\n\n1. `e2e/package.json:15` (inline comment)", "submitted_at": "2026-11-16T10:00:00Z"},
+]
+
+API_REVIEW_COMMENTS = [
+    {"pull_request_review_id": 11, "path": "e2e/package.json", "line": 15, "start_line": None, "body": "**Blocking 1** — Unused dependency."},
+]
+
+VERDICT_WITH_PLACES = f"""{VERDICT_HEADER}
+
+VERDICT: REJECTED
+
+- Proof: `pnpm proof` green.
+
+## Blocking
+
+1. `e2e/package.json:15` — `wrangler` is not in the plan. Ref: Decisions.
+   Expected: remove it.
+2. `apps/worker/src/main.ts:99` — Out of the diff. Ref: task 3.
+
+## Notes
+
+- `apps/worker/vitest.config.ts:1-3`: the filter is too wide.
+- A note without a place.
+"""
+
+
 class FakeGh:
-    def __init__(self, body=ISSUE_BODY):
+    def __init__(self, body=ISSUE_BODY, pull_request=PULL_REQUEST):
         self.body = body
+        self.pull_request = pull_request
         self.calls = []
+        self.posted_reviews = []
 
     def __call__(self, arguments):
         self.calls.append(arguments)
         if arguments[:2] == ["issue", "view"]:
-            return json.dumps({"body": self.body})
+            return json.dumps({"body": self.body, "title": "FEAT-001.1 · Walking skeleton"})
         if arguments[:2] == ["issue", "create"]:
             return "https://github.com/o/r/issues/42\n"
+        if arguments[:2] == ["pr", "create"]:
+            return "https://github.com/o/r/pull/43\n"
         if arguments[:2] == ["pr", "view"]:
-            return json.dumps(PULL_REQUEST)
+            return json.dumps(self.pull_request)
+        if arguments[:2] == ["pr", "diff"]:
+            return PR_DIFF
+        if arguments[0] == "api" and "--input" in arguments:
+            self.posted_reviews.append(json.loads(Path(arguments[arguments.index("--input") + 1]).read_text()))
+            return "{}"
+        if arguments[0] == "api" and arguments[1].endswith("/reviews"):
+            return json.dumps([API_REVIEWS])
+        if arguments[0] == "api" and arguments[1].endswith("/comments"):
+            return json.dumps([API_REVIEW_COMMENTS])
         if arguments[:2] == ["issue", "edit"]:
             self.body = arguments[arguments.index("--body") + 1]
+        return ""
+
+
+class FakeGit:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, arguments):
+        self.calls.append(arguments)
         return ""
 
 
@@ -101,12 +187,216 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertLess(review, second)
         self.assertIn("## Review · bilel · 2026-11-16T10:00:00Z", text)
 
+    def test_lit_les_commentaires_en_ligne_sous_leur_review(self):
+        text = ballet_github.read_pull_request("5", run=FakeGh())
+        review, inline, second = (text.index("VERDICT: REJECTED"), text.index("### `e2e/package.json:15`"), text.index("round 2"))
+        self.assertLess(review, inline)
+        self.assertLess(inline, second)
+        self.assertIn("**Blocking 1** — Unused dependency.", text)
+
+    def test_publie_chaque_point_situe_dans_le_diff_en_commentaire_sur_sa_ligne(self):
+        gh = FakeGh()
+        ballet_github.publish_review("#43", self.file("v.md", VERDICT_WITH_PLACES), run=gh)
+        review = gh.posted_reviews[-1]
+        self.assertEqual(review["event"], "COMMENT")
+        self.assertEqual(review["comments"], [
+            {"path": "e2e/package.json", "line": 15, "side": "RIGHT",
+             "body": "**Blocking 1** — `wrangler` is not in the plan. Ref: Decisions.\nExpected: remove it."},
+            {"path": "apps/worker/vitest.config.ts", "start_line": 1, "start_side": "RIGHT", "line": 3, "side": "RIGHT",
+             "body": "**Note** — the filter is too wide."},
+        ])
+
+    def test_garde_dans_la_review_le_verdict_et_les_points_hors_du_diff(self):
+        gh = FakeGh()
+        ballet_github.publish_review("43", self.file("v.md", VERDICT_WITH_PLACES), run=gh)
+        body = gh.posted_reviews[-1]["body"]
+        self.assertTrue(body.startswith(VERDICT_HEADER + "\n\nVERDICT: REJECTED"))
+        self.assertIn("1. `e2e/package.json:15` (inline comment)", body)
+        self.assertIn("2. `apps/worker/src/main.ts:99` — Out of the diff. Ref: task 3.", body)
+        self.assertIn("- A note without a place.", body)
+        self.assertNotIn("Expected: remove it.", body)
+
+    def test_pousse_la_branche_de_rehearsal(self):
+        git = FakeGit()
+        ballet_github.push_branch("rehearsal/FEAT-001.1", git=git)
+        self.assertEqual(git.calls, [["push", "--set-upstream", "origin", "rehearsal/FEAT-001.1"]])
+
+    def test_refuse_de_pousser_une_autre_branche_que_celle_d_une_rehearsal(self):
+        for branch in ("main", "spike/01-wasm", "rehearsal/oops", "rehearsal/FEAT-001;rm"):
+            with self.subTest(branch=branch), self.assertRaises(ballet_github.GitHubError):
+                ballet_github.push_branch(branch, git=FakeGit())
+
+    def test_ouvre_la_pr_sur_main_liee_a_l_issue(self):
+        gh = FakeGh()
+        self.assertEqual(ballet_github.open_pull_request("#2", "rehearsal/FEAT-001.1", run=gh), "43")
+        create = gh.calls[-1]
+        self.assertEqual(create[create.index("--base") + 1], "main")
+        self.assertEqual(create[create.index("--head") + 1], "rehearsal/FEAT-001.1")
+        self.assertEqual(create[create.index("--title") + 1], "FEAT-001.1 · Walking skeleton")
+        self.assertEqual(create[create.index("--body") + 1], "Closes #2\n")
+
+    def test_refuse_d_ouvrir_une_pr_depuis_une_autre_branche(self):
+        with self.assertRaises(ballet_github.GitHubError):
+            ballet_github.open_pull_request("2", "main", run=FakeGh())
+
+    def test_un_verdict_sans_point_situe_reste_une_review_sans_commentaire(self):
+        gh = FakeGh()
+        verdict = f"{VERDICT_HEADER}\n\nVERDICT: APPROVED\n\n- Proof: green.\n"
+        ballet_github.publish_review("#43", self.file("v.md", verdict), run=gh)
+        self.assertEqual(gh.posted_reviews[-1], {"body": verdict, "event": "COMMENT", "comments": []})
+
+    def test_refuse_une_review_qui_n_est_pas_un_verdict(self):
+        for text in (f"{REPORT_HEADER}\n\nVERDICT: APPROVED\n", f"{VERDICT_HEADER}\n\nLooks good.\n", "VERDICT: APPROVED\n"):
+            with self.subTest(text=text), self.assertRaises(ballet_github.GitHubError):
+                ballet_github.publish_review("43", self.file("v.md", text), run=FakeGh())
+
+    def test_commente_l_issue_et_la_pr_avec_le_message_entier(self):
+        gh = FakeGh()
+        message = f"{REPORT_HEADER}\n\nAll 7 tasks done.\n"
+        ballet_github.comment_issue("#2", self.file("m.md", message), run=gh)
+        ballet_github.comment_pull_request("#43", self.file("m.md", message), run=gh)
+        self.assertEqual(gh.calls[0], ["issue", "comment", "2", "--body", message])
+        self.assertEqual(gh.calls[1], ["pr", "comment", "43", "--body", message])
+
+    def test_refuse_un_commentaire_sans_en_tete_de_message(self):
+        with self.assertRaises(ballet_github.GitHubError):
+            ballet_github.comment_issue("2", self.file("m.md", "hello\n"), run=FakeGh())
+
+    def test_merge_par_rebase_puis_supprime_la_branche(self):
+        gh, git = FakeGh(pull_request=mergeable_pull_request()), FakeGit()
+        ballet_github.merge_pull_request("#43", run=gh, git=git)
+        self.assertEqual(gh.calls[-1], ["pr", "merge", "43", "--rebase"])
+        self.assertEqual(git.calls, [["push", "origin", "--delete", "rehearsal/FEAT-001.1"]])
+
+    def test_refuse_de_merger_sans_dernier_verdict_approved(self):
+        for verdict in ("REJECTED", "ESCALATE"):
+            with self.subTest(verdict=verdict):
+                self.assert_merge_refused(mergeable_pull_request(verdict=verdict), "verdict")
+
+    def test_refuse_de_merger_un_verdict_plus_ancien_que_le_dernier_commit(self):
+        self.assert_merge_refused(mergeable_pull_request(reviewed_at="2026-11-16T10:30:00Z"), "commit")
+
+    def test_refuse_de_merger_sans_ci_ou_avec_une_ci_rouge(self):
+        self.assert_merge_refused(mergeable_pull_request(checks=()), "no CI")
+        self.assert_merge_refused(mergeable_pull_request(checks=(GREEN_CHECK, RED_CHECK)), "proof")
+
+    def assert_merge_refused(self, pull_request, reason):
+        gh, git = FakeGh(pull_request=pull_request), FakeGit()
+        with self.assertRaisesRegex(ballet_github.GitHubError, reason):
+            ballet_github.merge_pull_request("43", run=gh, git=git)
+        self.assertFalse([call for call in gh.calls if call[:2] == ["pr", "merge"]])
+        self.assertEqual(git.calls, [])
+
     def test_refuse_un_numero_invalide(self):
         with self.assertRaises(ballet_github.GitHubError):
             ballet_github.read_issue("abc", run=FakeGh())
 
     def test_refuse_une_operation_inconnue(self):
         self.assertEqual(ballet_github.main(["x", "delete", "7"]), 1)
+
+
+def critic_review(review_id, round_, verdict, blocking, at):
+    header = json.dumps({"ballet": "message", "from": "critic", "to": "conductor", "type": "verdict", "subject": "#2", "round": round_})
+    points = "".join(f"{n}. `a.rs:{n}` (inline comment)\n" for n in range(1, blocking + 1))
+    return {"id": review_id, "user": {"login": "b"}, "submitted_at": at, "html_url": f"https://github.com/o/r/pull/43#pullrequestreview-{review_id}",
+            "body": f"{header}\n\nVERDICT: {verdict}\n\n## Blocking\n\n{points}"}
+
+
+def thread(thread_id, review_id, body, path="a.rs", line=1, resolved=False):
+    return {"id": thread_id, "isResolved": resolved,
+            "comments": {"nodes": [{"body": body, "path": path, "line": line, "pullRequestReview": {"databaseId": review_id}}]}}
+
+
+class FakeThreadsGh:
+    """gh pour le résumé des verdicts et les fils de review."""
+
+    def __init__(self, reviews, threads=(), comments=()):
+        self.reviews, self.threads, self.comments = list(reviews), list(threads), list(comments)
+        self.calls = []
+
+    def __call__(self, arguments):
+        self.calls.append(arguments)
+        if arguments[0] == "api" and arguments[1] == "graphql":
+            query = next(a for a in arguments if a.startswith("query="))
+            if "reviewThreads" in query:
+                return json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": self.threads}}}}})
+            return "{}"
+        if arguments[0] == "api" and arguments[1].endswith("/reviews"):
+            return json.dumps([self.reviews])
+        if arguments[0] == "api" and arguments[1].endswith("/issues/43/comments") and "--method" not in arguments:
+            return json.dumps([self.comments])
+        return "{}"
+
+    def mutations(self, name):
+        return [a for a in self.calls if a[:2] == ["api", "graphql"] and any(name in x for x in a)]
+
+    def field(self, call, name):
+        return next(a.split("=", 1)[1] for a in call if a.startswith(f"{name}="))
+
+
+class VerdictsAndThreadsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def report(self, body):
+        path = Path(self._tmp.name) / "r.md"
+        header = json.dumps({"ballet": "message", "from": "dancer", "to": "conductor", "type": "report", "subject": "#2", "round": 2})
+        path.write_text(f"{header}\n\n{body}\n", encoding="utf-8")
+        return path
+
+    def test_cree_le_commentaire_des_verdicts_avec_une_ligne_par_tour(self):
+        gh = FakeThreadsGh([critic_review(11, 1, "REJECTED", 2, "2026-11-16T10:00:00Z"), critic_review(12, 2, "APPROVED", 0, "2026-11-16T12:00:00Z")])
+        ballet_github.update_verdicts("#43", run=gh)
+        post = [c for c in gh.calls if "--method" in c and "POST" in c][0]
+        self.assertEqual(post[1], "repos/{owner}/{repo}/issues/43/comments")
+        body = gh.field(post, "body")
+        self.assertIn(ballet_github.VERDICTS_MARKER, body)
+        self.assertIn("| 1 | REJECTED | 2 |", body)
+        self.assertIn("| 2 | APPROVED | 0 |", body)
+        self.assertLess(body.index("| 1 |"), body.index("| 2 |"))
+        self.assertIn("pullrequestreview-12", body)
+
+    def test_reecrit_le_commentaire_des_verdicts_s_il_existe(self):
+        gh = FakeThreadsGh([critic_review(11, 1, "REJECTED", 1, "2026-11-16T10:00:00Z")],
+                           comments=[{"id": 77, "body": f"{ballet_github.VERDICTS_MARKER}\nold"}, {"id": 78, "body": "Dancer report"}])
+        ballet_github.update_verdicts("43", run=gh)
+        patch = [c for c in gh.calls if "PATCH" in c][0]
+        self.assertEqual(patch[1], "repos/{owner}/{repo}/issues/comments/77")
+        self.assertFalse([c for c in gh.calls if "POST" in c])
+
+    def test_ignore_les_reviews_qui_ne_sont_pas_des_verdicts(self):
+        human = {"id": 13, "user": {"login": "b"}, "submitted_at": "2026-11-16T11:00:00Z", "html_url": "u", "body": "LGTM"}
+        gh = FakeThreadsGh([critic_review(11, 1, "REJECTED", 1, "2026-11-16T10:00:00Z"), human])
+        ballet_github.update_verdicts("43", run=gh)
+        body = gh.field([c for c in gh.calls if "POST" in c][0], "body")
+        self.assertEqual(body.count("\n| "), 2)  # en-tête du tableau + un tour
+
+    def test_resout_les_fils_que_le_dancer_dit_corriges_avec_le_commit(self):
+        gh = FakeThreadsGh(
+            [critic_review(11, 1, "REJECTED", 2, "2026-11-16T10:00:00Z")],
+            threads=[thread("T1", 11, "**Blocking 1** — Unused."), thread("T2", 11, "**Blocking 2** — Wrong."),
+                     thread("T3", 11, "**Note** — Wide.", path="v.ts", line=11)])
+        report = self.report("- Outcome: done\n\n## Fixed\n\n- Blocking 1: abc1234\n- Note `v.ts:11`: def5678\n- Blocking 9: 0000000\n")
+        resolved, unmatched = ballet_github.resolve_fixed("43", report, run=gh)
+        self.assertEqual(resolved, ["Blocking 1", "Note `v.ts:11`"])
+        self.assertEqual(unmatched, ["Blocking 9"])
+        replies = gh.mutations("addPullRequestReviewThreadReply")
+        self.assertEqual([gh.field(c, "thread") for c in replies], ["T1", "T3"])
+        self.assertIn("abc1234", gh.field(replies[0], "body"))
+        self.assertEqual([gh.field(c, "thread") for c in gh.mutations("resolveReviewThread")], ["T1", "T3"])
+
+    def test_ne_touche_pas_un_fil_deja_resolu_ni_ceux_d_un_ancien_tour(self):
+        gh = FakeThreadsGh(
+            [critic_review(11, 1, "REJECTED", 1, "2026-11-16T10:00:00Z"), critic_review(12, 2, "REJECTED", 1, "2026-11-16T12:00:00Z")],
+            threads=[thread("OLD", 11, "**Blocking 1** — Old."), thread("NEW", 12, "**Blocking 1** — New.", resolved=True)])
+        resolved, _ = ballet_github.resolve_fixed("43", self.report("## Fixed\n\n- Blocking 1: abc1234\n"), run=gh)
+        self.assertEqual(resolved, [])
+        self.assertFalse(gh.mutations("resolveReviewThread"))
+
+    def test_un_rapport_sans_section_fixed_ne_resout_rien(self):
+        gh = FakeThreadsGh([critic_review(11, 1, "REJECTED", 1, "2026-11-16T10:00:00Z")], threads=[thread("T1", 11, "**Blocking 1** — x")])
+        self.assertEqual(ballet_github.resolve_fixed("43", self.report("- Outcome: done"), run=gh), ([], []))
 
 
 if __name__ == "__main__":

@@ -73,4 +73,13 @@ Your final text is a message, `type: report`, to the Conductor, which checks the
 
 ## When the Critic rejects
 
-You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its blocking points in one batch, then optional notes. Fix each blocking point, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again. A note is optional: act on it only if it fits inside a blocking point's fix or is a one-line change; otherwise leave it. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.
+You are launched again with the pull request's number. Read the Critic's review (`read-pr <pr>`): one verdict, all its blocking points in one batch, then optional notes; a point placed on a line shows under the review as `` ### `file:line` ``. Fix each blocking point, one green commit per point (`fix(FEAT-NNN): <point>`), nothing else, then report again, with the round of the review, and a `## Fixed` section at the end of the report: one line per point fixed, with its commit. The Conductor answers each line in the point's thread on the pull request and marks it resolved:
+
+```markdown
+## Fixed
+
+- Blocking 1: <commit sha>
+- Note `<file:line>`: <commit sha>
+```
+
+A point you did not fix is not listed. A note is optional: act on it only if it fits inside a blocking point's fix or is a one-line change; otherwise leave it. A point you disagree with: say why in your report, do not ignore it; the Conductor decides.

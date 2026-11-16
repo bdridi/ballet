@@ -37,7 +37,7 @@ Run the repo's proof yourself; never trust the report. Then check, task by task:
 
 ## 3. Decide
 
-- **Blocking point**: a fact you can show, that the Dancer must fix before the merge: a failing proof, a missing or wrong task, a criterion not proven, a broken rule, a *Decision* not followed, a modified test, out of scope code. Each one cites its place (`file:line` or commit) and its reference (task, criterion, rule, decision), and says what is expected.
+- **Blocking point**: a fact you can show, that the Dancer must fix before the merge: a failing proof, a missing or wrong task, a criterion not proven, a broken rule, a *Decision* not followed, a modified test, out of scope code. Each one **starts with** its place (`` `file:line` `` or `` `file:start-end` ``, else a commit) and gives its reference (task, criterion, rule, decision), and says what is expected. A point that starts with a place in the diff is published as a comment on that line; the rest stays in the review's body.
 - **Note**: anything else worth saying (a taste, a later improvement, a doubt that does not block). Optional: the Dancer does not have to act on it. Never turn a note into a blocking point in a later round.
 - **`VERDICT: APPROVED`**: no blocking point.
 - **`VERDICT: REJECTED`**: at least one blocking point. **All of them at once**, in one batch: never hold one back for the next round.
@@ -65,7 +65,7 @@ VERDICT: APPROVED | REJECTED | ESCALATE
 
 ## Notes
 
-- <optional remark> — or none
+- `<file:line>` — <optional remark>, or a remark with no place — or none
 
 ## Escalation
 

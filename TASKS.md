@@ -82,12 +82,12 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
   - [x] Retours du premier run (#2) : section « Answering the Dancer » (commit sur ses seuls chemins, vérifier une dépendance avant de l'accepter), sonde d'outillage avant un plan qui fixe versions et commandes, spikes sur chaque chemin (dev, test, CI), zones interdites du Dancer dans le plan (action du Director), `### Amendments` dans le plan, `AGENTS.md` dit le quoi sans versions ; `plan` refuse un brouillon complet (0.7.0).
 - [ ] `dancer` : exécute le plan en red → green → refactor, commite, preuve verte.
   - [x] Skill `dancer` : sa section du plan, un commit vert par tâche, jamais de push ni de test existant modifié, questions au Choreographer ou au Dramaturg en restant éveillé, rapport au Conductor (0.6.0).
-  - [ ] Premier run réel sur FEAT-001 d'antimurphy.
+  - [x] Premier run réel sur FEAT-001 d'antimurphy.
     - [x] Slice #2 (walking skeleton) : 7 tâches, preuve verte, 3 questions au Choreographer.
   - [x] Chaque Rehearsal sur sa branche `rehearsal/<ID>`, dans son worktree, intégrée par une PR que le Conductor merge par rebase ; le Critic rend ses remarques en un lot, publiées en une review ; sur un refus, le Dancer relit la PR ; clé `[project] merge` retirée (ADR 0004, 0.7.0).
 - [ ] `critic` : rend un verdict (message `type: verdict`, première ligne `VERDICT: …`), en lecture seule.
   - [x] Skill `critic` : relance la preuve, vérifie tâches, critères, décisions, règles et périmètre sur le diff de la branche de Rehearsal ; points bloquants en un seul lot, notes optionnelles ; relecture point par point au round suivant ; `read-pr` dans le script GitHub (0.8.0).
-  - [ ] Première review réelle : la PR de la slice #2 d'antimurphy, ouverte à la main par le Director.
+  - [x] Première review réelle : la PR de la slice #2 d'antimurphy, ouverte à la main par le Director ; un refus (une dépendance hors plan), corrigé par le Dancer, puis `APPROVED`.
 - [ ] Les règles communes minimales chargées par chaque rôle (tdd, clean code, trunk-based).
 
 **Fini quand** : une feature d'antimurphy passe à la main de l'état prêt au code validé.
@@ -95,8 +95,8 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 ## Étape 5 — Les scripts déterministes
 
 - [ ] Script de politique : état git avant et après, zones interdites, périmètre par rôle (dont ADR, `AGENTS.md` et branches `spike/*` réservés au Choreographer), état GitHub de l'issue inchangé.
-- [ ] Script GitHub : la liste fermée d'opérations (PRD §5.4), chaque appel journalisé. Déjà là : `read`, `publish`, `plan`, `slice` (0.5.0). À ajouter (ADR 0004) : pousser la branche de Rehearsal, ouvrir la PR, `read-pr` (PR et reviews), publier une review, commenter l'issue et la PR, merger par rebase, supprimer la branche mergée.
-- [ ] Lecture de l'en-tête JSON des messages (`message.md`), renvoi d'un en-tête invalide, compte des tours par sujet et paire de rôles.
+- [ ] Script GitHub : la liste fermée d'opérations (PRD §5.4), chaque appel journalisé. Déjà là : `read`, `publish`, `plan`, `slice` (0.5.0), `read-pr` (0.8.0), `push`, `open-pr`, `review` (un commentaire par point situé `fichier:ligne` du diff, le reste dans le corps), `verdicts` (un commentaire global de la PR, réécrit à chaque verdict : une ligne par tour), `resolve` (la section `## Fixed` du rapport du Dancer : réponse « Fixed in <sha> » dans le fil, puis résolu), `comment-issue`, `comment-pr`, `merge` (0.9.0 ; `merge` refuse sans dernier verdict `APPROVED` postérieur au dernier commit, et sans CI : une CI absente n'est pas verte). Reste : cocher une tâche du plan, libellés, fermer l'issue, journalisation des appels.
+- [x] Lecture de l'en-tête JSON des messages (`ballet_message.py`), escalade sur un en-tête invalide, compte des tours par sujet et paire de rôles (0.9.0).
 - [ ] Compter les tours **par point** et non par issue : au premier run, 3 questions sur 3 sujets différents auraient déclenché une escalade à tort. Trancher : un sujet par point (`#2/wasm-outdir`) ou un `round` remis à 1 sur une nouvelle question.
 - [ ] Politique : un commit appartient au rôle du passage où il est apparu (Choreographer et Dancer partagent la branche de Rehearsal). **Sujet à traiter à part.** Piste, le message, l'auteur ou un trailer étant falsifiables :
   - le Conductor relève l'état du repo à chaque relais (lancement, `ask`, `reply`, `worker_done`) ;
@@ -110,17 +110,37 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 
 ## Étape 6 — Le Conductor séquentiel, Piece v0 `hybrid-track`
 
-- [ ] Créer le remote GitHub d'antimurphy.
-- [ ] Créer le worktree et la branche `rehearsal/<ID>` depuis `main` avant le Choreographer ; les supprimer après la Premiere.
-- [ ] Publier chaque échange : questions et réponses en commentaires de l'issue, rapports du Dancer et verdicts du Critic sur la PR.
+- [x] Créer le remote GitHub d'antimurphy.
+- [x] Créer le worktree et la branche `rehearsal/<ID>` depuis `origin/main` (`orca worktree create`) ; les supprimer après la Premiere (0.9.0).
+- [x] Publier chaque échange : questions et réponses en commentaires de l'issue, rapports du Dancer et verdicts du Critic sur la PR (0.9.0).
 - [ ] Skill `conductor` : lance le Choreographer sur une feature prête, route ses questions au Dramaturg (Orca `ask`/`reply`, Choreographer gardé éveillé), escalade au-delà de `max_exchange_rounds`, journalise les rapports, enchaîne Dancer → Critic.
+  - [x] v0 (0.9.0) : skill fin ; tout passe par `ballet_rehearsal.py` (`begin`, `receive`, `premiere`, `status`), qui tient l'état, décide la suite (`NEXT: wait | escalate | done`) et appelle git, gh et Orca. Part d'une issue existante : Dancer si le plan a ses tâches, Choreographer sinon. Un rôle déjà lancé reçoit la suite dans sa session (`send`), une question reçoit sa réponse par `reply` : les contextes sont gardés.
+  - [x] Premier run réel : FEAT-001.2 (#3) d'antimurphy, PR #9. 8 min en auto, aucune question, un seul tour de Critic ; `ESCALATE` sur la seule taille (1623 lignes > 700), le Director a mergé à la main.
+  - [ ] Retours du premier run :
+    - [ ] Taille de diff comptée par le script, pas par le Critic : `git diff --shortstat origin/main...` après le rapport du Dancer. Clé `[escalation] diff_exclude` (globs : lockfiles, `tests/`…) ; le Critic ne juge plus la taille.
+    - [ ] `[escalation] max_diff_strict` : `false`, la taille est notée dans la PR et ne bloque rien ; `true`, la PR est ouverte quand même, libellé `ballet:oversized`, escalade **avant** le Critic (pas de review payée pour une slice qu'on redécoupe). Le Director débloque par le libellé `ballet:size-accepted`, la reprise lance alors le Critic.
+    - [ ] Choreographer : estimer la taille de chaque slice au plan et redécouper au-delà de `max_diff_lines`.
+    - [ ] Verdict en libellé de la PR (`ballet:approved | rejected | escalated`), le commentaire de verdicts reste. Le Director acte en changeant le libellé : `approved` → Premiere ; `rejected` + un commentaire de PR → le Dancer reprend avec ce commentaire comme points bloquants.
+    - [ ] Commande `resume <ID>` : un changement de libellé ne réveille pas le Conductor, le Director lui dit « reprends ». Le script lit libellés et commentaires, journalise la décision du Director, puis Premiere (merge, worktree supprimé, statut `done`) ou renvoi au Dancer. Un libellé n'atteste pas son auteur (même compte `gh`) : le script tient dans l'état les libellés qu'il a posés, tout écart est du Director ; `approved` doit dater d'après le dernier commit (timeline de la PR). `merge` accepte ce libellé à la place du verdict `APPROVED`.
+    - [ ] Section Escalation du skill Conductor : décrire `resume`.
+    - [ ] Notes non bloquantes du Critic : reportées par le script dans l'issue de la slice suivante, ou une issue de suivi s'il n'y en a pas.
+    - [ ] `receive` lit le message d'Orca par son id au lieu d'une recopie du Conductor dans `inbox.md` (altération, tokens).
+    - [ ] `NEXT: escalate` sort avec 0 (cas prévu, pas une erreur) ; code ≠ 0 réservé aux pannes du script.
+    - [ ] `status` lisible : PR, verdict, CI, taille, prochaine action ; le JSON derrière `--json`.
+    - [ ] TDD vérifiable : le rapport du Dancer cite, par tâche, la sortie d'échec du test rouge ; le Critic la contrôle.
+    - [ ] `.ballet/run/` ignoré par `init-project` dans le `.gitignore` du projet, au lieu du `.gitignore` que le script écrit dans le dossier.
+    - [ ] Ménage antimurphy : worktree `rehearsal-FEAT-001-2` et état `escalated` de FEAT-001.2 (par `resume` une fois là, sinon à la main).
+  - [ ] Une liste d'issues à dépiler (`/ballet:hybrid-track #4 #5 #6`) : une Rehearsal après l'autre, la suivante part de `main` après la Premiere de la précédente ; une escalade arrête la liste. À tester sur la fin de FEAT-001.
+  - [ ] Partir d'une feature prête (Choreographer qui crée l'issue), Dramaturg consulté.
+  - [ ] Multi-repos (v0 : un seul repo).
 - [ ] Slices : publier une issue par slice, liée à l'issue parente ; enchaîner leurs Rehearsals dans l'ordre ; fermer la parente avec la dernière.
 - [ ] Politique après chaque rôle ; renvoi une fois, escalade à la deuxième violation.
-- [ ] Plafond de 2 allers-retours Dancer ↔ Critic.
-- [ ] Déclencheurs d'escalade mécaniques dès la v0 (l'auto en dépend) : taille de diff, zone sensible, test modifié ou supprimé, `VERDICT: ESCALATE`, seconde violation.
-- [ ] Premiere : merge de la PR par rebase si `APPROVED`, politique et CI vertes.
-- [ ] Journal d'événements JSONL (format à figer).
-- [ ] Commande `/ballet:hybrid-track`.
+- [x] Plafond de 2 allers-retours Dancer ↔ Critic (0.9.0).
+- [ ] Déclencheurs d'escalade mécaniques dès la v0 (l'auto en dépend) : taille de diff, zone sensible, test modifié ou supprimé, `VERDICT: ESCALATE`, seconde violation. Déjà là (0.9.0) : `VERDICT: ESCALATE`, plafonds de tours et d'allers-retours, question au Director, opération GitHub refusée, message invalide.
+- [x] Premiere : merge de la PR par rebase si `APPROVED` postérieur au dernier commit et CI verte ; une CI absente bloque (0.9.0). La politique s'y ajoutera.
+- [x] Antimurphy : workflow GitHub qui lance `pnpm proof` sur chaque PR (Director, à la main).
+- [ ] Journal d'événements JSONL (format à figer). v0 : `.ballet/run/journal.jsonl` (`at`, `rehearsal`, `event`, `detail`), à côté de l'état `.ballet/run/<ID>.json` (0.9.0).
+- [x] Commande `/ballet:hybrid-track #<issue>` (0.9.0).
 
 **Fini quand** : le Director cadre, lance `/ballet:hybrid-track`, et l'issue arrive sur `main` sans intervention, ou escalade avec son motif.
 
