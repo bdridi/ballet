@@ -30,6 +30,7 @@ le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts »
 La taille a ses deux libellés : `ballet:oversized` (posé et retiré par le Conductor) et `ballet:size-accepted` (le Director).
 `close` ne se fie pas au `Closes #N` de la PR (implicite, et absent d'une PR ouverte à la main) : il ferme lui-même.
 Une slice se reconnaît à sa première ligne, `Part of #<parente>` (posée par `slice`).
+Le plan du Choreographer a son libellé, `ballet:plan-approved`, que pose le Director sur l'issue (plan en review).
 """
 
 import json
@@ -65,6 +66,7 @@ VERDICT_LABELS = {
 }
 OVERSIZED = ("ballet:oversized", "e99695", "Ballet: the diff is over max_diff_lines")
 SIZE_ACCEPTED = ("ballet:size-accepted", "c5def5", "Ballet: the Director accepts the size of the diff")
+PLAN_APPROVED = ("ballet:plan-approved", "0e8a16", "Ballet: the Director approves the Choreographer's plan")
 
 
 class GitHubError(Exception):
@@ -224,6 +226,25 @@ def director_decision(pr_number, run=None):
     escalated_at = _last_labeled(events, "ESCALATE")
     return {"verdict": verdict, "labeled_at": labeled_at, "escalated_at": escalated_at,
             "comments": _comments_since(number, escalated_at, run)}
+
+
+def slices_of(parent_number, run=None):
+    """Les slices ouvertes de la parente, dans l'ordre de leur création. La liste des issues, pas la recherche :
+    l'index de recherche ne voit pas encore des slices publiées à l'instant."""
+    run = run or _run_gh
+    parent = _issue_number(parent_number)
+    found = json.loads(run(["issue", "list", "--state", "open", "--json", "number,body", "--limit", "500"]))
+    return sorted((str(issue["number"]) for issue in found if _parent_of(issue["body"]) == parent), key=int)
+
+
+def ask_plan_approval(run=None):
+    """Le libellé que le Director posera sur l'issue du plan existe déjà dans le repo."""
+    _ensure_labels([PLAN_APPROVED], run or _run_gh)
+
+
+def plan_approved(issue_number, run=None):
+    output = (run or _run_gh)(["issue", "view", _issue_number(issue_number), "--json", "labels"])
+    return PLAN_APPROVED[0] in {label["name"] for label in json.loads(output).get("labels", [])}
 
 
 def pull_request_status(pr_number, run=None):

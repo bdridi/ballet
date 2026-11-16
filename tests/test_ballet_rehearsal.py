@@ -73,6 +73,9 @@ class FakeWorld:
         if tool == "git" and "push" in arguments:
             self.pull_request["commits"] = [{"committedDate": f"2026-11-16T12:{len(self.timeline):02d}:00Z"}]
             return ""
+        if tool == "git" and arguments[2:4] == ["branch", "-m"]:
+            self.branch = arguments[-1]
+            return ""
         if tool == "git" and "--numstat" in arguments:
             return self.numstat
         if tool == "git" and "worktree" in arguments:
@@ -114,7 +117,8 @@ class FakeWorld:
         if arguments[:2] == ["issue", "view"]:
             return json.dumps({"title": "FEAT-001.2 · Inventory model", "body": self.issue_body, "state": self.issue_state})
         if arguments[:2] == ["issue", "list"]:
-            return "[]"
+            return json.dumps([{"number": int(number), "body": issue["body"]} for number, issue in self.issues.items()
+                               if issue.get("state", "OPEN") == "OPEN"])
         if arguments[:2] == ["pr", "create"]:
             return "https://github.com/o/r/pull/8\n"
         if arguments[:2] == ["pr", "view"] and arguments[-1] == "labels":
@@ -1004,6 +1008,140 @@ class FileTest(unittest.TestCase):
         self.assertEqual(self.run_queue("--plan", "auto")[0], 2)
         self.assertEqual(self.run_queue("nope")[0], 2)
         self.assertEqual(self.world.commands, [])
+
+
+def slice_body(parent, body=PLANNED_ISSUE):
+    return f"Part of #{parent}\n\n{body}"
+
+
+def choreographer_report(issue="", outcome="sliced"):
+    issue_line = f"- Issue: #{issue}\n" if issue else ""
+    return message("choreographer", "conductor", "report", f"- Outcome: {outcome}\n{issue_line}- ADRs: 0007 Inventory store")
+
+
+class PlanningTest(unittest.TestCase):
+    """Une feature prête : le Choreographer seul crée l'issue et ses slices, qui prennent la tête de la file."""
+
+    run_main = BalletRehearsalTest.run_main
+    state = BalletRehearsalTest.state
+    write = FileTest.write
+    queue = FileTest.queue
+    journal = BalletRehearsalTest.journal
+
+    def setUp(self):
+        BalletRehearsalTest.setUp(self)
+        self.world.branch = "rehearsal/FEAT-002"
+        self.world.issues = {
+            "13": {"title": "FEAT-002 · Inventory", "body": "## Plan\n\nSlices: #14, #15.\n", "state": "OPEN", "labels": []},
+            "14": {"title": "FEAT-002.1 · Inventory model", "body": slice_body(13), "state": "OPEN"},
+            "15": {"title": "FEAT-002.2 · Inventory list", "body": slice_body(13), "state": "OPEN"},
+        }
+
+    def receive(self, text, question_id=None):
+        return self.run_main("receive", str(self.write(text)), *(["--question", question_id] if question_id else []))[1]
+
+    def planned(self, *arguments, report=None):
+        self.run_main("run", "FEAT-002", *arguments)
+        self.world.new_commits = ["adr1"]
+        lines = self.receive(report or choreographer_report(issue="13"))
+        self.world.new_commits = []
+        return lines
+
+    def test_une_feature_ouvre_une_planification_ou_le_choreographer_joue_seul(self):
+        lines = self.run_main("run", "FEAT-002")[1]
+        self.assertEqual(lines[-1], "NEXT: wait")
+        self.assertIn("- choreographer started on feature FEAT-002, no issue yet", lines)
+        create = self.world.ran("orca", "worktree", "create")[0]
+        self.assertEqual(create[create.index("--branch") + 1], "rehearsal/FEAT-002")
+        self.assertNotIn("--issue", create)
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002"])
+        self.assertEqual(self.queue()["current"], "FEAT-002")
+
+    def test_la_consigne_du_choreographer_nomme_la_feature_et_demande_le_numero_de_l_issue(self):
+        self.run_main("run", "FEAT-002")
+        start = self.journal("handoff")[0]
+        self.assertIn("ready feature FEAT-002", start["text"])
+        self.assertIn("- Issue: #<n>", start["text"])
+
+    def test_en_auto_la_premiere_slice_se_joue_dans_le_worktree_de_la_planification(self):
+        lines = self.planned("--plan", "auto")
+        self.assertIn("- issue #13 cut into slices: #14, #15", lines)
+        self.assertIn("- now playing: Rehearsal FEAT-002.1 (issue #14) in the worktree of FEAT-002, branch rehearsal/FEAT-002.1", lines)
+        self.assertIn("- dancer started on issue #14", lines)
+        self.assertEqual(lines[-1], "NEXT: wait")
+        self.assertTrue(self.world.ran("git", "-C", "/wt/FEAT-002", "branch", "-m", "rehearsal/FEAT-002", "rehearsal/FEAT-002.1"))
+        state = json.loads((self.home / ".ballet" / "run" / "FEAT-002.1.json").read_text())
+        self.assertEqual((state["issue"], state["worktree"], state["owned"]), ("14", "/wt/FEAT-002", ["adr1"]))
+        self.assertEqual(state["dispatches"]["choreographer"], "ctx_1")
+        self.assertEqual(json.loads((self.home / ".ballet" / "run" / "FEAT-002.json").read_text())["status"], "done")
+        self.assertEqual((self.queue()["current"], self.queue()["items"]), ("FEAT-002.1", ["#15"]))
+        self.assertEqual(self.queue()["played"], [{"item": "FEAT-002", "rehearsal": "FEAT-002.1"}])
+
+    def test_les_slices_passent_avant_la_feature_suivante(self):
+        self.run_main("run", "FEAT-002", "FEAT-003", "--plan", "auto")
+        self.receive(choreographer_report(issue="13"))
+        self.assertEqual(self.queue()["items"], ["#15", "FEAT-003"])
+
+    def test_la_politique_s_applique_a_la_planification(self):
+        self.run_main("run", "FEAT-002")
+        self.world.changed = ["src/a.rs"]
+        lines = self.receive(choreographer_report(issue="13"))
+        self.assertIn("src/a.rs: outside the choreographer's perimeter", lines[0])
+        self.assertEqual(self.journal("policy")[-1]["role"], "choreographer")
+        self.assertEqual(self.queue()["current"], "FEAT-002")
+
+    def test_en_review_la_file_s_arrete_jusqu_au_libelle_du_director(self):
+        lines = self.planned()
+        self.assertEqual(lines[-1], "NEXT: escalate plan to review (--plan review): read #13, label it ballet:plan-approved, then resume")
+        self.assertTrue(self.world.ran("gh", "label", "create", "ballet:plan-approved"))
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002"])
+        self.assertEqual(self.run_main("resume")[1][-1], "NEXT: escalate no ballet:plan-approved on #13 yet: label it, then resume")
+        self.world.issues["13"]["labels"] = [{"name": "ballet:plan-approved"}]
+        lines = self.run_main("resume")[1]
+        self.assertIn("- the Director approves the plan of #13", lines)
+        self.assertEqual(lines[-1], "NEXT: wait")
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002", "Dancer · FEAT-002.1"])
+
+    def test_une_feature_sans_slices_se_joue_seule_sous_son_id(self):
+        self.world.issues = {"13": {"title": "FEAT-002 · Inventory", "body": PLANNED_ISSUE, "state": "OPEN"}}
+        lines = self.planned("--plan", "auto", report=choreographer_report(issue="13", outcome="planned"))
+        self.assertIn("- plan found on issue #13", lines)
+        self.assertFalse(self.world.ran("git", "-C", "/wt/FEAT-002", "branch", "-m"))
+        self.assertEqual((self.state_of("FEAT-002")["issue"], self.queue()["items"]), ("13", []))
+
+    def test_une_issue_sans_plan_decoupee_en_slices_passe_aussi_la_main(self):
+        self.world.issues["3"] = {"title": "FEAT-002 · Inventory", "body": UNPLANNED_ISSUE, "state": "OPEN"}
+        for number in ("14", "15"):
+            self.world.issues[number]["body"] = slice_body(3)
+        self.run_main("run", "#3", "--plan", "auto")
+        lines = self.receive(message("choreographer", "conductor", "report", "- Outcome: sliced\n- Slices: #14, #15"))
+        self.assertIn("- issue #3 cut into slices: #14, #15", lines)
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002", "Dancer · FEAT-002.1"])
+
+    def test_un_choreographer_bloque_escalade(self):
+        self.run_main("run", "FEAT-002")
+        lines = self.receive(choreographer_report(outcome="blocked"))
+        self.assertEqual(lines[-1], "NEXT: escalate the Choreographer is blocked: see its report")
+
+    def test_un_rapport_sans_issue_escalade(self):
+        self.run_main("run", "FEAT-002")
+        lines = self.receive(choreographer_report())
+        self.assertTrue(lines[-1].startswith("NEXT: escalate the Choreographer reported no issue"))
+
+    def test_une_slice_sans_taches_escalade(self):
+        self.world.issues["15"]["body"] = slice_body(13, UNPLANNED_ISSUE)
+        lines = self.planned("--plan", "auto")
+        self.assertEqual(lines[-1], "NEXT: escalate the Choreographer reported, but #15 has no tasks in its plan")
+
+    def test_une_question_au_dramaturg_sans_issue_n_est_que_journalisee(self):
+        self.run_main("run", "FEAT-002")
+        lines = self.receive(message("choreographer", "dramaturg", "question", "1. C2?"), question_id="msg_1")
+        self.assertIn("- question not published: no issue yet, the journal keeps it", lines)
+        self.assertFalse(self.world.ran("gh", "issue", "comment"))
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002", "Dramaturg · FEAT-002"])
+
+    def state_of(self, rehearsal_id):
+        return json.loads((self.home / ".ballet" / "run" / f"{rehearsal_id}.json").read_text())
 
 
 if __name__ == "__main__":

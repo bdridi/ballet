@@ -1,7 +1,7 @@
 """Le Conductor déterministe : l'état d'une Rehearsal, ses transitions, et chaque action qu'elles déclenchent.
 
-    python3 ballet_rehearsal.py run      <issue>… [--plan review|auto]             # une file : une Rehearsal après l'autre
-    python3 ballet_rehearsal.py begin    <issue>                                   # une file d'un seul élément
+    python3 ballet_rehearsal.py run      <élément>… [--plan review|auto]           # une file : une Rehearsal après l'autre
+    python3 ballet_rehearsal.py begin    <élément>                                 # une file d'un seul élément
     python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
     python3 ballet_rehearsal.py receive  <ID> --dispatch <ctx-id>                  # le dernier message du worker de ce dispatch
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
@@ -18,6 +18,13 @@ Tout est séquentiel : une seule Rehearsal ouverte à la fois. La file (`.ballet
 à jouer, dans l'ordre de la commande ; à la Premiere d'une Rehearsal, le script ouvre lui-même la suivante, depuis
 `main`. Une escalade met la file en pause : `resume` reprend la Rehearsal, puis la file. `<ID>` est facultatif pour
 `receive`, `premiere`, `resume` et `status` : sans lui, c'est la Rehearsal en cours de la file.
+
+Un élément est une issue (`#12`) ou une feature prête (`FEAT-002`, aussi `BUG-NNN`, `TASK-NNN`). Une feature ouvre
+une Rehearsal de planification : le Choreographer seul, en mode auto, crée l'issue et ses slices. À son rapport, le
+script lit l'issue et ses slices sur GitHub (`Part of #N` en première ligne) et les met en tête de file ; la première
+se joue dans le worktree de la planification (sa branche est renommée), avec les ADR du Choreographer, qui restent
+à son nom pour la politique. Une issue sans plan suit le même chemin. En `--plan review` (`[escalation] plan_approval`),
+la file s'arrête alors : le Director pose `ballet:plan-approved` sur l'issue planifiée, puis `resume` lance le Dancer.
 
 Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
@@ -65,6 +72,7 @@ from ballet_message import MessageError, notes_of, parse_message, read_message, 
 RUN_DIR = Path(".ballet") / "run"
 QUEUE_FILE = "queue.json"
 ISSUE_ITEM = re.compile(r"^#?(\d+)$")
+FEATURE_ITEM = re.compile(r"^(?:FEAT|BUG|TASK)-\d{3}$")
 PLAN_MODES = ("review", "auto")
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
 ORCA_AGENTS = {"claude": "claude", "codex": "codex", "grok": "grok", "opencode": "opencode"}
@@ -110,6 +118,8 @@ class Rehearsal:
     owned: list = field(default_factory=list)        # les commits du Choreographer et du Dramaturg sur la branche
     violations: dict = field(default_factory=dict)   # rôle → passages refusés par la politique
     plan: str = ""                                   # review (le Director approuve le plan) | auto
+    feature: str = ""                                # la feature d'une Rehearsal de planification, sans issue au départ
+    plan_issue: str = ""                             # l'issue dont le plan attend `ballet:plan-approved`
 
     @property
     def branch(self):
@@ -120,7 +130,7 @@ class Rehearsal:
 class Queue:
     """La file d'une Piece : ses éléments, joués un à la fois, dans l'ordre de la commande."""
     plan: str = "review"
-    items: list = field(default_factory=list)       # à jouer : `#12`
+    items: list = field(default_factory=list)       # à jouer : `#12` (une issue) ou `FEAT-002` (une feature prête)
     current: str = ""                               # la Rehearsal en cours
     played: list = field(default_factory=list)      # {item, rehearsal}, dans l'ordre
 
@@ -165,23 +175,22 @@ def run(items, plan, home, tools):
     return _play_next(Step("wait"), home, tools)
 
 
-def begin(issue, home, tools, plan=None):
+def begin(item, home, tools, plan=None):
+    """Ouvre la Rehearsal d'un élément : une issue (le Dancer si son plan a ses tâches, le Choreographer sinon),
+    ou une feature prête (la planification : le Choreographer seul)."""
     config = _checked_config(home)
-    repo = _single_repo(config, home)
-    title, body = _issue(issue, tools)
-    rehearsal = Rehearsal(id=_rehearsal_id(title), issue=ballet_github._issue_number(issue), repo=str(repo),
-                          plan=plan or _default_plan(config))
+    rehearsal, first_role = _rehearsal_of(item, config, home, tools)
+    rehearsal.plan = plan or _default_plan(config)
     _refuse_if_already_open(rehearsal, home)
     step = Step("wait")
     rehearsal.worktree = _open_worktree(rehearsal, tools)
     step.done.append(f"worktree {rehearsal.worktree} on {rehearsal.branch}, from origin/main")
-    _log(home, rehearsal, "begin", {"item": f"#{rehearsal.issue}", "plan": rehearsal.plan})
-    first_role = "dancer" if _has_tasks(body) else "choreographer"
+    _log(home, rehearsal, "begin", {"item": _item_of(rehearsal), "plan": rehearsal.plan})
     git = tools.git(rehearsal.worktree)
     rehearsal.checkpoint, rehearsal.refs = ballet_policy.head(git), ballet_policy.refs(git)
-    _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal), config, home, tools)
-    step.done.append(f"{first_role} started on issue #{rehearsal.issue}")
-    _join_queue(rehearsal, f"#{rehearsal.issue}", home)
+    _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal, config), config, home, tools)
+    step.done.append(f"{first_role} started on {_target(rehearsal)}")
+    _join_queue(rehearsal, _item_of(rehearsal), home)
     return _settle(rehearsal, step, home, tools)
 
 
@@ -290,6 +299,22 @@ def _after_premiere(rehearsal, step, home, tools):
     return _play_next(step, home, tools)
 
 
+def _queue_first(items, home):
+    """Les slices d'un plan passent avant le reste de la file."""
+    queue = _load_queue(home)
+    queue.items = items + queue.items
+    _save_queue(queue, home)
+
+
+def _rename_in_queue(previous, rehearsal_id, home):
+    queue = _load_queue(home)
+    queue.current = rehearsal_id if queue.current == previous else queue.current
+    for entry in queue.played:
+        if entry["rehearsal"] == previous:
+            entry["rehearsal"] = rehearsal_id
+    _save_queue(queue, home)
+
+
 def _join_queue(rehearsal, item, home):
     """La Rehearsal qui s'ouvre devient celle en cours de la file (une file d'un élément si `begin` est appelé seul)."""
     queue = _load_queue(home, plan=rehearsal.plan)
@@ -349,7 +374,7 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
     if kind == "answer":
         return _relay_answer(rehearsal, header, text, config, home, tools)
     if kind == "report" and sender == "choreographer":
-        return _after_plan(rehearsal, config, home, tools)
+        return _after_plan(rehearsal, text, config, home, tools)
     if kind == "report" and sender == "dancer":
         return _after_code(rehearsal, text, config, home, tools)
     if kind == "verdict" and sender == "critic":
@@ -377,13 +402,12 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
     """Publie la question sur l'issue, puis la porte au rôle qui doit répondre ; le demandeur attend, éveillé."""
     if not question_id:
         raise RehearsalError("a question needs the Orca message id (--question) to send the answer back")
-    step = Step("wait")
-    _comment_issue(rehearsal, text, home, tools)
-    step.done.append(f"question published on issue #{rehearsal.issue}")
+    step = Step("wait", done=[_publish_exchange(rehearsal, "question", text, home, tools)])
     rehearsal.pending.append({"id": question_id, "from": header["from"], "to": header["to"]})
     if header["to"] == "director":
         return Step("escalate", f"the {header['from']} asks the Director: answer with an `answer` message", step.done)
-    _ask_role(rehearsal, header["to"], f"Answer this question from the {header['from']}, then return your answer "
+    _ask_role(rehearsal, header["to"], f"Rehearsal {rehearsal.id}, {_target(rehearsal)}, branch `{rehearsal.branch}`. "
+              f"Answer this question from the {header['from']}, then return your answer "
               f"as a Ballet message (`type: answer`, to the {header['from']}):\n\n{text}", config, home, tools)
     step.done.append(f"question carried to the {header['to']}")
     return step
@@ -397,9 +421,7 @@ def _relay_answer(rehearsal, header, text, config, home, tools):
         if found:
             return Step("escalate", f"policy: the {header['from']} broke the rules while answering: {'; '.join(found)}")
         _own_commits(rehearsal, tools)
-    step = Step("wait")
-    _comment_issue(rehearsal, text, home, tools)
-    step.done.append(f"answer published on issue #{rehearsal.issue}")
+    step = Step("wait", done=[_publish_exchange(rehearsal, "answer", text, home, tools)])
     tools.orca(["orchestration", "reply", "--id", question["id"], "--body", text])
     _log_handoff(rehearsal, header["to"], "reply", text, home)
     rehearsal.pending.remove(question)
@@ -407,16 +429,85 @@ def _relay_answer(rehearsal, header, text, config, home, tools):
     return step
 
 
-def _after_plan(rehearsal, config, home, tools):
+def _after_plan(rehearsal, report, config, home, tools):
+    """La politique d'abord. Puis le plan est lu sur GitHub : l'issue seule, ou ses slices, prennent la tête de la file ;
+    la première se joue dans ce worktree, avec les commits du Choreographer. En review, le Director l'approuve d'abord."""
     found = _policy(rehearsal, "choreographer", config, home, tools)
     if found:
         return _refused_by_policy(rehearsal, "choreographer", found, config, home, tools)
     _own_commits(rehearsal, tools)
-    _, body = _issue(rehearsal.issue, tools)
-    if not _has_tasks(body):
-        raise RehearsalError(f"the Choreographer reported but issue #{rehearsal.issue} has no tasks (slices?)")
-    _ask_role(rehearsal, "dancer", _first_assignment("dancer", rehearsal), config, home, tools)
-    return Step("wait", done=[f"plan found on issue #{rehearsal.issue}", "dancer started"])
+    planned, issues = _planned_issues(rehearsal, report, tools)
+    step = Step("wait", done=[_plan_line(planned, issues)])
+    step.done += _hand_over(rehearsal, issues[0], home, tools)
+    _queue_first([f"#{number}" for number, _, _ in issues[1:]], home)
+    if (rehearsal.plan or _default_plan(config)) == "review":
+        return _await_plan_approval(rehearsal, planned, step, tools)
+    return _dancer_on_the_plan(rehearsal, step, config, home, tools)
+
+
+def _planned_issues(rehearsal, report, tools):
+    """L'issue planifiée (celle du rapport, ou celle de la Rehearsal) et ce qui se joue : ses slices, sinon elle seule.
+    Chacune doit avoir les tâches de son plan."""
+    if _report_field(report, "Outcome") == "blocked":
+        raise RehearsalError("the Choreographer is blocked: see its report")
+    planned = _report_issue(report) or rehearsal.issue
+    if not planned:
+        raise RehearsalError("the Choreographer reported no issue: its report needs `- Issue: #<n>`")
+    numbers = ballet_github.slices_of(planned, run=tools.gh) or [planned]
+    issues = [(number, *_issue(number, tools)) for number in numbers]
+    without_tasks = [f"#{number}" for number, _, body in issues if not _has_tasks(body)]
+    if without_tasks:
+        raise RehearsalError(f"the Choreographer reported, but {', '.join(without_tasks)} has no tasks in its plan")
+    return planned, issues
+
+
+def _hand_over(rehearsal, first, home, tools):
+    """La Rehearsal joue la première issue du plan. Si c'est une slice, la planification lui laisse son worktree :
+    la branche prend le nom de la slice, les commits du Choreographer restent à son nom (`owned`)."""
+    number, title, _ = first
+    rehearsal_id = _rehearsal_id(title)
+    rehearsal.issue = number
+    if rehearsal_id == rehearsal.id:
+        return []
+    previous, old_branch = rehearsal.id, rehearsal.branch
+    _refuse_if_already_open(Rehearsal(id=rehearsal_id, issue=number, repo=rehearsal.repo), home)
+    _save(Rehearsal(**{**asdict(rehearsal), "status": "done", "reason": f"planned: its worktree plays {rehearsal_id}"}), home)
+    _log(home, rehearsal, "handover", {"to": rehearsal_id, "issue": number})
+    git = tools.git(rehearsal.worktree)
+    git(["branch", "-m", old_branch, f"rehearsal/{rehearsal_id}"])
+    rehearsal.id, rehearsal.refs = rehearsal_id, ballet_policy.refs(git)
+    _rename_in_queue(previous, rehearsal_id, home)
+    return [f"now playing: Rehearsal {rehearsal_id} (issue #{number}) in the worktree of {previous}, branch {rehearsal.branch}"]
+
+
+def _await_plan_approval(rehearsal, planned, step, tools):
+    rehearsal.blocked_on, rehearsal.plan_issue = "plan", planned
+    ballet_github.ask_plan_approval(run=tools.gh)
+    return Step("escalate", f"plan to review (--plan review): read #{planned}, label it ballet:plan-approved, then resume",
+                step.done)
+
+
+def _dancer_on_the_plan(rehearsal, step, config, home, tools):
+    _ask_role(rehearsal, "dancer", _first_assignment("dancer", rehearsal, config), config, home, tools)
+    step.done.append(f"dancer started on issue #{rehearsal.issue}")
+    return step
+
+
+def _plan_decision(rehearsal, config, home, tools):
+    """`ballet:plan-approved` sur l'issue planifiée : le Dancer part ; sinon le plan attend toujours."""
+    approved = ballet_github.plan_approved(rehearsal.plan_issue, run=tools.gh)
+    _log(home, rehearsal, "director-decision", {"plan": rehearsal.plan_issue, "approved": approved})
+    if not approved:
+        return Step("escalate", f"no ballet:plan-approved on #{rehearsal.plan_issue} yet: label it, then resume")
+    rehearsal.blocked_on = ""
+    return _dancer_on_the_plan(rehearsal, Step("wait", done=[f"the Director approves the plan of #{rehearsal.plan_issue}"]),
+                               config, home, tools)
+
+
+def _plan_line(planned, issues):
+    if [number for number, _, _ in issues] == [planned]:
+        return f"plan found on issue #{planned}"
+    return f"issue #{planned} cut into slices: " + ", ".join(f"#{number}" for number, _, _ in issues)
 
 
 def _after_code(rehearsal, report, config, home, tools):
@@ -508,7 +599,10 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
 
 
 def _apply_decision(rehearsal, config, home, tools):
-    """`ballet:approved` : la Premiere ; `ballet:rejected` : le Dancer reprend avec les commentaires du Director."""
+    """`ballet:approved` : la Premiere ; `ballet:rejected` : le Dancer reprend avec les commentaires du Director.
+    Un plan en review attend `ballet:plan-approved` sur son issue."""
+    if rehearsal.blocked_on == "plan":
+        return _plan_decision(rehearsal, config, home, tools)
     if not rehearsal.pull_request:
         raise RehearsalError("no pull request yet: answer the pending question with an `answer` message (receive)")
     decision = ballet_github.director_decision(rehearsal.pull_request, run=tools.gh)
@@ -612,7 +706,7 @@ def _close_issues(rehearsal, tools):
 
 
 def _where(rehearsal):
-    return f"Rehearsal {rehearsal.id}: issue #{rehearsal.issue}, branch {rehearsal.branch}, worktree {rehearsal.worktree or 'none'}"
+    return f"Rehearsal {rehearsal.id}: {_target(rehearsal)}, branch {rehearsal.branch}, worktree {rehearsal.worktree or 'none'}"
 
 
 def _pull_request_line(rehearsal, tools):
@@ -688,7 +782,7 @@ def _log_handoff(rehearsal, role, how, text, home, extra=None):
 
 def _role_spec(rehearsal, role, assignment):
     pull_request = f", pull request #{rehearsal.pull_request}" if rehearsal.pull_request else ""
-    return f"""You are the Ballet {role.capitalize()} of Rehearsal {rehearsal.id}: issue #{rehearsal.issue}{pull_request}, branch `{rehearsal.branch}`, in this worktree.
+    return f"""You are the Ballet {role.capitalize()} of Rehearsal {rehearsal.id}: {_target(rehearsal)}{pull_request}, branch `{rehearsal.branch}`, in this worktree.
 
 Load the skill `/ballet:{role}` and follow it. Its GitHub script is {SKILLS_ROOT.parent / "scripts" / "ballet_github.py"}.
 
@@ -701,10 +795,14 @@ Under the Conductor:
 """
 
 
-def _first_assignment(role, rehearsal):
+def _first_assignment(role, rehearsal, config):
     if role == "dancer":
         return f"Execute your repo's section of the plan of issue #{rehearsal.issue}, task by task."
-    return f"Issue #{rehearsal.issue} has no plan yet: write it (`plan`), commit your ADRs on this branch, then report."
+    if rehearsal.feature:
+        return (f"Plan the ready feature {rehearsal.feature}: create its issue with `publish` (and its slices with `slice`, "
+                "if it needs them), commit your ADRs on this branch, then report with the issue's number (`- Issue: #<n>`).")
+    return (f"Issue #{rehearsal.issue} has no plan yet: write it (`plan`), or cut it into slices (`slice {rehearsal.issue}`), "
+            "commit your ADRs on this branch, then report.")
 
 
 def _review_round(rehearsal):
@@ -771,6 +869,14 @@ def _pending_question(rehearsal, asker, answerer):
         if question["from"] == asker and question["to"] == answerer:
             return question
     raise RehearsalError(f"no pending question from the {asker} to the {answerer}")
+
+
+def _publish_exchange(rehearsal, what, text, home, tools):
+    """Une question ou une réponse va sur l'issue ; une planification n'en a pas encore : le journal la garde seul."""
+    if not rehearsal.issue:
+        return f"{what} not published: no issue yet, the journal keeps it"
+    _comment_issue(rehearsal, text, home, tools)
+    return f"{what} published on issue #{rehearsal.issue}"
 
 
 def _comment_issue(rehearsal, text, home, tools):
@@ -901,6 +1007,34 @@ def _single_repo(config, home):
     return (Path(home) / next(iter(repos.values()))["path"]).resolve()
 
 
+def _rehearsal_of(item, config, home, tools):
+    """La Rehearsal d'un élément et son premier rôle."""
+    repo = str(_single_repo(config, home))
+    if FEATURE_ITEM.match(item):
+        return Rehearsal(id=item, issue="", repo=repo, feature=item), "choreographer"
+    title, body = _issue(item, tools)
+    rehearsal = Rehearsal(id=_rehearsal_id(title), issue=ballet_github._issue_number(item), repo=repo)
+    return rehearsal, "dancer" if _has_tasks(body) else "choreographer"
+
+
+def _item_of(rehearsal):
+    return rehearsal.feature or f"#{rehearsal.issue}"
+
+
+def _target(rehearsal):
+    return f"issue #{rehearsal.issue}" if rehearsal.issue else f"feature {rehearsal.feature}, no issue yet"
+
+
+def _report_field(report, name):
+    match = re.search(rf"^- {name}:\s*(.+?)\s*$", report, re.MULTILINE)
+    return match.group(1) if match else ""
+
+
+def _report_issue(report):
+    match = re.match(r"#?(\d+)\b", _report_field(report, "Issue"))
+    return match.group(1) if match else ""
+
+
 def _issue(issue, tools):
     output = tools.gh(["issue", "view", ballet_github._issue_number(issue), "--json", "title,body"])
     issue_data = json.loads(output)
@@ -976,9 +1110,10 @@ def _find_list(value, key):
 def _open_worktree(rehearsal, tools):
     git = tools.git(rehearsal.repo)
     git(["fetch", "origin", "main"])
+    linked = ["--issue", rehearsal.issue] if rehearsal.issue else []
     tools.orca(["worktree", "create", "--name", rehearsal.branch.replace("/", "-").replace(".", "-"),
                 "--repo", f"path:{rehearsal.repo}", "--base-branch", "origin/main", "--branch", rehearsal.branch,
-                "--issue", rehearsal.issue, "--no-parent", "--json"])
+                *linked, "--no-parent", "--json"])
     return _worktree_of(rehearsal.branch, git(["worktree", "list", "--porcelain"]))
 
 
@@ -1036,7 +1171,7 @@ def main(argv, home=".", tools=None):
 
 USAGE = ("usage: run <item>... [--plan review|auto] | begin <item> | receive [<ID>] --message <msg-id> "
          "| receive [<ID>] --dispatch <ctx-id> | receive [<ID>] <message.md> [--question <msg-id>] | premiere [<ID>] "
-         "| resume [<ID>] | status [<ID>] [--json]   (an item: #<issue>; no <ID>: the Rehearsal the queue is playing)")
+         "| resume [<ID>] | status [<ID>] [--json]   (an item: #<issue> or a ready FEAT-NNN; no <ID>: the Rehearsal the queue is playing)")
 
 
 def _command(command, arguments, home, tools):
@@ -1084,7 +1219,9 @@ def _run_arguments(arguments):
 
 
 def _item(text):
-    """Un élément de la file : une issue (`#12`, `12`)."""
+    """Un élément de la file : une issue (`#12`, `12`) ou une feature prête (`FEAT-002`)."""
+    if FEATURE_ITEM.match(text):
+        return text
     match = ISSUE_ITEM.match(text)
     if not match:
         raise UsageError(f"not an item: {text}\n" + USAGE)

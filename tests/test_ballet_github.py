@@ -435,6 +435,29 @@ class CloseIssueTest(unittest.TestCase):
         self.assertEqual(ballet_github.close_issue("6", "12", run=stale), ["6", "1"])
 
 
+class PlanTest(unittest.TestCase):
+    def test_les_slices_d_une_parente_dans_l_ordre_de_creation(self):
+        gh = FakeIssuesGh({"1": an_issue("## Context\n"), "16": an_issue("Part of #1\n"), "9": an_issue("Part of #1\n"),
+                           "8": an_issue("See Part of #1\n"), "11": an_issue("Part of #12\n"),
+                           "7": an_issue("Part of #1\n", "CLOSED")})
+        self.assertEqual(ballet_github.slices_of("#1", run=gh), ["9", "16"])
+        self.assertNotIn("--search", gh.calls[0])
+
+    def test_une_issue_sans_slices_n_en_a_aucune(self):
+        self.assertEqual(ballet_github.slices_of("1", run=FakeIssuesGh({"1": an_issue("## Plan\n")})), [])
+
+    def test_le_plan_est_approuve_par_le_libelle_du_director(self):
+        gh = FakeIssuesGh({"1": {**an_issue("## Plan\n"), "labels": [{"name": "ballet:plan-approved"}]},
+                           "2": {**an_issue("## Plan\n"), "labels": [{"name": "ballet:approved"}]}})
+        self.assertTrue(ballet_github.plan_approved("#1", run=gh))
+        self.assertFalse(ballet_github.plan_approved("2", run=gh))
+
+    def test_le_libelle_d_approbation_du_plan_est_cree_d_avance(self):
+        gh = FakeIssuesGh({})
+        ballet_github.ask_plan_approval(run=gh)
+        self.assertEqual(gh.calls[0][:3], ["label", "create", "ballet:plan-approved"])
+
+
 class FakeThreadsGh:
     """gh pour le résumé des verdicts et les fils de review."""
 

@@ -23,7 +23,12 @@ The lines before it (`- …`) say what the script did. Relay them to the Directo
 python3 <path>/scripts/ballet_rehearsal.py run <item>... [--plan review|auto]
 ```
 
-The items come from the Piece, in its order: issues (`#12`). The script keeps them in a queue (`.ballet/run/queue.json`) and plays them one at a time. For each, it checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `origin/main`, and starts the first role: the Dancer if the issue already holds its tasks, the Choreographer otherwise. `<ID>` is the issue title's prefix (`FEAT-001.2`).
+The items come from the Piece, in its order: issues (`#12`) or ready features (`FEAT-002`). The script keeps them in a queue (`.ballet/run/queue.json`) and plays them one at a time. For each, it checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `origin/main`, and starts the first role:
+
+- an issue whose plan holds its tasks: the Dancer;
+- an issue without a plan, or a feature: the Choreographer alone, in auto mode. It publishes the issue (and its slices) and reports; the script reads them on GitHub, puts them at the head of the queue, and the first one goes on in the same worktree (`now playing: Rehearsal <ID> …`), with the Choreographer's ADRs.
+
+`<ID>` is the issue title's prefix (`FEAT-001.2`), or the feature (`FEAT-002`) while it is planned.
 
 Every later command takes the Rehearsal `<ID>` or nothing: without it, the script acts on the Rehearsal the queue is playing. Leave it out: the queue knows which one plays.
 
@@ -46,12 +51,13 @@ When a verdict is `APPROVED`, the Premiere waits inside the script for a CI that
 
 ## 3. Escalation
 
-The script escalates on: an invalid message, too many rounds on one subject (`max_exchange_rounds`), too many Dancer ↔ Critic round trips (`max_round_trips`), a question to the Director, a diff over `max_diff_lines` in strict mode (`max_diff_strict`, before the Critic), `VERDICT: ESCALATE`, a GitHub operation refused (for example a merge with a failed CI, or a CI still running after `ci_wait_seconds`), a worker that stops twice without reporting, or on an error, a worker that cannot start, and a role that broke Ballet's policy (`policy: …`): a Critic that changed the worktree, a Choreographer or a Dramaturg that wrote outside its perimeter while answering, or a second violation by the Dancer or the Choreographer (the first one is sent back to them, nothing pushed). Never fix a violation yourself.
+The script escalates on: a plan to review (`--plan review`, the default: see below), a Choreographer that reports `blocked` or a plan without tasks, an invalid message, too many rounds on one subject (`max_exchange_rounds`), too many Dancer ↔ Critic round trips (`max_round_trips`), a question to the Director, a diff over `max_diff_lines` in strict mode (`max_diff_strict`, before the Critic), `VERDICT: ESCALATE`, a GitHub operation refused (for example a merge with a failed CI, or a CI still running after `ci_wait_seconds`), a worker that stops twice without reporting, or on an error, a worker that cannot start, and a role that broke Ballet's policy (`policy: …`): a Critic that changed the worktree, a Choreographer or a Dramaturg that wrote outside its perimeter while answering, or a second violation by the Dancer or the Choreographer (the first one is sent back to them, nothing pushed). Never fix a violation yourself.
 
 Once a pull request exists, the script labels it `ballet:escalated`. The verdict in force is always the pull request's label (`ballet:approved`, `ballet:rejected`, `ballet:escalated`); the merge needs `ballet:approved`, set after the last commit.
 
 An escalation pauses the queue: the next items wait. Tell the Director, in their language: the reason, the issue and pull request links, and what they must decide. Then wait. What happens next is theirs:
 
+- **A plan to review** (`plan to review (--plan review): read #13, label it ballet:plan-approved, then resume`): the Director reads the issue and its slices, sets `ballet:plan-approved` on that issue, and tells you to go on: `resume` starts the Dancer on the first one. No label yet: it escalates again.
 - **A decision on the pull request**: the Director sets `ballet:approved` to accept it, or `ballet:rejected` with a pull request comment saying what to fix. When they tell you to go on, run `python3 <path>/scripts/ballet_rehearsal.py resume`: it resumes the Rehearsal, then the queue. On `approved` it runs the Premiere, on `rejected` it sends their comments to the Dancer, in its session. After a size escalation, `ballet:size-accepted` sends the pull request to the Critic. With no decision yet it escalates again: tell the Director what is missing.
 - **An answer to a question** (to the Director): the only message you write yourself. Write it, with the Write tool, as a Ballet message (`from: director`, `type: answer`, to the asker, same subject, the question's round), then `receive .ballet/run/inbox.md`. The asker resumes in its own session.
 - **The CI failed, or was still running after `ci_wait_seconds`**: once it is green, `python3 <path>/scripts/ballet_rehearsal.py premiere`.
