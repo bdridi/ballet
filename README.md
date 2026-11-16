@@ -60,6 +60,17 @@ To check the configuration by hand:
 python3 <path-to-ballet>/scripts/ballet_config.py check <project-folder>
 ```
 
+## Watch the Rehearsals (concept)
+
+A local, read-only page that shows what happens in a project, live and in history (stage, score of the journal, replay, season). It reads `.ballet/run/` and listens on 127.0.0.1 only.
+
+```
+python3 <path-to-ballet>/scripts/ballet_stage.py <project-folder>
+python3 <path-to-ballet>/scripts/ballet_stage.py --scan <folder-of-projects>
+```
+
+Then open http://127.0.0.1:7700 (`--port` to change it). It is a first sketch: see the Stage item in `TASKS.md`.
+
 ## Languages
 
 Code is always in English. Specs are in English by default (`[project] specs_language` to change it, e.g. for a client who reads them). Text the product displays stays in the product's language: scenarios quote it verbatim, and the glossary maps each term to its code name and its UI wording. The rule is in the `ballet:ddd` skill.

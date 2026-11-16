@@ -109,6 +109,8 @@ class FakeGh:
             return "https://github.com/o/r/issues/42\n"
         if arguments[:2] == ["pr", "create"]:
             return "https://github.com/o/r/pull/43\n"
+        if arguments[:2] == ["pr", "view"] and arguments[-1] == "labels":
+            return json.dumps({"labels": [{"name": name} for name in self.labels()]})
         if arguments[:2] == ["pr", "view"]:
             return json.dumps(self.pull_request)
         if arguments[:2] == ["pr", "diff"]:
@@ -125,6 +127,13 @@ class FakeGh:
         if arguments[:2] == ["issue", "edit"]:
             self.body = arguments[arguments.index("--body") + 1]
         return ""
+
+    def labels(self):
+        on_the_pr = set()
+        for event in self.timeline:
+            if event.get("event") in ("labeled", "unlabeled"):
+                (on_the_pr.add if event["event"] == "labeled" else on_the_pr.discard)(event["label"]["name"])
+        return sorted(on_the_pr)
 
 
 class FakeGit:
@@ -309,6 +318,13 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertEqual(gh.calls[-1], ["pr", "edit", "43", "--add-label", "ballet:approved",
                                         "--remove-label", "ballet:rejected", "--remove-label", "ballet:escalated"])
 
+    def test_un_libelle_deja_pose_est_retire_puis_repose_pour_dater_le_nouveau_verdict(self):
+        gh = FakeGh(timeline=[labeled("ballet:approved", "2026-11-16T10:00:00Z")])
+        ballet_github.label_pull_request("43", "APPROVED", run=gh)
+        edits = [call for call in gh.calls if call[:2] == ["pr", "edit"]]
+        self.assertEqual(edits[0], ["pr", "edit", "43", "--remove-label", "ballet:approved"])
+        self.assertEqual(edits[1][3:5], ["--add-label", "ballet:approved"])
+
     def test_label_refuse_un_verdict_inconnu(self):
         with self.assertRaisesRegex(ballet_github.GitHubError, "unknown verdict"):
             ballet_github.label_pull_request("43", "maybe", run=FakeGh())
@@ -489,6 +505,13 @@ class VerdictsAndThreadsTest(unittest.TestCase):
         self.assertEqual([gh.field(c, "thread") for c in replies], ["T1", "T3"])
         self.assertIn("abc1234", gh.field(replies[0], "body"))
         self.assertEqual([gh.field(c, "thread") for c in gh.mutations("resolveReviewThread")], ["T1", "T3"])
+
+    def test_resout_le_fil_d_une_note_dont_la_ligne_a_change_depuis_le_verdict(self):
+        outdated = thread("T1", 11, "**Note** — Wide.", path="m.rs", line=None)
+        outdated["comments"]["nodes"][0]["originalLine"] = 41
+        gh = FakeThreadsGh([critic_review(11, 1, "APPROVED", 0, "2026-11-16T10:00:00Z")], threads=[outdated])
+        resolved, unmatched = ballet_github.resolve_fixed("43", self.report("## Fixed\n\n- Note `m.rs:41`: abc1234\n"), run=gh)
+        self.assertEqual((resolved, unmatched), (["Note `m.rs:41`"], []))
 
     def test_ne_touche_pas_un_fil_deja_resolu_ni_ceux_d_un_ancien_tour(self):
         gh = FakeThreadsGh(

@@ -424,7 +424,8 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 
 - **Sur GitHub**, la trace des échanges : l'issue (plan, amendements, questions et réponses) et la PR (rapports du Dancer, verdicts du Critic).
 - **Dès la V1**, le Conductor écrit un événement par transition (JSON lines) : run, issue, phase, rôle, CLI et modèle, début, fin, résultat, allers-retours, escalades et leur motif.
-- **Plus tard**, un tableau de bord par-dessus ces données, à la manière de ce qui était prévu pour Nightshift. Sources complémentaires côté Orca : `orca search` dans les sessions, `worker-list`, `inbox`, hooks de statut des agents.
+- **Concept en place** : la Scène (`scripts/ballet_stage.py`, page `stage/index.html`), une page locale en lecture seule, par projet, qui lit `.ballet/run/` : le direct (rôle actif, messages entre rôles, escalades, Premiere), la partition du journal avec rejeu, et la saison (Rehearsals, durées, tours, taille de diff). C'est une maquette à retravailler, pas un livrable de la V1 (§14).
+- **Plus tard**, un vrai tableau de bord par-dessus ces données, à la manière de ce qui était prévu pour Nightshift. Sources complémentaires côté Orca : `orca search` dans les sessions, `worker-list`, `inbox`, hooks de statut des agents.
 - Il sert à piloter, à **comparer les modèles par rôle**, et à décider quand passer une phase de manuel à auto.
 
 ## 13. Contraintes et limites connues
@@ -438,7 +439,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 
 - `parallel-conductor` et la file de merge ;
 - le Workshop discovery autonome ;
-- le tableau de bord de monitoring (le journal, lui, est dans la V1) ;
+- le tableau de bord de monitoring abouti (le journal est dans la V1 ; la Scène n'en est que le concept, voir §12) ;
 - un cockpit dans le repo Ballet pour piloter plusieurs projets depuis un seul endroit (registre des projets, discovery entre projets) ;
 - la migration de Flownest.
 

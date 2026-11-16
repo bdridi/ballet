@@ -60,6 +60,9 @@ class FakeWorld:
         tool, arguments = argv[0], argv[1:]
         if tool == "gh":
             return self.gh(arguments)
+        if tool == "git" and "push" in arguments:
+            self.pull_request["commits"] = [{"committedDate": f"2026-11-16T12:{len(self.timeline):02d}:00Z"}]
+            return ""
         if tool == "git" and "--numstat" in arguments:
             return self.numstat
         if tool == "git" and "worktree" in arguments:
@@ -100,10 +103,11 @@ class FakeWorld:
         return ""
 
     def relabel(self, arguments):
-        """Comme GitHub : `--remove-label` d'un libellé absent ne laisse aucune trace dans la timeline."""
+        """Comme GitHub : `--add-label` d'un libellé déjà posé, ou `--remove-label` d'un libellé absent,
+        ne laisse aucune trace dans la timeline."""
         on_the_pr = self.labels()
         for flag, label in zip(arguments, arguments[1:]):
-            if flag == "--add-label":
+            if flag == "--add-label" and label not in on_the_pr:
                 self.label_event("labeled", label)
             elif flag == "--remove-label" and label in on_the_pr:
                 self.label_event("unlabeled", label)
@@ -338,6 +342,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(step.next, "escalate")
         self.assertIn("no CI", step.reason)
         self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        self.assertIn("verdict APPROVED published on #8, labelled, Verdicts comment updated", step.done)
 
     def test_premiere_retente_le_merge_une_fois_la_ci_verte(self):
         self.world.pull_request = pull_request_state(checks=False)
@@ -574,6 +579,23 @@ class BalletRehearsalTest(unittest.TestCase):
         self.receive(message("choreographer", "dancer", "answer", "1. B."))
         reply = self.world.ran("orca", "orchestration", "reply")[0]
         self.assertEqual(reply[reply.index("--id") + 1], "msg_q")
+
+    def test_un_reveil_qui_ne_nomme_que_le_dispatch_lit_son_dernier_message(self):
+        self.begin()
+        self.world.inbox += [
+            {"id": "msg_q", "type": "question", "sequence": 1, "payload": json.dumps({"dispatchId": "ctx_1"}), "body": "{}"},
+            {"id": "msg_other", "type": "worker_done", "sequence": 3, "payload": json.dumps({"dispatchId": "ctx_9"}), "body": "{}"},
+            {"id": "msg_done", "type": "worker_done", "sequence": 2, "payload": json.dumps({"dispatchId": "ctx_1"}),
+             "body": message("dancer", "conductor", "report", "- Done.")},
+        ]
+        code, lines = self.run_main("receive", "FEAT-001.2", "--dispatch", "ctx_1")
+        self.assertEqual((code, lines[-1]), (0, "NEXT: wait"))
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+
+    def test_un_dispatch_sans_message_escalade(self):
+        self.begin()
+        step = ballet_rehearsal.receive_from_orca("FEAT-001.2", "ctx_nope", self.home, self.tools, by="dispatch")
+        self.assertEqual((step.next, step.reason), ("escalate", "no Orca message from dispatch ctx_nope in the inbox"))
 
     def test_un_id_inconnu_escalade(self):
         self.begin()

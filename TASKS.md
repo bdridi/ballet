@@ -132,6 +132,13 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
     - [x] TDD vérifiable : le rapport du Dancer cite, par tâche, son test rouge et la ligne d'échec ; le Critic vérifie que l'échec est le bon, une tâche sans rouge est un point bloquant (0.13.0).
     - [x] `.ballet/run/` ignoré par `init-project` dans le `.gitignore` du projet, au lieu du `.gitignore` que le script écrit dans le dossier (0.9.1).
     - [x] Ménage antimurphy : worktree `rehearsal-FEAT-001-2` supprimé, FEAT-001.2 passé à `done` avec sa trace au journal, `.ballet/run/` ajouté au `.gitignore` (à la main).
+    - [x] Retour du run FEAT-001.3 (#10) : un libellé de verdict déjà posé est retiré puis reposé, sinon GitHub garde sa vieille date et `merge` refuse l'APPROVED du tour de notes (0.13.1).
+    - [x] Un merge refusé après un verdict escalade sans perdre les lignes `- …` déjà faites (verdict publié, libellé) (0.13.1).
+    - [x] `receive <ID> --dispatch <ctx-id>` : le réveil d'un `worker_done` ne nomme que le dispatch ; le script lit le dernier message de ce worker (0.13.1).
+    - [x] Le fil d'une note se retrouve par sa ligne d'origine (`originalLine`) quand le commit qui la corrige l'a déplacée (0.13.1).
+    - [ ] À affiner : les notes déclinées adressées au Choreographer (amender une décision, fixer un contrat pour la tranche suivante) se perdent dans les commentaires de la PR au merge. Les lui porter, ou les reporter sur l'issue parente ou la tranche suivante ; le circuit reste à définir.
+    - [ ] Plus tard : taille des tranches. #3 puis #10 au-delà du double de `max_diff_lines` (700) ; la taille est journalisée (`diff-size`), on tranchera sur ces mesures entre le découpage du Choreographer et le seuil.
+    - [ ] Le Choreographer vérifie l'outillage dont dépend son plan (version, comportement) par un spike, plutôt que de reprendre AGENTS.md (isolation D1 de `@cloudflare/vitest-plugin` 1.8.2).
   - [ ] Une liste d'issues à dépiler (`/ballet:hybrid-track #4 #5 #6`) : une Rehearsal après l'autre, la suivante part de `main` après la Premiere de la précédente ; une escalade arrête la liste. À tester sur la fin de FEAT-001.
   - [ ] Partir d'une feature prête (Choreographer qui crée l'issue), Dramaturg consulté.
   - [ ] Multi-repos (v0 : un seul repo).
@@ -158,6 +165,7 @@ Sans Conductor : on ajuste chaque spec de rôle isolément, quand c'est encore f
 
 ## Ensuite (à découper le moment venu)
 
+- [ ] La Scène (monitoring, PRD §12) : le concept existe (`python3 scripts/ballet_stage.py <home>` ou `--scan <dossier>`, puis http://127.0.0.1:7700). À travailler : valider le nom « Scène » au vocabulaire (PRD §3), tester le rejeu et le direct dans un vrai navigateur, ajouter les modèles et CLI par rôle et les temps par phase (comparer les modèles), un registre de projets, une doc d'usage dans le README.
 - [ ] Dancer Claude puis Dancer Mistral sur les mêmes issues, et comparaison (PRD §15.4).
 - [ ] Workshop auto : `auto-track`.
 - [ ] Déclencheurs d'escalade subtils : désaccord persistant, build instable.

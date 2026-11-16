@@ -25,12 +25,13 @@ It checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `
 
 ## 2. On every wake
 
-Orca wakes you with a worker's message: a `worker_done` (a report or a verdict), a `question` (from `ask`), or an `escalation` (a worker stopped without reporting). Each has a message id (`msg_…`).
+Orca wakes you with a worker's message: a `worker_done` (a report or a verdict), a `question` (from `ask`), or an `escalation` (a worker stopped without reporting).
 
-1. Run, with that id only: the script reads the whole message from Orca itself. Never copy, summarize or fix it.
+1. Run, with the id the wake gives: the script reads the whole message from Orca itself. Never copy, summarize or fix it, and never read the inbox yourself.
 
    ```sh
-   python3 <path>/scripts/ballet_rehearsal.py receive <ID> --message <message-id>
+   python3 <path>/scripts/ballet_rehearsal.py receive <ID> --message <msg_…>    # the wake names a message id
+   python3 <path>/scripts/ballet_rehearsal.py receive <ID> --dispatch <ctx_…>   # it names only a dispatchId: the worker's last message
    ```
 
 2. Follow its last line.

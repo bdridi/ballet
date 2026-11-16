@@ -49,7 +49,7 @@ VERDICTS_MARKER = "<!-- ballet:verdicts -->"
 FIXED_POINT = re.compile(r"^- (Blocking (\d+)|Note `([^`:]+):(\d+)(?:-\d+)?`)\s*(?::|—|–|-)\s*`?([0-9a-f]{7,40})`?", re.MULTILINE)
 REVIEW_THREADS = """query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes {
-    id isResolved comments(first: 1) { nodes { body path line startLine pullRequestReview { databaseId } } }
+    id isResolved comments(first: 1) { nodes { body path line startLine originalLine originalStartLine pullRequestReview { databaseId } } }
   } } } }
 }"""
 REPLY_TO_THREAD = "mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }"
@@ -185,11 +185,13 @@ def close_issue(issue_number, pr_number, run=None):
 
 
 def label_pull_request(pr_number, verdict, run=None):
-    """Pose le libellé du verdict sur la PR et retire les deux autres : un seul verdict en vigueur."""
+    """Pose le libellé du verdict sur la PR et retire les deux autres : un seul verdict en vigueur.
+    Le libellé porte la date de ce verdict : déjà posé, il est retiré puis reposé (GitHub ignore un ajout en double)."""
     run = run or _run_gh
     number = _issue_number(pr_number)
     verdict = _known_verdict(verdict)
     _ensure_labels(VERDICT_LABELS.values(), run)
+    _remove_if_present(number, _label_name(verdict), run)
     run(["pr", "edit", number, *_label_changes(verdict)])
 
 
@@ -430,10 +432,11 @@ def _open_threads(number, review_id, run):
 
 
 def _matches(point, thread):
+    """Une note se retrouve par sa ligne au moment du verdict : le commit qui la corrige a pu la déplacer."""
     if point["blocking"]:
         return thread["body"].startswith(f"**Blocking {point['blocking']}**")
-    return (thread["body"].startswith("**Note**") and thread["path"] == point["path"]
-            and point["line"] in (thread.get("line"), thread.get("startLine")))
+    lines = (thread.get("line"), thread.get("startLine"), thread.get("originalLine"), thread.get("originalStartLine"))
+    return thread["body"].startswith("**Note**") and thread["path"] == point["path"] and point["line"] in lines
 
 
 def _close_thread(thread_id, reply, run):
@@ -479,6 +482,11 @@ def _ensure_labels(labels, run):
     """Crée les libellés au premier usage ; `--force` les remet à leur couleur et description ensuite."""
     for name, color, description in labels:
         run(["label", "create", name, "--color", color, "--description", description, "--force"])
+
+
+def _remove_if_present(number, label, run):
+    if label in _labels_on(number, run):
+        run(["pr", "edit", number, "--remove-label", label])
 
 
 def _labels_on(number, run):

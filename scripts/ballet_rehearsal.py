@@ -2,6 +2,7 @@
 
     python3 ballet_rehearsal.py begin    <issue>                                   # ouvre la Rehearsal, lance le premier rôle
     python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
+    python3 ballet_rehearsal.py receive  <ID> --dispatch <ctx-id>                  # le dernier message du worker de ce dispatch
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI encore en cours)
     python3 ballet_rehearsal.py resume   <ID>                                      # applique la décision du Director (libellé de la PR)
@@ -44,6 +45,7 @@ RUN_DIR = Path(".ballet") / "run"
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
 ORCA_AGENTS = {"claude": "claude", "codex": "codex", "grok": "grok", "opencode": "opencode"}
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
+WORKER_MESSAGES = ("worker_done", "question", "escalation")
 STATUS_OF_STEP = {"wait": "open", "escalate": "escalated", "done": "done"}
 STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 
@@ -138,14 +140,16 @@ def receive(rehearsal_id, message_path, question_id, home, tools):
     return _settle(rehearsal, step, home, tools)
 
 
-def receive_from_orca(rehearsal_id, message_id, home, tools):
-    """Le message d'un worker, lu chez Orca par son id : le Conductor ne le recopie pas."""
+def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
+    """Le message d'un worker, lu chez Orca par son id (`by="message"`) ou comme le dernier de son dispatch
+    (`by="dispatch"`, quand le réveil ne nomme que lui) : le Conductor ne le recopie pas."""
     config = _checked_config(home)
     rehearsal = _load(rehearsal_id, home)
     try:
-        kind, body = _orca_message(message_id, tools)
-        header, text = _parsed(body)
-        step = _handle(rehearsal, header, text, message_id if kind == "question" else None, config, home, tools)
+        message = _orca_message(wanted, by, tools)
+        header, text = _parsed(message.get("body", ""))
+        question_id = message["id"] if message.get("type") == "question" else None
+        step = _handle(rehearsal, header, text, question_id, config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
     return _settle(rehearsal, step, home, tools)
@@ -153,11 +157,7 @@ def receive_from_orca(rehearsal_id, message_id, home, tools):
 
 def premiere(rehearsal_id, home, tools):
     rehearsal = _load(rehearsal_id, home)
-    try:
-        step = _premiere(rehearsal, tools)
-    except (RehearsalError, ballet_github.GitHubError) as error:
-        step = Step("escalate", f"merge refused: {error}")
-    return _settle(rehearsal, step, home, tools)
+    return _settle(rehearsal, _then_premiere(rehearsal, Step("wait"), tools), home, tools)
 
 
 def resume(rehearsal_id, home, tools):
@@ -316,8 +316,7 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
     if verdict == "APPROVED" and notes_of(text) and not rehearsal.notes:
         return _notes_to_the_dancer(rehearsal, len(notes_of(text)), step, config, home, tools)
     if verdict == "APPROVED":
-        premiere_step = _premiere(rehearsal, tools)
-        return Step(premiere_step.next, premiere_step.reason, step.done + premiere_step.done)
+        return _then_premiere(rehearsal, step, tools)
     rehearsal.round_trips += 1
     if rehearsal.round_trips > config["escalation"]["max_round_trips"]:
         return Step("escalate", f"{rehearsal.round_trips} rejections, over max_round_trips", step.done)
@@ -354,6 +353,15 @@ def _back_to_the_dancer(rehearsal, comments, config, home, tools):
     rehearsal.label, rehearsal.blocked_on = "REJECTED", ""
     _ask_role(rehearsal, "dancer", _director_fix_assignment(rehearsal, comments), config, home, tools)
     return Step("wait", done=[f"the Director rejected #{rehearsal.pull_request}: {len(comments)} comment(s) carried to the dancer"])
+
+
+def _then_premiere(rehearsal, step, tools):
+    """La Premiere après ce qui est déjà fait : un merge refusé escalade sans perdre ces lignes."""
+    try:
+        premiere_step = _premiere(rehearsal, tools)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        return Step("escalate", f"merge refused: {error}", step.done)
+    return Step(premiere_step.next, premiere_step.reason, step.done + premiere_step.done)
 
 
 def _premiere(rehearsal, tools):
@@ -671,16 +679,37 @@ def _parsed(body):
         raise RehearsalError(f"invalid message, send it back to its author: {error}") from error
 
 
-def _orca_message(message_id, tools):
-    """Le type Orca (`question`, `worker_done`…) et le corps entier du message, retrouvé dans la boîte par son id.
+def _orca_message(wanted, by, tools):
+    """Le message entier, retrouvé dans la boîte d'Orca par son id ou comme le dernier du dispatch d'un worker.
     Un `escalation` d'Orca (worker arrêté sans rapport) n'est pas un message Ballet : le Director le reçoit tel quel."""
-    found = json.loads(tools.orca(["orchestration", "inbox", "--limit", "200", "--full", "--json"]))
-    message = next((item for item in _find_list(found, "messages") if item.get("id") == message_id), None)
+    messages = _find_list(json.loads(tools.orca(["orchestration", "inbox", "--limit", "200", "--full", "--json"])), "messages")
+    message = _by_id(messages, wanted) if by == "message" else _latest_from(messages, wanted)
     if not message:
-        raise RehearsalError(f"no Orca message {message_id} in the inbox")
+        raise RehearsalError(f"no Orca message {'from dispatch ' if by == 'dispatch' else ''}{wanted} in the inbox")
     if message.get("type") == "escalation":
         raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
-    return message.get("type"), message.get("body", "")
+    return message
+
+
+def _by_id(messages, message_id):
+    return next((message for message in messages if message.get("id") == message_id), None)
+
+
+def _latest_from(messages, dispatch_id):
+    sent = [message for message in messages
+            if message.get("type") in WORKER_MESSAGES and _payload(message).get("dispatchId") == dispatch_id]
+    return max(sent, key=lambda message: int(message.get("sequence") or 0), default=None)
+
+
+def _payload(message):
+    """Orca rend le payload en JSON dans une chaîne, ou déjà décodé, ou pas du tout."""
+    payload = message.get("payload")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _find_list(value, key):
@@ -755,8 +784,8 @@ def main(argv, home=".", tools=None):
 def _command(command, arguments, home, tools):
     if command == "begin" and len(arguments) == 1:
         return begin(arguments[0], home, tools).render()
-    if command == "receive" and len(arguments) == 3 and arguments[1] == "--message":
-        return receive_from_orca(arguments[0], arguments[2], home, tools).render()
+    if command == "receive" and len(arguments) == 3 and arguments[1] in ("--message", "--dispatch"):
+        return receive_from_orca(arguments[0], arguments[2], home, tools, by=arguments[1][2:]).render()
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):
         return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools).render()
     if command == "premiere" and len(arguments) == 1:
@@ -767,7 +796,7 @@ def _command(command, arguments, home, tools):
         return status(arguments[0], home, tools).render()
     if command == "status" and arguments[1:] == ["--json"]:
         return json.dumps(asdict(_load(arguments[0], home)), indent=2)
-    raise UsageError("usage: begin <issue> | receive <ID> --message <msg-id> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | resume <ID> | status <ID> [--json]")
+    raise UsageError("usage: begin <issue> | receive <ID> --message <msg-id> | receive <ID> --dispatch <ctx-id> | receive <ID> <message.md> [--question <msg-id>] | premiere <ID> | resume <ID> | status <ID> [--json]")
 
 
 if __name__ == "__main__":
