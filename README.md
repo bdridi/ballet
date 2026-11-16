@@ -1,14 +1,33 @@
 # Ballet
 
-A common method to make coding agents (Claude, Grok, Mistral Vibe) work as a chain, on Orca.
+A common method to make coding agents (Claude, Grok, Mistral Vibe…) work as a chain, on Orca.
 Ballet is a plugin: install it once, and all your projects benefit.
 
-> Status: under construction (v0.8.1). Today the plugin provides the `dramaturg`, `choreographer`, `dancer` and `critic` skills, the common rules (`tdd`, `bdd`, `ddd`, `clean-code`), the specs space templates (`templates/`) and project bootstrapping (`init-project`). The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
+You frame the work with an agent; then Ballet plans it, codes it, reviews it and merges it, one pull request at a time, and stops to ask you whenever something needs your decision.
+
+> Status: under construction (v0.22.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
+
+## How it works
+
+You are the **Director**. Four roles do the work, each one an agent in its own session:
+
+| Role | Does | Touches |
+|---|---|---|
+| **Dramaturg** | frames a need with you into ready features (what and why) | the specs space only |
+| **Choreographer** | turns a feature into a GitHub issue with a technical plan, cut into slices when it is big; writes the ADRs | ADRs and `AGENTS.md` only |
+| **Dancer** | codes the plan, test first, one commit per task | the code |
+| **Critic** | reviews the pull request and returns a verdict | nothing (read-only) |
+
+The **Conductor** runs them on Orca for you: it starts each role, carries their questions and answers, publishes everything on GitHub (issue comments, pull request, review) and merges once the Critic approves and the CI is green. A deterministic script checks after each role that it stayed within its perimeter; a role that oversteps is sent back once, then you decide.
+
+One issue played this way is a **Rehearsal**; its merge is the **Premiere**. A **Piece** is how you launch them: today, `hybrid-track`.
 
 ## Requirements
 
 - macOS with Orca installed and running.
 - At least one of these CLIs, authenticated: Claude Code (`claude`), Grok (`grok`), Mistral Vibe (`vibe`).
+- The GitHub CLI (`gh`), authenticated, and a GitHub remote for each project.
+- A CI on the project's pull requests that runs its proof command: Ballet never merges without a green CI (no CI counts as not green).
 - Python 3.11 or later (standard library only).
 - A clone of this repo, e.g. `~/Workspace/ballet`. In the commands below, replace `<path-to-ballet>` with that path.
 
@@ -40,9 +59,9 @@ In one of the CLIs, run:
 
 The Dramaturg should introduce itself. `/dramaturg` without the prefix also works in Claude and Vibe, as long as no other skill has that name.
 
-## Bootstrap a project
+## 1. Bootstrap a project (once)
 
-In the project's home folder (the single repo, or the specs repo for a multi-repo project):
+In the project's home folder (its repo):
 
 ```
 /ballet:init-project
@@ -50,9 +69,10 @@ In the project's home folder (the single repo, or the specs repo for a multi-rep
 
 The skill asks for the specs space, the proof command (the one that says "it's green") and, if it is not English, the specs language. It then creates:
 
-- `.ballet/config.toml`: the project profile (repos, proof, rules, specs language, routing overrides);
+- `.ballet/config.toml`: the project profile (repos, proof, rules, specs language, which CLI and model plays each role, thresholds);
 - `AGENTS.md` and `CLAUDE.md` (which imports `AGENTS.md`), without overwriting your existing files;
-- `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills.
+- `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills;
+- `.ballet/run/` in the `.gitignore`: Ballet keeps its state and journal there.
 
 To check the configuration by hand:
 
@@ -60,33 +80,101 @@ To check the configuration by hand:
 python3 <path-to-ballet>/scripts/ballet_config.py check <project-folder>
 ```
 
-## Run a Piece
-
-Once a feature is ready (framed with `/ballet:dramaturg`), from the project's home folder, in Orca:
+## 2. Frame the work
 
 ```
+/ballet:dramaturg
+```
+
+Talk it through with the Dramaturg: a need, a bug, feedback, or "what's next?". It keeps the backlog and writes each feature in the specs space until it is **ready** (`features/FEAT-NNN-*.md`). Nothing starts on its own at the end: launching the Piece is your go.
+
+## 3. Run a Piece
+
+From the project's home folder, in Orca:
+
+```
+/ballet:hybrid-track FEAT-002                  # a ready feature: planned, then coded, reviewed and merged
+/ballet:hybrid-track FEAT-002 FEAT-003         # several features, in this order
 /ballet:hybrid-track #12                       # an existing issue
-/ballet:hybrid-track #12 #13 #14               # a queue of issues, one after the other
-/ballet:hybrid-track FEAT-002 FEAT-003         # ready features: the Choreographer creates their issues and slices
-/ballet:hybrid-track FEAT-002 --plan auto      # without the Director's review of the plan
+/ballet:hybrid-track #12 #13 #14               # several issues, in this order
+/ballet:hybrid-track FEAT-002 --plan auto      # without stopping for you to approve the plan
 ```
 
-Everything is sequential: one Rehearsal at a time, each from `main` after the previous merge; the slices of a feature play before the next item. By default (`--plan review`, `[escalation] plan_approval = true`), the queue stops once the Choreographer has published a plan: read it, label the issue `ballet:plan-approved`, and tell the Conductor to resume. Any escalation pauses the queue the same way. The state lives in `.ballet/run/`; `python3 <path-to-ballet>/scripts/ballet_rehearsal.py status` shows it.
+What happens:
 
-## Watch the Rehearsals (concept)
+- **One thing at a time.** The items form a queue, played in the order you gave. Each Rehearsal starts from `main` after the previous merge, so a feature is planned on the code its predecessors left.
+- **A feature is planned first.** The Choreographer reads it with the code, settles the technical choices, and publishes the issue, cut into slices when one pull request would be too big. It asks the Dramaturg when the feature has gaps, and you when neither of them can settle something. The slices then play one after the other, before the next item of the queue. Its ADRs ship with the first slice.
+- **An issue that already has its plan** goes straight to the Dancer; one without a plan is planned first, like a feature.
+- **You approve each plan** (`--plan review`, the default): once the Choreographer has published it, the queue stops until you do (see below). With `--plan auto`, it goes on.
+- **Then, for each issue**: the Dancer codes, the Critic reviews (up to 2 round trips), and the pull request is merged when the Critic approves and the CI is green. The issue is closed, and its parent after its last slice.
 
-A local, read-only page that shows what happens in a project, live and in history: the queue of the Piece (what was played, what plays, what is next), the Rehearsals and the role at work in each, what the Director must do on an escalation (a plan to approve, a pull request to decide), the phase reached (plan, code, review, Premiere), the round trips and the diff size against their limits, and the journal as a thread (what the Conductor hands to each worker, every message received in full, the policy and every step of the script), the planning of a feature joined to its first slice. It reads `.ballet/run/` and listens on 127.0.0.1 only.
+The Conductor tells you what it does as it goes, and stops when the whole queue is merged or when it needs you.
 
+## 4. When the Conductor needs you
+
+Any stop pauses the whole queue; the Conductor tells you why and what to decide. Your decisions go through GitHub labels, then you tell the Conductor to resume ("go on", "resume"):
+
+| The Conductor says | You |
+|---|---|
+| a plan to review | read the issue and its slices; label the issue `ballet:plan-approved`, then resume |
+| a role asks you a question | answer it in the conversation: the Conductor carries your answer back |
+| the Critic escalates, too many round trips, a policy violation… | on the pull request: `ballet:approved` to merge it, or `ballet:rejected` with a comment saying what to fix (sent to the Dancer), then resume |
+| the diff is over the limit (strict mode) | `ballet:size-accepted` to send it to the Critic anyway, or `ballet:rejected` with a comment, then resume |
+| the CI failed, or ran too long | fix or rerun it; once green, ask the Conductor to retry the merge |
+| the queue stopped before an item (e.g. an issue title without its `FEAT-NNN` prefix) | fix the cause, then resume |
+
+To change a plan before approving it, edit the issue yourself. To drop the rest of a queue, delete `.ballet/run/queue.json`.
+
+At any time, ask the Conductor for the status, or run:
+
+```sh
+python3 <path-to-ballet>/scripts/ballet_rehearsal.py status
 ```
+
+## 5. Watch it play: the Stage
+
+A local, read-only page that follows your projects live:
+
+```sh
 python3 <path-to-ballet>/scripts/ballet_stage.py <project-folder>
 python3 <path-to-ballet>/scripts/ballet_stage.py --scan <folder-of-projects>
 ```
 
-Then open http://127.0.0.1:7700 (`--port` to change it). See the Stage item in `TASKS.md` for what comes next.
+Then open http://127.0.0.1:7700 (`--port` to change it). For each project: the queue (played, playing, next) and its Rehearsals. For each Rehearsal: what you have to do when it waits for you, the phase it has reached (plan, code, review, Premiere), the round trips and the diff size against their limits, who plays which role, and the whole thread: every message between the roles in full, what the Conductor handed to each one, the policy checks and every step of the script. It listens on 127.0.0.1 only and changes nothing.
+
+## Settings you may tune
+
+In the project's `.ballet/config.toml` (every key is optional; the defaults are in the plugin's [`config.toml`](config.toml)):
+
+```toml
+[roles.dancer]                  # which CLI and model plays each role
+cli = "claude"
+model = "sonnet"                # the Critic must differ from the Dancer: another CLI, or another model
+
+[escalation]
+plan_approval = true            # false: plans go on without your approval (like --plan auto)
+max_round_trips = 2             # Dancer ↔ Critic round trips before it comes to you
+max_diff_lines = 400            # lines changed by a pull request; the Choreographer aims each slice at half
+max_diff_strict = false         # true: over the limit, it stops before the Critic
+ci_wait_seconds = 480           # how long the merge waits for a running CI
+diff_exclude = ["*.lock"]       # files left out of the count
+
+[policy]
+sensitive_zones = ["api/contract/*"]    # paths the Dancer must not touch (API contract, security…)
+
+[policy.roles.choreographer]
+extra_writes = ["docs/*"]       # widen a role's perimeter without rewriting the method's
+```
 
 ## Languages
 
 Code is always in English. Specs are in English by default (`[project] specs_language` to change it, e.g. for a client who reads them). Text the product displays stays in the product's language: scenarios quote it verbatim, and the glossary maps each term to its code name and its UI wording. The rule is in the `ballet:ddd` skill.
+
+## Known limits
+
+- Sequential only: one Rehearsal at a time (parallel runs come later).
+- One repo per project for the Conductor (multi-repo projects come later).
+- The roles run as Orca workers with Claude Code, Codex, Grok or OpenCode; other CLIs (Mistral Vibe…) can be used by hand, not yet by the Conductor.
 
 ## Update
 
