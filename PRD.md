@@ -206,7 +206,7 @@ Toute phase en auto peut escalader vers le Director. Les déclencheurs par défa
 - il sort du périmètre fonctionnel de l'issue ;
 - un rôle viole la politique une deuxième fois (section 5.3) ;
 - il touche une zone sensible déclarée par le projet (contrat d'API, sécurité, décisions d'architecture, harnais…) ;
-- il dépasse une taille de diff fixée ;
+- il dépasse une taille de diff fixée, comptée par le script (lignes changées hors `diff_exclude`) et non par le Critic ; hors mode strict, la PR est seulement marquée `ballet:oversized` ; en mode strict, l'escalade précède le Critic, et le Director la lève par `ballet:size-accepted` ;
 - il modifie ou supprime un test existant au lieu d'en ajouter.
 
 **Côté exécution**
@@ -397,6 +397,8 @@ sensitive_zones = ["**/contract/**"]   # globs, valables dans tous les repos
 
 [escalation]
 max_diff_lines = 400
+max_diff_strict = true                   # escalade avant le Critic au-delà du seuil (défaut : false)
+diff_exclude = ["*.lock", "**/generated/**"]
 
 [roles.dancer]                            # surcharge : le reste hérite des défauts
 cli = "mistral-vibe"

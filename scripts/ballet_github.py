@@ -27,6 +27,7 @@ Le verdict qui fait foi est le libellé de la PR : `ballet:approved`, `ballet:re
 Le Conductor pose celui du Critic ; le Director tranche une escalade en posant le sien. S'il en reste plusieurs,
 le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts » restent, pour la lecture.
 `merge` refuse sans libellé `ballet:approved` posé après le dernier commit, et sans CI entièrement verte.
+La taille a ses deux libellés : `ballet:oversized` (posé et retiré par le Conductor) et `ballet:size-accepted` (le Director).
 `close` ne se fie pas au `Closes #N` de la PR (implicite, et absent d'une PR ouverte à la main) : il ferme lui-même.
 Une slice se reconnaît à sa première ligne, `Part of #<parente>` (posée par `slice`).
 """
@@ -62,6 +63,8 @@ VERDICT_LABELS = {
     "REJECTED": ("ballet:rejected", "d93f0b", "Ballet: rejected, back to the Dancer"),
     "ESCALATE": ("ballet:escalated", "fbca04", "Ballet: escalated, the Director decides"),
 }
+OVERSIZED = ("ballet:oversized", "e99695", "Ballet: the diff is over max_diff_lines")
+SIZE_ACCEPTED = ("ballet:size-accepted", "c5def5", "Ballet: the Director accepts the size of the diff")
 
 
 class GitHubError(Exception):
@@ -186,8 +189,24 @@ def label_pull_request(pr_number, verdict, run=None):
     run = run or _run_gh
     number = _issue_number(pr_number)
     verdict = _known_verdict(verdict)
-    _ensure_verdict_labels(run)
+    _ensure_labels(VERDICT_LABELS.values(), run)
     run(["pr", "edit", number, *_label_changes(verdict)])
+
+
+def mark_size(pr_number, oversized, run=None):
+    """`ballet:oversized` suit la taille : posé au-delà du seuil, retiré en deçà."""
+    run = run or _run_gh
+    number = _issue_number(pr_number)
+    marked = OVERSIZED[0] in _labels_on(number, run)
+    if oversized and not marked:
+        _ensure_labels([OVERSIZED, SIZE_ACCEPTED], run)
+        run(["pr", "edit", number, "--add-label", OVERSIZED[0]])
+    elif marked and not oversized:
+        run(["pr", "edit", number, "--remove-label", OVERSIZED[0]])
+
+
+def size_accepted(pr_number, run=None):
+    return SIZE_ACCEPTED[0] in _labels_on(_issue_number(pr_number), run or _run_gh)
 
 
 def director_decision(pr_number, run=None):
@@ -456,10 +475,14 @@ def _known_verdict(verdict):
     return verdict
 
 
-def _ensure_verdict_labels(run):
-    """Crée les trois libellés au premier usage ; `--force` les laisse tels quels ensuite."""
-    for name, color, description in VERDICT_LABELS.values():
+def _ensure_labels(labels, run):
+    """Crée les libellés au premier usage ; `--force` les remet à leur couleur et description ensuite."""
+    for name, color, description in labels:
         run(["label", "create", name, "--color", color, "--description", description, "--force"])
+
+
+def _labels_on(number, run):
+    return {label["name"] for label in json.loads(run(["pr", "view", number, "--json", "labels"]))["labels"]}
 
 
 def _label_changes(verdict):

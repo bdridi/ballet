@@ -162,10 +162,18 @@ def _threshold_problems(config):
         value = escalation.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             problems.append(f"[escalation] {key} must be a positive integer")
+    if not isinstance(escalation.get("max_diff_strict"), bool):
+        problems.append("[escalation] max_diff_strict must be true or false")
+    if not _is_glob_list(escalation.get("diff_exclude")):
+        problems.append("[escalation] diff_exclude must be a list of globs")
     zones = _table(config, "policy").get("sensitive_zones", [])
-    if not isinstance(zones, list) or not all(isinstance(zone, str) for zone in zones):
+    if not _is_glob_list(zones):
         problems.append("[policy] sensitive_zones must be a list of globs")
     return problems
+
+
+def _is_glob_list(value):
+    return isinstance(value, list) and all(isinstance(glob, str) for glob in value)
 
 
 # --- outils -----------------------------------------------------------------

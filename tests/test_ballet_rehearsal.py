@@ -50,6 +50,7 @@ class FakeWorld:
         self.reviews = [{"id": 11, "submitted_at": "2026-11-16T10:00:00Z", "html_url": "u", "body": "VERDICT: REJECTED\n\n## Blocking\n\n1. `a.rs:1` (inline comment)\n"}]
         self.timeline = []
         self.issue_state = "OPEN"
+        self.numstat = "10\t2\tsrc/a.rs\n"
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -58,6 +59,8 @@ class FakeWorld:
         tool, arguments = argv[0], argv[1:]
         if tool == "gh":
             return self.gh(arguments)
+        if tool == "git" and "--numstat" in arguments:
+            return self.numstat
         if tool == "git" and "worktree" in arguments:
             return f"worktree {self.home}\nbranch refs/heads/main\n\nworktree /wt/FEAT-001.2\nbranch refs/heads/rehearsal/FEAT-001.2\n"
         if arguments[:2] == ["orchestration", "worker-start"]:
@@ -72,6 +75,8 @@ class FakeWorld:
             return "[]"
         if arguments[:2] == ["pr", "create"]:
             return "https://github.com/o/r/pull/8\n"
+        if arguments[:2] == ["pr", "view"] and arguments[-1] == "labels":
+            return json.dumps({"labels": [{"name": name} for name in sorted(self.labels())]})
         if arguments[:2] == ["pr", "view"]:
             return json.dumps(self.pull_request)
         if arguments[:2] == ["pr", "edit"]:
@@ -119,6 +124,10 @@ class FakeWorld:
 
     def started_roles(self):
         return [command[command.index("--task-title") + 1] for command in self.ran("orca", "orchestration", "worker-start")]
+
+
+STRICT_PROFILE = PROFILE + "\n[escalation]\nmax_diff_lines = 100\nmax_diff_strict = true\n"
+OVERSIZED_NUMSTAT = "150\t30\tsrc/inventory.rs\n900\t0\tCargo.lock\n-\t-\tlogo.png\n"
 
 
 class BalletRehearsalTest(unittest.TestCase):
@@ -428,6 +437,78 @@ class BalletRehearsalTest(unittest.TestCase):
         step = self.resume()
         self.assertEqual(step.next, "wait")
         self.assertFalse(self.world.ran("gh", "api"))
+
+    # --- taille du diff ---
+
+    def strict(self):
+        (self.home / ".ballet" / "config.toml").write_text(STRICT_PROFILE, encoding="utf-8")
+        self.world.numstat = OVERSIZED_NUMSTAT
+
+    def journal(self, event):
+        lines = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
+        return [json.loads(line)["detail"] for line in lines if json.loads(line)["event"] == event]
+
+    def test_chaque_rapport_mesure_et_journalise_la_taille_meme_sous_le_seuil(self):
+        self.to_the_critic()
+        self.assertEqual(self.journal("diff-size"), [{"counted": 12, "excluded": 0, "excluded_files": [], "limit": 400,
+                                                      "strict": False, "over": False, "round": 1}])
+        diffs = [command[3:] for command in self.world.ran("git") if "--numstat" in command]
+        self.assertEqual(diffs, [["diff", "--numstat", "origin/main...rehearsal/FEAT-001.2"]])
+
+    def test_hors_mode_strict_un_gros_diff_est_marque_et_part_au_critic(self):
+        self.world.numstat = "500\t0\tsrc/a.rs\n"
+        self.begin()
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual(step.next, "wait")
+        self.assertIn("ballet:oversized", self.world.labels())
+        self.assertIn("diff: 500 lines counted, 0 excluded, limit 400: over the limit, not blocking", step.done)
+        self.assertEqual(len(self.world.started_roles()), 2)
+
+    def test_en_mode_strict_un_gros_diff_escalade_avant_le_critic(self):
+        self.strict()
+        self.begin()
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("diff of 180 lines, over max_diff_lines (100)", step.reason)
+        self.assertEqual(self.world.labels(), {"ballet:oversized", "ballet:escalated"})
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+        self.assertEqual(self.journal("diff-size")[0]["excluded_files"], ["Cargo.lock"])
+
+    def test_la_taille_acceptee_par_le_director_lance_le_critic(self):
+        self.strict()
+        self.begin()
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.world.label_event("labeled", "ballet:size-accepted")
+        step = self.resume()
+        self.assertEqual((step.next, self.state()["blocked_on"]), ("wait", ""))
+        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+
+    def test_une_taille_deja_acceptee_ne_bloque_plus_au_tour_suivant(self):
+        self.strict()
+        self.begin()
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.world.label_event("labeled", "ballet:size-accepted")
+        self.resume()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.assertEqual(self.receive(message("dancer", "conductor", "report", "- Fixed.")).next, "wait")
+
+    def test_sans_decision_sur_la_taille_le_director_voit_l_option(self):
+        self.strict()
+        self.begin()
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertIn("ballet:size-accepted", self.resume().reason)
+
+    def test_le_libelle_oversized_tombe_quand_le_diff_repasse_sous_le_seuil(self):
+        self.world.numstat = "500\t0\tsrc/a.rs\n"
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.world.numstat = "50\t0\tsrc/a.rs\n"
+        self.receive(message("dancer", "conductor", "report", "- Smaller."))
+        self.assertNotIn("ballet:oversized", self.world.labels())
+
+    def test_status_montre_la_derniere_mesure(self):
+        self.to_the_critic()
+        self.assertIn("- diff: 12 lines counted, 0 excluded, limit 400: within the limit", self.run_main("status", "FEAT-001.2")[1])
 
     # --- ligne de commande ---
 

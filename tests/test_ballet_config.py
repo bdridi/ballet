@@ -160,6 +160,20 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT + "\n[escalation]\nmax_exchange_rounds = 0\n")
         self.assertProblem("max_exchange_rounds must be a positive integer")
 
+    def test_mode_strict_qui_n_est_pas_un_booleen_est_refuse(self):
+        self.write_project_config(VALID_PROJECT + '\n[escalation]\nmax_diff_strict = "yes"\n')
+        self.assertProblem("max_diff_strict must be true or false")
+
+    def test_exclusions_qui_ne_sont_pas_une_liste_sont_refusees(self):
+        self.write_project_config(VALID_PROJECT + '\n[escalation]\ndiff_exclude = "*.lock"\n')
+        self.assertProblem("diff_exclude must be a list of globs")
+
+    def test_par_defaut_la_taille_ne_bloque_pas_et_exclut_les_lockfiles(self):
+        self.write_project_config(VALID_PROJECT)
+        escalation = ballet_config.effective_config(self.project)["escalation"]
+        self.assertFalse(escalation["max_diff_strict"])
+        self.assertIn("*.lock", escalation["diff_exclude"])
+
 
 if __name__ == "__main__":
     unittest.main()

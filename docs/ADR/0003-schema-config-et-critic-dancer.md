@@ -19,6 +19,8 @@
 | `[roles.<rôle>] model` | texte, facultatif (alias du CLI, ex. `opus`, `sonnet`) | Choreographer et Critic `opus`, Dancer `sonnet`, Dramaturg absent (défaut du CLI) |
 | `[policy] sensitive_zones` | liste de globs | `[]` |
 | `[escalation] max_round_trips`, `max_diff_lines` | entiers positifs | 2, 400 |
+| `[escalation] max_diff_strict` | booléen | false |
+| `[escalation] diff_exclude` | liste de globs (fnmatch) | lockfiles |
 
 Fusion : une table se fusionne clé par clé ; toute autre valeur (liste comprise) est remplacée par celle du projet.
 

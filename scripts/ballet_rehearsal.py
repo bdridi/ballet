@@ -14,6 +14,10 @@ Lancé depuis le home du projet. Le skill `conductor` n'a qu'à appeler ce scrip
 Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
 
+À chaque rapport du Dancer, le script compte la taille du diff (`ballet_size.py`) et la journalise (`diff-size`).
+Au-delà de `max_diff_lines`, la PR porte `ballet:oversized` ; en mode strict (`max_diff_strict`), la Rehearsal
+escalade avant le Critic, jusqu'à ce que le Director pose `ballet:size-accepted` et la fasse reprendre.
+
 Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
 et un autre code ≠ 0 n'est qu'une panne du script.
 
@@ -32,6 +36,7 @@ from pathlib import Path
 
 import ballet_config
 import ballet_github
+import ballet_size
 from ballet_message import MessageError, read_message, verdict_of
 
 RUN_DIR = Path(".ballet") / "run"
@@ -64,6 +69,8 @@ class Rehearsal:
     status: str = "open"                             # open | escalated | done
     reason: str = ""                                 # le motif de la dernière escalade, ou de la fin
     label: str = ""                                  # le dernier verdict posé en libellé par le script
+    size: dict = field(default_factory=dict)         # la dernière mesure du diff
+    blocked_on: str = ""                             # "size" : le Critic attend que le Director accepte la taille
 
     @property
     def branch(self):
@@ -155,7 +162,7 @@ def status(rehearsal_id, home, tools):
     """Où en est la Rehearsal, en clair : sa dernière ligne `NEXT` est celle du dernier pas."""
     config = _checked_config(home)
     rehearsal = _load(rehearsal_id, home)
-    summary = [_where(rehearsal), _pull_request_line(rehearsal, tools), _round_trips_line(rehearsal, config)]
+    summary = [_where(rehearsal), _pull_request_line(rehearsal, tools), _size_line(rehearsal), _round_trips_line(rehearsal, config)]
     summary += _pending_lines(rehearsal) + _workers_line(rehearsal)
     return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, summary)
 
@@ -229,9 +236,41 @@ def _after_code(rehearsal, report, config, home, tools):
         step.done.append(f"pull request #{rehearsal.pull_request} opened")
     _comment_pull_request(rehearsal, report, home, tools)
     step.done.append(f"Dancer report published on #{rehearsal.pull_request}")
+    size = _measure(rehearsal, config, home, tools)
+    step.done.append(_size_line(rehearsal))
+    if _blocked_by_size(rehearsal, size, config, tools):
+        rehearsal.blocked_on = "size"
+        return Step("escalate", f"diff of {size.counted} lines, over max_diff_lines ({config['escalation']['max_diff_lines']}) "
+                    f"in strict mode: label #{rehearsal.pull_request} ballet:size-accepted, or ballet:rejected with a comment, "
+                    "then resume", step.done)
+    return _to_the_critic(rehearsal, step, config, home, tools)
+
+
+def _to_the_critic(rehearsal, step, config, home, tools):
     _ask_role(rehearsal, "critic", _critic_assignment(rehearsal), config, home, tools)
     step.done.append(f"critic asked to review #{rehearsal.pull_request}, round {rehearsal.round_trips + 1}")
     return step
+
+
+def _measure(rehearsal, config, home, tools):
+    """Compte le diff de la branche, le note sur la PR (`ballet:oversized`) et le journalise, à chaque fois :
+    sans les mesures sous le seuil, pas de taux de dépassement."""
+    escalation = config["escalation"]
+    size = ballet_size.branch_size(rehearsal.branch, escalation["diff_exclude"], tools.git(rehearsal.repo))
+    over = size.over(escalation["max_diff_lines"])
+    ballet_github.mark_size(rehearsal.pull_request, over, run=tools.gh)
+    rehearsal.size = {"counted": size.counted, "excluded": size.excluded, "excluded_files": size.excluded_files,
+                      "limit": escalation["max_diff_lines"], "strict": escalation["max_diff_strict"], "over": over,
+                      "round": rehearsal.round_trips + 1}
+    _log(home, rehearsal, "diff-size", rehearsal.size)
+    return size
+
+
+def _blocked_by_size(rehearsal, size, config, tools):
+    escalation = config["escalation"]
+    if not escalation["max_diff_strict"] or not size.over(escalation["max_diff_lines"]):
+        return False
+    return not ballet_github.size_accepted(rehearsal.pull_request, run=tools.gh)
 
 
 def _after_verdict(rehearsal, verdict, text, config, home, tools):
@@ -258,20 +297,27 @@ def _apply_decision(rehearsal, config, home, tools):
     if not rehearsal.pull_request:
         raise RehearsalError("no pull request yet: answer the pending question with an `answer` message (receive)")
     decision = ballet_github.director_decision(rehearsal.pull_request, run=tools.gh)
+    if rehearsal.blocked_on == "size":
+        decision["size_accepted"] = ballet_github.size_accepted(rehearsal.pull_request, run=tools.gh)
     _log(home, rehearsal, "director-decision", decision)
     if decision["verdict"] == "APPROVED":
-        rehearsal.label = "APPROVED"
+        rehearsal.label, rehearsal.blocked_on = "APPROVED", ""
         return _premiere(rehearsal, tools)
     if decision["verdict"] == "REJECTED":
         return _back_to_the_dancer(rehearsal, decision["comments"], config, home, tools)
-    return Step("escalate", f"nothing decided yet on #{rehearsal.pull_request}: label it ballet:approved, "
+    if decision.get("size_accepted"):
+        rehearsal.blocked_on = ""
+        return _to_the_critic(rehearsal, Step("wait", done=[f"the Director accepts the size of #{rehearsal.pull_request}"]),
+                              config, home, tools)
+    size_option = "ballet:size-accepted to send it to the Critic, " if rehearsal.blocked_on == "size" else ""
+    return Step("escalate", f"nothing decided yet on #{rehearsal.pull_request}: label it {size_option}ballet:approved, "
                 "or ballet:rejected with a comment saying what to fix, then resume")
 
 
 def _back_to_the_dancer(rehearsal, comments, config, home, tools):
     if not comments:
         return Step("escalate", f"ballet:rejected needs a comment on #{rehearsal.pull_request} saying what to fix, then resume")
-    rehearsal.label = "REJECTED"
+    rehearsal.label, rehearsal.blocked_on = "REJECTED", ""
     _ask_role(rehearsal, "dancer", _director_fix_assignment(rehearsal, comments), config, home, tools)
     return Step("wait", done=[f"the Director rejected #{rehearsal.pull_request}: {len(comments)} comment(s) carried to the dancer"])
 
@@ -313,6 +359,14 @@ def _pull_request_line(rehearsal, tools):
     state = f" ({found['state'].lower()})" if found["state"] else ""
     return (f"pull request #{rehearsal.pull_request}{state}: {found['label'] or 'no verdict label'}, "
             f"Critic's last verdict {found['verdict'] or 'none yet'}, {found['ci']}")
+
+
+def _size_line(rehearsal):
+    size = rehearsal.size
+    if not size:
+        return "diff not measured yet"
+    verdict = "over the limit" + (", strict" if size["strict"] else ", not blocking") if size["over"] else "within the limit"
+    return f"diff: {size['counted']} lines counted, {size['excluded']} excluded, limit {size['limit']}: {verdict}"
 
 
 def _round_trips_line(rehearsal, config):
