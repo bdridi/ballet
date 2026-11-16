@@ -165,8 +165,9 @@ def _threshold_problems(config):
         value = escalation.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             problems.append(f"[escalation] {key} must be a positive integer")
-    if not isinstance(escalation.get("max_diff_strict"), bool):
-        problems.append("[escalation] max_diff_strict must be true or false")
+    for key in ("max_diff_strict", "plan_approval"):
+        if not isinstance(escalation.get(key), bool):
+            problems.append(f"[escalation] {key} must be true or false")
     if not _is_glob_list(escalation.get("diff_exclude")):
         problems.append("[escalation] diff_exclude must be a list of globs")
     return problems

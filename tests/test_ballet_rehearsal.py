@@ -61,6 +61,7 @@ class FakeWorld:
         self.dirty = ""
         self.changed = []
         self.new_commits = []
+        self.issues = {}            # numéro → {title, body, state, labels} ; les autres issues sont #3
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -75,7 +76,7 @@ class FakeWorld:
         if tool == "git" and "--numstat" in arguments:
             return self.numstat
         if tool == "git" and "worktree" in arguments:
-            return f"worktree {self.home}\nbranch refs/heads/main\n\nworktree /wt/FEAT-001.2\nbranch refs/heads/rehearsal/FEAT-001.2\n"
+            return self.worktrees()
         if tool == "git":
             return self.policy_git(arguments[2:])
         if arguments[:2] == ["orchestration", "inbox"]:
@@ -84,6 +85,14 @@ class FakeWorld:
             self.dispatches += 1
             return json.dumps({"ok": True, "result": {"worker": {"dispatchId": f"ctx_{self.dispatches}"}}})
         return ""
+
+    def worktrees(self):
+        """Un worktree par branche de Rehearsal créée par Orca, plus le home."""
+        listed = f"worktree {self.home}\nbranch refs/heads/main\n"
+        for create in self.ran("orca", "worktree", "create"):
+            branch = create[create.index("--branch") + 1]
+            listed += f"\nworktree /wt/{branch.split('/', 1)[1]}\nbranch refs/heads/{branch}\n"
+        return listed
 
     def policy_git(self, arguments):
         """Ce que lit la politique : un worktree en règle, sauf ce que le test y met (`changed`, `dirty`, `branch`)."""
@@ -100,6 +109,8 @@ class FakeWorld:
         return answers.get(tuple(arguments[:2]), "")
 
     def gh(self, arguments):
+        if arguments[:2] == ["issue", "view"] and arguments[2] in self.issues:
+            return json.dumps(self.issues[arguments[2]])
         if arguments[:2] == ["issue", "view"]:
             return json.dumps({"title": "FEAT-001.2 · Inventory model", "body": self.issue_body, "state": self.issue_state})
         if arguments[:2] == ["issue", "list"]:
@@ -245,7 +256,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.begin()
         events = [json.loads(line)["event"] for line in (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()]
         self.assertEqual(events[:2], ["begin", "handoff"])
-        self.assertEqual(self.journal("begin"), [{}])
+        self.assertEqual(self.journal("begin"), [{"item": "#3", "plan": "review"}])
         start = self.journal("handoff")[0]
         self.assertEqual((start["role"], start["how"], start["dispatch"], start["agent"], start["model"]),
                          ("dancer", "start", "ctx_1", "claude", "sonnet"))
@@ -888,6 +899,111 @@ class BalletRehearsalTest(unittest.TestCase):
     def test_le_dossier_d_etat_n_ecrit_plus_son_propre_gitignore(self):
         self.begin()
         self.assertFalse((self.home / ".ballet" / "run" / ".gitignore").exists())
+
+
+class FileTest(unittest.TestCase):
+    """La file : une Rehearsal après l'autre, la suivante depuis `main` après la Premiere de la précédente."""
+
+    run_main = BalletRehearsalTest.run_main
+    state = BalletRehearsalTest.state
+
+    def setUp(self):
+        BalletRehearsalTest.setUp(self)
+        self.world.issues = {
+            "3": {"title": "FEAT-001.2 · Inventory model", "body": PLANNED_ISSUE, "state": "OPEN"},
+            "4": {"title": "FEAT-001.3 · Inventory list", "body": PLANNED_ISSUE, "state": "OPEN"},
+        }
+
+    def run_queue(self, *arguments):
+        return self.run_main("run", *arguments)
+
+    def queue(self):
+        return json.loads((self.home / ".ballet" / "run" / "queue.json").read_text())
+
+    def approve(self, rehearsal_id):
+        """Le Dancer rend son rapport, le Critic approuve : la Premiere est faite."""
+        self.run_main("receive", rehearsal_id, str(self.write(message("dancer", "conductor", "report", "- Done."))))
+        return self.run_main("receive", str(self.write(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))))
+
+    def write(self, text):
+        path = self.home / "incoming.md"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_run_ouvre_la_premiere_rehearsal_et_garde_les_suivantes(self):
+        code, lines = self.run_queue("#3", "4")
+        self.assertEqual((code, lines[-1]), (0, "NEXT: wait"))
+        self.assertEqual(self.queue()["items"], ["#4"])
+        self.assertEqual(self.queue()["current"], "FEAT-001.2")
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+
+    def test_la_premiere_ouvre_la_suivante_depuis_main(self):
+        self.run_queue("#3", "#4")
+        lines = self.approve("FEAT-001.2")[1]
+        self.assertIn("- next in the queue: #4", lines)
+        self.assertEqual(lines[-1], "NEXT: wait")
+        self.assertEqual(self.world.started_roles()[-1], "Dancer · FEAT-001.3")
+        fetches = self.world.ran("git", "-C", str(self.home.resolve()), "fetch", "origin", "main")
+        self.assertEqual(len(fetches), 2)
+        self.assertEqual((self.queue()["items"], self.queue()["current"]), ([], "FEAT-001.3"))
+
+    def test_la_derniere_premiere_rend_done_et_dit_la_file_jouee(self):
+        self.run_queue("#3", "#4")
+        self.approve("FEAT-001.2")
+        self.world.branch = "rehearsal/FEAT-001.3"
+        lines = self.approve("FEAT-001.3")[1]
+        self.assertIn("- queue done: FEAT-001.2, FEAT-001.3", lines)
+        self.assertTrue(lines[-1].startswith("NEXT: done"))
+        self.assertEqual(self.queue()["current"], "")
+
+    def test_une_escalade_met_la_file_en_pause_et_resume_reprend_la_rehearsal_puis_la_file(self):
+        self.run_queue("#3", "#4")
+        self.run_main("receive", str(self.write(message("dancer", "conductor", "report", "- Done."))))
+        lines = self.run_main("receive", str(self.write(message("critic", "conductor", "verdict", "VERDICT: ESCALATE\n\nSize."))))[1]
+        self.assertTrue(lines[-1].startswith("NEXT: escalate"))
+        self.assertEqual(self.queue()["items"], ["#4"])
+        self.world.label_event("labeled", "ballet:approved")
+        lines = self.run_main("resume")[1]
+        self.assertIn("- next in the queue: #4", lines)
+        self.assertEqual(self.world.started_roles()[-1], "Dancer · FEAT-001.3")
+
+    def test_une_file_arretee_avant_un_element_reprend_par_resume(self):
+        self.world.issues["4"]["title"] = "Inventory list"
+        self.run_queue("#3", "#4")
+        lines = self.approve("FEAT-001.2")[1]
+        self.assertTrue(lines[-1].startswith("NEXT: escalate the queue stopped before #4"))
+        self.assertEqual((self.queue()["items"], self.queue()["current"]), (["#4"], ""))
+        self.assertTrue(self.run_main("status")[1][-1].startswith("NEXT: escalate the queue stopped before #4"))
+        self.world.issues["4"]["title"] = "FEAT-001.3 · Inventory list"
+        self.assertEqual(self.run_main("resume")[1][-1], "NEXT: wait")
+        self.assertEqual(self.queue()["current"], "FEAT-001.3")
+
+    def test_une_seule_rehearsal_a_la_fois(self):
+        self.run_queue("#3")
+        lines = self.run_queue("#4")[1]
+        self.assertTrue(lines[-1].startswith("NEXT: escalate Rehearsal FEAT-001.2 is still open"))
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+
+    def test_status_montre_la_file(self):
+        self.run_queue("#3", "#4", "--plan", "auto")
+        lines = self.run_main("status")[1]
+        self.assertIn("- queue (plan auto): playing FEAT-001.2; next: #4", lines)
+        self.assertIn("- played: FEAT-001.2 (#3)", lines)
+
+    def test_le_mode_du_plan_vient_de_la_commande_sinon_du_profil(self):
+        self.run_queue("#3", "--plan", "auto")
+        self.assertEqual(self.state()["plan"], "auto")
+
+    def test_plan_approval_false_vaut_plan_auto(self):
+        (self.home / ".ballet" / "config.toml").write_text(PROFILE + "\n[escalation]\nplan_approval = false\n", encoding="utf-8")
+        self.run_queue("#3")
+        self.assertEqual(self.queue()["plan"], "auto")
+
+    def test_un_mode_de_plan_inconnu_est_un_usage_invalide(self):
+        self.assertEqual(self.run_queue("#3", "--plan", "maybe")[0], 2)
+        self.assertEqual(self.run_queue("--plan", "auto")[0], 2)
+        self.assertEqual(self.run_queue("nope")[0], 2)
+        self.assertEqual(self.world.commands, [])
 
 
 if __name__ == "__main__":
