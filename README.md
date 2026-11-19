@@ -5,7 +5,7 @@ Ballet is a plugin: install it once, and all your projects benefit.
 
 You frame the work with an agent; then Ballet plans it, codes it, reviews it and merges it, one pull request at a time, and stops to ask you whenever something needs your decision.
 
-> Status: under construction (v0.22.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), the plan in [`TASKS.md`](TASKS.md) (both in French for now).
+> Status: under construction (v0.25.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), what is shipped in [`release.md`](release.md), what comes next in [`opportunities.md`](opportunities.md) (all in French for now).
 
 ## How it works
 
