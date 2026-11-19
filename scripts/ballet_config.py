@@ -36,6 +36,7 @@ def find_problems(config, plugin_root=PLUGIN_ROOT):
         + _rule_problems(config, Path(plugin_root))
         + _role_problems(config)
         + _critic_dancer_problems(config)
+        + _rehearsal_problems(config)
         + _threshold_problems(config)
         + _mutation_problems(config)
         + _policy_problems(config)
@@ -185,6 +186,12 @@ def _critic_dancer_problems(config):
     if dancer.get("cli") != critic.get("cli") or _models_differ(dancer, critic):
         return []
     return ["Critic ≠ Dancer: same CLI without two different explicit models"]
+
+
+def _rehearsal_problems(config):
+    if not isinstance(_table(config, "rehearsal").get("plan_approval"), bool):
+        return ["[rehearsal] plan_approval must be true or false"]
+    return []
 
 
 def _threshold_problems(config):

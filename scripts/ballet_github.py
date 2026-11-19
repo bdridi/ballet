@@ -34,7 +34,6 @@ le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts »
 La taille a ses deux libellés : `ballet:oversized` (posé et retiré par le Conductor) et `ballet:size-accepted` (le Director).
 `close` ne se fie pas au `Closes #N` de la PR (implicite, et absent d'une PR ouverte à la main) : il ferme lui-même.
 Une slice se reconnaît à sa première ligne, `Part of #<parente>` (posée par `slice`).
-Le plan du Choreographer a son libellé, `ballet:plan-approved`, que pose le Director sur l'issue (plan en review).
 """
 
 import json
@@ -52,6 +51,7 @@ PUBLISHED_TYPES = ("Feature", "Bug", "Task")
 SLICE_TYPE = "Slice"
 STATUS_FIELD = "Ballet status"
 MODE_FIELD = "Rehearsal mode"
+PLAN_APPROVAL_FIELD = "Plan approval"
 BALLET_STATUSES = ("proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done")
 NEXT_GLOBAL_ID = "X-Github-Next-Global-ID: 1"  # les ID d'issue et de champ au format actuel
 ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!) {
@@ -95,7 +95,6 @@ VERDICT_LABELS = {
 }
 OVERSIZED = ("ballet:oversized", "e99695", "Ballet: the diff is over max_diff_lines")
 SIZE_ACCEPTED = ("ballet:size-accepted", "c5def5", "Ballet: the Director accepts the size of the diff")
-PLAN_APPROVED = ("ballet:plan-approved", "0e8a16", "Ballet: the Director approves the Choreographer's plan")
 
 
 class GitHubError(Exception):
@@ -133,14 +132,15 @@ def set_status(number, status, run=None):
 
 
 def queue_fields(number, run=None):
-    """Ce que la file lit sur une issue : son type natif, son `Rehearsal mode` et son `Ballet status` (vides s'ils ne sont pas posés)."""
+    """Ce que la file lit sur une issue : son type natif, son `Rehearsal mode`, son `Plan approval` et son `Ballet status`
+    (vides s'ils ne sont pas posés)."""
     answer = _graphql(["-f", f"query={QUEUE_FIELDS}", "-F", "owner={owner}", "-F", "name={repo}",
                        "-F", f"number={_issue_number(number)}"], run or _run_gh)["data"]
     issue = answer["repository"]["issue"] or {}
     values = {(value.get("field") or {}).get("name"): value["name"]
               for value in (issue.get("issueFieldValues") or {}).get("nodes", []) if value}
     return {"type": (issue.get("issueType") or {}).get("name", ""), "mode": values.get(MODE_FIELD, ""),
-            "status": values.get(STATUS_FIELD, "")}
+            "plan_approval": values.get(PLAN_APPROVAL_FIELD, ""), "status": values.get(STATUS_FIELD, "")}
 
 
 def write_plan(number, plan_path, run=None):
@@ -292,16 +292,6 @@ def slices_of(parent_number, run=None):
     parent = _issue_number(parent_number)
     found = json.loads(run(["issue", "list", "--state", "open", "--json", "number,body", "--limit", "500"]))
     return sorted((str(issue["number"]) for issue in found if _parent_of(issue["body"]) == parent), key=int)
-
-
-def ask_plan_approval(run=None):
-    """Le libellé que le Director posera sur l'issue du plan existe déjà dans le repo."""
-    _ensure_labels([PLAN_APPROVED], run or _run_gh)
-
-
-def plan_approved(issue_number, run=None):
-    output = (run or _run_gh)(["issue", "view", _issue_number(issue_number), "--json", "labels"])
-    return PLAN_APPROVED[0] in {label["name"] for label in json.loads(output).get("labels", [])}
 
 
 def pull_request_status(pr_number, run=None):

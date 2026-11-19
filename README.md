@@ -73,7 +73,7 @@ The skill asks for the specs space, the proof command (the one that says "it's g
 - `AGENTS.md` and `CLAUDE.md` (which imports `AGENTS.md`), without overwriting your existing files;
 - `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills;
 - `.ballet/run/` in the `.gitignore`: Ballet keeps its state and journal there;
-- on GitHub, for the repo's owner (your account or your organization, shared by all its repos): the issue type `Slice` next to `Task`, `Bug` and `Feature`, and three issue fields, `Ballet status` (`proposed`, `ready`, `in-rehearsal`, `plan-review`, `escalated`, `done`), `Rehearsal mode` (`assisted`, `assisted + plan approval`, `autopilot`) and `Priority`. Only what is missing is created, nothing is changed; a field that exists without all its options is reported, to complete in Settings → Planning. Ballet's queue reads them: the Conductor reads `Rehearsal mode` and keeps `Ballet status` up to date; `--no-github` skips this step.
+- on GitHub, for the repo's owner (your account or your organization, shared by all its repos): the issue type `Slice` next to `Task`, `Bug` and `Feature`, and four issue fields, `Ballet status` (`proposed`, `ready`, `in-rehearsal`, `plan-review`, `escalated`, `done`), `Rehearsal mode` (`assisted`, `autopilot`), `Plan approval` (`required`, `skipped`) and `Priority`. Only what is missing is created, nothing is changed; a field that exists without all its options is reported, to complete in Settings → Planning. Ballet's queue reads them: the Conductor reads `Rehearsal mode` and `Plan approval` and keeps `Ballet status` up to date; `--no-github` skips this step.
 
 To prepare the GitHub issue types and fields again, e.g. for a project whose remote did not exist yet:
 
@@ -107,21 +107,21 @@ From the project's home folder, in Orca, hand one item to a Conductor:
 What happens:
 
 - **One item per Conductor session.** The session (`.ballet/run/session-12.json`) plays the item, then its slices, one Rehearsal at a time, and ends at its last Premiere. Each Rehearsal starts from `main` after the previous merge. Another item gets its own Conductor; an item already in a session is refused.
-- **The mode is on the issue**: its `Rehearsal mode` field (empty: `assisted`). The Conductor keeps its `Ballet status` up to date: `in-rehearsal`, `plan-review`, `escalated`, `done`.
+- **The mode is on the issue**: its `Rehearsal mode` field (empty: `assisted`). In `assisted`, whether the plan waits for you is its `Plan approval` field (`required` or `skipped`), or else your project's profile (`[rehearsal] plan_approval`, `true` by default); a feature with no issue follows the profile, and `autopilot` never waits. The Conductor keeps its `Ballet status` up to date: `in-rehearsal`, `plan-review`, `escalated`, `done`.
 - **A feature is planned first.** The Choreographer reads its issue (published by the Dramaturg) with the code, settles the technical choices, and writes the plan on it, cut into slices when one pull request would be too big. It asks the Dramaturg when the feature has gaps, and you when neither of them can settle something. The slices then play one after the other. Its ADRs ship with the first slice.
 - **An issue that already has its plan** goes straight to the Dancer; one without a plan is planned first, like a feature.
-- **You approve the plan** only in mode `assisted + plan approval`: once the Choreographer has published it, the session stops until you do (see below). Otherwise it goes on.
+- **You review the plan** when it waits for you: once the Choreographer has published it, the session stops, and you discuss it with the Choreographer through the Conductor until you approve it (see below). Otherwise it goes on.
 - **Then, for each issue**: the Dancer codes, the script runs the proof (and the mutation test, if your project declares one), the Critic reviews (up to 2 round trips), and the pull request is merged when the Critic approves and the CI is green. The issue is closed, and its parent after its last slice.
 
 The Conductor tells you what it does as it goes, and stops when the item's last slice is merged or when it needs you.
 
 ## 4. When the Conductor needs you
 
-Any stop pauses the session; the Conductor tells you why and what to decide. Your decisions go through GitHub labels, then you tell the Conductor to resume ("go on", "resume"):
+Any stop pauses the session; the Conductor tells you why and what to decide. A plan review is a conversation with the Conductor; your other decisions go through GitHub labels, then you tell the Conductor to resume ("go on", "resume"):
 
 | The Conductor says | You |
 |---|---|
-| a plan to review | read the issue and its slices; label the issue `ballet:plan-approved`, then resume |
+| a plan to review | read the issue and its slices, then tell the Conductor: a question for the Choreographer (it answers, the plan stays as is), changes to make (it amends the plan and its slices, and you review again), or that you approve it (the Dancer starts). Every exchange is published on the issue |
 | a role asks you a question | answer it in the conversation: the Conductor carries your answer back |
 | the Critic escalates, too many round trips, a policy violation… | on the pull request: `ballet:approved` to merge it, or `ballet:rejected` with a comment saying what to fix (sent to the Dancer), then resume |
 | the diff is over the limit (strict mode) | `ballet:size-accepted` to send it to the Critic anyway, or `ballet:rejected` with a comment, then resume |

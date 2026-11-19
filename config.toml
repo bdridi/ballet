@@ -80,6 +80,9 @@ pattern = '''(?m)^\s*(?:async\s+)?def\s+(test\w*)'''
 extensions = [".feature"]
 pattern = '''(?m)^\s*(?:Scenario|Scenario Outline|Scenario Template|Example):\s*(.+?)\s*$'''
 
+[rehearsal]
+plan_approval = true             # en assisted, le plan attend le Director ; le champ `Plan approval` d'une issue l'emporte
+
 [escalation]
 max_round_trips = 2              # allers-retours Dancer ↔ Critic
 max_exchange_rounds = 3          # tours de questions entre deux rôles sur un même sujet (message.md)

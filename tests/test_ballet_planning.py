@@ -39,12 +39,13 @@ class PrepareTest(unittest.TestCase):
     def test_un_compte_vierge_recoit_le_type_slice_et_les_trois_champs(self):
         github = FakeGitHub(owner())
         report = ballet_planning.prepare(run=github)
-        self.assertEqual(report["created"], ["issue type Slice", "issue field Ballet status", "issue field Rehearsal mode", "issue field Priority"])
-        self.assertEqual(len(github.mutations), 4)
+        self.assertEqual(report["created"], ["issue type Slice", "issue field Ballet status", "issue field Rehearsal mode",
+                                             "issue field Plan approval", "issue field Priority"])
+        self.assertEqual(len(github.mutations), 5)
 
     def test_rien_n_est_cree_quand_tout_existe(self):
-        fields = {"Ballet status": ALL_STATUS, "Rehearsal mode": ["assisted", "assisted + plan approval", "autopilot"],
-                  "Priority": ["Urgent", "High", "Medium", "Low"]}
+        fields = {"Ballet status": ALL_STATUS, "Rehearsal mode": ["assisted", "autopilot"],
+                  "Plan approval": ["required", "skipped"], "Priority": ["Urgent", "High", "Medium", "Low"]}
         github = FakeGitHub(owner(types=("Task", "Bug", "Feature", "Slice"), fields=fields))
         report = ballet_planning.prepare(run=github)
         self.assertEqual(report["created"], [])

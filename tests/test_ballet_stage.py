@@ -78,10 +78,10 @@ class BalletStageTest(unittest.TestCase):
         self.assertEqual(self._queue()["sessions"], [])
 
     def test_une_session_ouverte_donne_son_element_ses_slices_et_sa_rehearsal_courante(self):
-        self._session(mode="assisted + plan approval", items=["#35", "#36"], current="FEAT-004.1",
+        self._session(mode="assisted", items=["#35", "#36"], current="FEAT-004.1",
                       played=[{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}])
         project = ballet_stage.snapshot([self.home])["projects"][0]
-        self.assertEqual(project["queue"]["sessions"], [{"item": "FEAT-004", "mode": "assisted + plan approval", "current": "FEAT-004.1",
+        self.assertEqual(project["queue"]["sessions"], [{"item": "FEAT-004", "mode": "assisted", "current": "FEAT-004.1",
                           "items": ["#35", "#36"], "played": [{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}]}])
         self.assertEqual(project["queue_titles"]["#35"], "FEAT-001.2 · Issue 35")
 

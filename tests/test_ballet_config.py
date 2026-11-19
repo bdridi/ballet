@@ -191,9 +191,15 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT + '\n[escalation]\nmax_diff_strict = "yes"\n')
         self.assertProblem("max_diff_strict must be true or false")
 
-    def test_l_approbation_du_plan_ne_vient_plus_du_profil(self):
+    def test_par_defaut_le_plan_attend_le_director_et_ce_n_est_plus_une_escalade(self):
         self.write_project_config(VALID_PROJECT)
-        self.assertNotIn("plan_approval", ballet_config.effective_config(self.project)["escalation"])
+        config = ballet_config.effective_config(self.project)
+        self.assertIs(config["rehearsal"]["plan_approval"], True)
+        self.assertNotIn("plan_approval", config["escalation"])
+
+    def test_l_approbation_du_plan_qui_n_est_pas_un_booleen_est_refusee(self):
+        self.write_project_config(VALID_PROJECT + '\n[rehearsal]\nplan_approval = "no"\n')
+        self.assertProblem("[rehearsal] plan_approval must be true or false")
 
     def test_exclusions_qui_ne_sont_pas_une_liste_sont_refusees(self):
         self.write_project_config(VALID_PROJECT + '\n[escalation]\ndiff_exclude = "*.lock"\n')

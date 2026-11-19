@@ -366,7 +366,7 @@ function call(r){
 
 function action(r){
   const s = r.state, asked = (s.pending || []).find(q => q.to === 'director'), label = text => `<code data-copy title="copier">${text}</code>`;
-  if (s.blocked_on === 'plan') return `Lis le plan de <b>#${esc(s.plan_issue)}</b> et ses slices, pose ${label('ballet:plan-approved')} sur #${esc(s.plan_issue)}, puis demande au Conductor de reprendre.`;
+  if (s.blocked_on === 'plan') return `Lis le plan de <b>#${esc(s.plan_issue)}</b> et ses slices, puis réponds au Choreographer par le Conductor : une question, des changements à faire, ou ton approbation.`;
   if (s.blocked_on === 'size') return `Le diff dépasse le seuil : pose ${label('ballet:size-accepted')} sur la PR #${esc(s.pull_request)}, ou ${label('ballet:rejected')} avec un commentaire, puis reprends.`;
   if (asked) return `Le ${esc(cap(asked.from))} te pose une question : réponds-lui par le Conductor (un message <code>answer</code>).`;
   if (s.pull_request) return `Tranche sur la PR #${esc(s.pull_request)} : ${label('ballet:approved')}, ou ${label('ballet:rejected')} avec un commentaire, puis reprends.`;

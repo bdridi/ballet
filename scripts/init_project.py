@@ -30,6 +30,9 @@ rules = [{rules}]
 [repos.{repo}]
 path = "."
 proof = {proof}
+
+[rehearsal]
+plan_approval = true    # in assisted, the plan waits for the Director's review; an issue's `Plan approval` field wins
 """
 
 AGENTS_TEMPLATE = """\

@@ -358,7 +358,7 @@ function callout(r){
   if (s.status !== 'escalated') return '';
   const toDirector = (s.pending || []).find(q => q.to === 'director');
   const action = s.blocked_on === 'plan'
-    ? `Lis le plan de <b>#${esc(s.plan_issue)}</b> et ses slices, pose <code>ballet:plan-approved</code> sur #${esc(s.plan_issue)}, puis demande au Conductor de reprendre.`
+    ? `Lis le plan de <b>#${esc(s.plan_issue)}</b> et ses slices, puis réponds au Choreographer par le Conductor : une question, des changements à faire, ou ton approbation.`
     : s.blocked_on === 'size'
       ? `Le diff dépasse le seuil : pose <code>ballet:size-accepted</code> sur la PR #${esc(s.pull_request)}, ou <code>ballet:rejected</code> avec un commentaire, puis reprends.`
       : toDirector

@@ -168,9 +168,9 @@ class FakeWorld:
         return next(argument for argument in arguments if argument.startswith("number="))[len("number="):]
 
     def queue_fields(self, number):
-        fields = {"type": "Feature", "mode": "", "status": "ready", **self.fields.get(number, {})}
-        values = [{"name": fields[key], "field": {"name": name}} for key, name in (("mode", "Rehearsal mode"), ("status", "Ballet status"))
-                  if fields[key]]
+        fields = {"type": "Feature", "mode": "", "plan_approval": "", "status": "ready", **self.fields.get(number, {})}
+        names = (("mode", "Rehearsal mode"), ("plan_approval", "Plan approval"), ("status", "Ballet status"))
+        values = [{"name": fields[key], "field": {"name": name}} for key, name in names if fields[key]]
         issue = {"issueType": {"name": fields["type"]} if fields["type"] else None, "issueFieldValues": {"nodes": values}}
         return json.dumps({"data": {"repository": {"issue": issue}}})
 
@@ -220,6 +220,7 @@ MUTATED_DIFF = """diff --git a/src/inventory.rs b/src/inventory.rs
 """
 CARGO_REPORT = (Path(__file__).resolve().parent / "fixtures" / "cargo-mutants-27.1.0-outcomes.json").read_text(encoding="utf-8")
 
+CHAINED_PROFILE = PROFILE + "\n[rehearsal]\nplan_approval = false\n"
 STRICT_PROFILE = PROFILE + "\n[escalation]\nmax_diff_lines = 100\nmax_diff_strict = true\n"
 OVERSIZED_NUMSTAT = "150\t30\tsrc/inventory.rs\n900\t0\tCargo.lock\n-\t-\tlogo.png\n"
 
@@ -307,7 +308,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.begin()
         events = [json.loads(line)["event"] for line in (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()]
         self.assertEqual(events[:2], ["begin", "handoff"])
-        self.assertEqual(self.journal("begin"), [{"item": "#3", "plan": "auto", "mode": "assisted", "session": "#3"}])
+        self.assertEqual(self.journal("begin"), [{"item": "#3", "plan": "review", "mode": "assisted", "session": "#3"}])
         start = self.journal("handoff")[0]
         self.assertEqual((start["role"], start["how"], start["dispatch"], start["agent"], start["model"]),
                          ("dancer", "start", "ctx_1", "claude", "sonnet"))
@@ -1371,7 +1372,9 @@ class PlanningTest(unittest.TestCase):
     journal = BalletRehearsalTest.journal
 
     def setUp(self):
+        """Ce projet enchaîne sur le plan (`plan_approval = false`) : la review a ses propres tests."""
         BalletRehearsalTest.setUp(self)
+        self.profile(CHAINED_PROFILE)
         self.world.branch = "rehearsal/FEAT-002"
         self.world.issues = {
             "13": {"title": "FEAT-002 · Inventory", "body": "## Plan\n\nSlices: #14, #15.\n", "state": "OPEN", "labels": []},
@@ -1405,9 +1408,12 @@ class PlanningTest(unittest.TestCase):
         self.assertIn("ready feature FEAT-002", start["text"])
         self.assertIn("- Issue: #<n>", start["text"])
 
+    def profile(self, text):
+        (self.home / ".ballet" / "config.toml").write_text(text, encoding="utf-8")
+
     def in_review(self):
-        """L'issue #13 attend son plan, en mode `assisted + plan approval`."""
-        self.world.fields = {"13": {"mode": "assisted + plan approval"}}
+        """L'issue #13 attend son plan, et son plan attend le Director (`Plan approval` à `required`)."""
+        self.world.fields = {"13": {"plan_approval": "required"}}
 
     def test_le_choreographer_planifie_en_mode_auto_en_slices_verticales_sous_les_deux_tiers_du_seuil(self):
         self.in_review()
@@ -1470,20 +1476,114 @@ class PlanningTest(unittest.TestCase):
         self.assertEqual(self.journal("policy")[-1]["role"], "choreographer")
         self.assertEqual(self.session("FEAT-002")["current"], "FEAT-002")
 
-    def test_en_review_la_session_s_arrete_jusqu_au_libelle_du_director(self):
-        self.in_review()
-        lines = self.planned("#13")
-        self.assertEqual(lines[-1], "NEXT: escalate plan to review (assisted + plan approval): read #13, label it ballet:plan-approved, then resume")
+    # --- l'approbation du plan : l'issue, puis le profil ---
+
+    def test_par_defaut_en_assisted_le_plan_attend_le_director(self):
+        self.profile(PROFILE)
+        lines = self.planned()
+        self.assertEqual(lines[-1], "NEXT: escalate plan to review: read #13 and its slices, then write to the choreographer: "
+                                    "a `question`, a `revise` with your remarks, or `approve` (receive)")
         self.assertIn("- Ballet status of #13: plan-review", lines)
-        self.assertTrue(self.world.ran("gh", "label", "create", "ballet:plan-approved"))
         self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002"])
-        self.assertEqual(self.run_main("resume")[1][-1], "NEXT: escalate no ballet:plan-approved on #13 yet: label it, then resume")
-        self.world.issues["13"]["labels"] = [{"name": "ballet:plan-approved"}]
-        lines = self.run_main("resume")[1]
-        self.assertIn("- the Director approves the plan of #13", lines)
+        self.assertEqual((self.session("FEAT-002")["plan_approval"], self.session("FEAT-002")["plan_approval_from"]), (True, "project"))
+        self.assertFalse(self.world.ran("gh", "label", "create"))
+
+    def test_le_debut_de_session_dit_d_ou_vient_l_approbation_du_plan(self):
+        self.in_review()
+        lines = self.run_main("begin", "#13")[1]
+        self.assertIn("- session of #13: mode assisted, plan approval required (issue)", lines)
+
+    def test_le_champ_de_l_issue_l_emporte_sur_le_profil(self):
+        self.profile(PROFILE)
+        self.world.fields = {"13": {"plan_approval": "skipped"}}
+        lines = self.planned("#13")
+        self.assertIn("- dancer started on issue #14", lines)
         self.assertEqual(lines[-1], "NEXT: wait")
-        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002", "Dancer · FEAT-002.1"])
+
+    def test_le_champ_de_l_issue_peut_demander_la_review_a_un_projet_qui_enchaine(self):
+        self.in_review()
+        self.assertTrue(self.planned("#13")[-1].startswith("NEXT: escalate plan to review: read #13"))
+
+    def test_en_autopilot_personne_n_approuve_le_plan(self):
+        self.world.fields = {"13": {"mode": "autopilot", "plan_approval": "required"}}
+        lines = self.planned("#13")
+        self.assertIn("- dancer started on issue #14", lines)
+        self.assertEqual(self.session("13")["plan_approval_from"], "autopilot")
+
+    def test_une_approbation_inconnue_est_refusee(self):
+        self.world.fields = {"13": {"plan_approval": "maybe"}}
+        self.assertTrue(self.run_main("begin", "#13")[1][-1].startswith("NEXT: escalate #13: unknown Plan approval 'maybe'"))
+
+    # --- la review du plan : une discussion par le Conductor ---
+
+    def director(self, kind, body):
+        return self.receive(message("director", "choreographer", kind, body))
+
+    def test_une_question_du_director_va_au_choreographer_dans_sa_session(self):
+        self.in_review()
+        self.planned("#13")
+        lines = self.director("question", "1. Why two slices? — #13. Recommendation: one.")
+        self.assertEqual(lines[-1], "NEXT: wait")
+        self.assertIn("- question published on issue #13", lines)
+        self.assertIn("- question carried to the choreographer", lines)
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_1")
+        self.assertIn("without changing the plan nor the branch", send[send.index("--body") + 1])
+        self.assertIn("Why two slices?", send[send.index("--body") + 1])
+        self.assertEqual(self.world.statuses[-1], ("13", "plan-review"))
+
+    def test_la_reponse_du_choreographer_revient_au_director_et_le_plan_reste_en_review(self):
+        self.in_review()
+        self.planned("#13")
+        self.director("question", "1. Why two slices?")
+        lines = self.receive(message("choreographer", "director", "answer", "1. Each one is vertical."))
+        self.assertIn("- answer published on issue #13", lines)
+        self.assertIn("- the choreographer answers the Director", lines)
+        self.assertTrue(lines[-1].startswith("NEXT: escalate plan to review: read #13"))
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002"])
+        self.assertEqual(self.world.statuses, [("13", "in-rehearsal"), ("13", "plan-review")])
+        self.assertEqual(len(self.world.ran("gh", "issue", "comment", "13")), 2)
+
+    def test_une_revision_amende_le_plan_et_remplace_les_slices_de_la_session(self):
+        self.in_review()
+        self.planned("#13")
+        lines = self.director("revise", "1. Add a slice for the export.")
+        self.assertIn("- revise carried to the choreographer", lines)
+        self.assertIn("report again, with `- Issue: #13`", self.journal("handoff")[-1]["text"])
+        self.world.issues["16"] = {"title": "FEAT-002.3 · Inventory export", "body": slice_body(13), "state": "OPEN"}
+        lines = self.receive(choreographer_report(issue="13"))
+        self.assertIn("- issue #13 cut into slices: #14, #15, #16", lines)
+        self.assertTrue(lines[-1].startswith("NEXT: escalate plan to review: read #13"))
+        self.assertEqual(self.session("13")["items"], ["#15", "#16"])
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002"])
+
+    def test_l_approbation_du_director_lance_le_dancer(self):
+        self.in_review()
+        self.planned("#13")
+        lines = self.director("approve", "The plan is approved.")
+        self.assertIn("- approve published on issue #13", lines)
+        self.assertIn("- the Director approves the plan of #13", lines)
+        self.assertIn("- dancer started on issue #14", lines)
+        self.assertEqual(lines[-1], "NEXT: wait")
         self.assertEqual(self.world.statuses, [("13", "in-rehearsal"), ("13", "plan-review"), ("13", "in-rehearsal")])
+        self.assertEqual(self.journal("director-decision"), [{"plan": "13", "approved": True}])
+
+    def test_un_plan_en_review_ne_se_reprend_pas_sans_message_du_director(self):
+        self.in_review()
+        self.planned("#13")
+        self.assertTrue(self.run_main("resume")[1][-1].startswith("NEXT: escalate plan to review: read #13"))
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002"])
+
+    def test_le_director_ecrit_au_choreographer_et_a_personne_d_autre_en_review(self):
+        self.in_review()
+        self.planned("#13")
+        lines = self.receive(message("director", "dancer", "approve", "Go."))
+        self.assertEqual(lines[-1], "NEXT: escalate in a plan review, the Director writes to the choreographer, not to the dancer")
+
+    def test_une_approbation_sans_plan_en_review_est_refusee(self):
+        self.planned()
+        lines = self.receive(message("director", "choreographer", "approve", "Go."))
+        self.assertEqual(lines[-1], "NEXT: escalate a `approve` message answers a plan in review, and no plan waits for the Director")
 
     def test_une_feature_sans_slices_se_joue_seule_sous_son_id(self):
         self.world.issues = {"13": {"title": "FEAT-002 · Inventory", "body": PLANNED_ISSUE, "state": "OPEN"}}

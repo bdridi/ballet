@@ -9,7 +9,7 @@
      beyond `[escalation] max_exchange_rounds`. A first line that is not valid JSON is sent back.
        ballet   always "message"
        from, to dramaturg | choreographer | dancer | critic | conductor | director
-       type     question | answer | report | verdict | escalation
+       type     question | answer | report | verdict | escalation | revise | approve
        subject  FEAT-NNN, BUG-NNN, TASK-NNN, or the issue "#N" once created
        round    integer: the exchange round on this subject, between these two roles
 
@@ -21,4 +21,6 @@
        report:     what the role did, at the end of its run (see each role's report).
        verdict:    first body line `VERDICT: APPROVED`, `VERDICT: REJECTED` or `VERDICT: ESCALATE`.
        escalation: the reason, and what the Director must decide.
+       revise:     the Director only, in a plan review: numbered remarks the Choreographer takes in its plan.
+       approve:    the Director only, in a plan review: the plan is approved, the Dancer starts.
      This comment is not part of a message. -->

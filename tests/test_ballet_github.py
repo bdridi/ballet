@@ -245,8 +245,8 @@ class BalletGitHubTest(unittest.TestCase):
             ballet_github.set_status("42", "wip", run=gh)
         self.assertEqual(gh.calls, [])
 
-    def test_lit_le_type_le_mode_et_le_statut_d_une_issue(self):
-        values = [{"name": "assisted + plan approval", "field": {"name": "Rehearsal mode"}},
+    def test_lit_le_type_le_mode_l_approbation_du_plan_et_le_statut_d_une_issue(self):
+        values = [{"name": "assisted", "field": {"name": "Rehearsal mode"}}, {"name": "skipped", "field": {"name": "Plan approval"}},
                   {"name": "ready", "field": {"name": "Ballet status"}}, {}]
         answer = {"data": {"repository": {"issue": {"issueType": {"name": "Bug"}, "issueFieldValues": {"nodes": values}}}}}
         calls = []
@@ -255,13 +255,13 @@ class BalletGitHubTest(unittest.TestCase):
             calls.append(arguments)
             return json.dumps(answer)
         self.assertEqual(ballet_github.queue_fields("#12", run=gh),
-                         {"type": "Bug", "mode": "assisted + plan approval", "status": "ready"})
+                         {"type": "Bug", "mode": "assisted", "plan_approval": "skipped", "status": "ready"})
         self.assertIn("number=12", calls[0])
 
     def test_une_issue_sans_type_ni_champ_se_lit_vide(self):
         answer = {"data": {"repository": {"issue": {"issueType": None, "issueFieldValues": {"nodes": []}}}}}
         self.assertEqual(ballet_github.queue_fields("12", run=lambda arguments: json.dumps(answer)),
-                         {"type": "", "mode": "", "status": ""})
+                         {"type": "", "mode": "", "plan_approval": "", "status": ""})
 
     def test_un_refus_de_github_sur_le_champ_nomme_l_issue(self):
         gh = FakeGh()
@@ -556,17 +556,6 @@ class PlanTest(unittest.TestCase):
 
     def test_une_issue_sans_slices_n_en_a_aucune(self):
         self.assertEqual(ballet_github.slices_of("1", run=FakeIssuesGh({"1": an_issue("## Plan\n")})), [])
-
-    def test_le_plan_est_approuve_par_le_libelle_du_director(self):
-        gh = FakeIssuesGh({"1": {**an_issue("## Plan\n"), "labels": [{"name": "ballet:plan-approved"}]},
-                           "2": {**an_issue("## Plan\n"), "labels": [{"name": "ballet:approved"}]}})
-        self.assertTrue(ballet_github.plan_approved("#1", run=gh))
-        self.assertFalse(ballet_github.plan_approved("2", run=gh))
-
-    def test_le_libelle_d_approbation_du_plan_est_cree_d_avance(self):
-        gh = FakeIssuesGh({})
-        ballet_github.ask_plan_approval(run=gh)
-        self.assertEqual(gh.calls[0][:3], ["label", "create", "ballet:plan-approved"])
 
 
 class FakeThreadsGh:

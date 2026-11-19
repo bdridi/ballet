@@ -2,6 +2,17 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.29.0 — 2026-11-19 · `v0.29.0`
+
+- En `assisted`, le plan attend la review du Director par défaut. Le champ d'issue `Plan approval` (`required`, `skipped`) l'emporte, sinon `[rehearsal] plan_approval` du profil (`true` par défaut, écrit par `init-project`) ; une feature sans issue suit le profil, l'`autopilot` n'attend jamais. Le début de session dit ce qui est retenu et d'où (`plan approval required (issue)`).
+- La review du plan est une discussion avec le Choreographer, par le Conductor : le Director lui envoie un message `question` (il répond sans toucher au plan), `revise` (il amende le plan et ses slices, puis refait son rapport) ou `approve` (le Dancer part). Chaque échange est publié sur l'issue planifiée ; `Ballet status` reste `plan-review` jusqu'à `approve`. Deux types de message s'ajoutent, `revise` et `approve`, réservés au Director.
+- Un plan amendé remplace les slices de la session par celles de sa nouvelle version.
+- Le libellé `ballet:plan-approved` disparaît, avec `ask_plan_approval` et `plan_approved` de `ballet_github.py` ; `resume` n'approuve plus un plan.
+- `Rehearsal mode` ne garde que `assisted` et `autopilot` : `assisted + plan approval` est refusée comme un mode inconnu. `init-project` crée le champ `Plan approval`.
+- La Scène dit au Director de répondre au Choreographer par le Conductor.
+
+**Opportunités traitées** : OPP-57, OPP-19 ; OPP-07, OPP-08 et OPP-46 en partie. Nouvelles : OPP-58 (retirer une slice dans un `revise`), OPP-59 (la review du plan sans le Conductor ouvert).
+
 ## 0.28.0 — 2026-11-19 · `v0.28.0`
 
 - `/ballet:rehearsal #12` (ou `FEAT-002`) remplace `/ballet:hybrid-track` : il confie un seul élément, une `Feature`, un `Bug` ou une `Task`, à un Conductor, qui le joue jusqu'à sa dernière Premiere. Le script l'ouvre par `begin <élément>` ; `run`, la liste d'éléments et `--plan` disparaissent.

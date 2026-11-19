@@ -23,16 +23,19 @@ session ouverte. Combien de sessions à la fois, c'est l'affaire de celui qui le
 pause : `resume` reprend la Rehearsal, puis la session. `<ID>` est facultatif pour `receive`, `premiere`, `resume` et
 `status` quand une seule session est ouverte.
 
-Le mode est le champ `Rehearsal mode` de l'issue (vide : `assisted`). Le script écrit son champ `Ballet status` à des
-points fixes, seulement quand il change : `in-rehearsal` tant que la session joue, `plan-review` quand le plan attend le
-Director, `escalated` à une escalade, `done` à la dernière Premiere.
+Le mode est le champ `Rehearsal mode` de l'issue (vide : `assisted`). En `assisted`, le plan attend le Director selon
+le champ `Plan approval` de l'issue (`required`, `skipped`), sinon selon le profil (`[rehearsal] plan_approval`, `true`
+par défaut) ; une feature sans issue suit le profil, l'`autopilot` n'attend jamais. Le script écrit le champ `Ballet status` à des
+points fixes, seulement quand il change : `in-rehearsal` tant que la session joue, `plan-review` tant que le plan est en
+review, `escalated` à une escalade, `done` à la dernière Premiere.
 
 Une feature ouvre une Rehearsal de planification : le Choreographer seul, en mode auto, crée l'issue et ses slices. À
 son rapport, le script lit l'issue et ses slices sur GitHub (`Part of #N` en première ligne) et les met en tête de la
 session ; la première se joue dans le worktree de la planification (sa branche est renommée), avec les ADR du
-Choreographer, qui restent à son nom pour la politique. Une issue sans plan suit le même chemin. En mode
-`assisted + plan approval`, la session s'arrête alors : le Director pose `ballet:plan-approved` sur l'issue planifiée,
-puis `resume` lance le Dancer.
+Choreographer, qui restent à son nom pour la politique. Une issue sans plan suit le même chemin. Quand le plan attend
+le Director, la session s'arrête alors pour sa review, une discussion qui passe par le Conductor : le Director écrit au
+Choreographer un message `question` (il répond sans toucher au plan), `revise` (il amende le plan et ses slices, puis
+refait son rapport) ou `approve` (le Dancer part). Chaque échange est publié sur l'issue planifiée.
 
 Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
@@ -99,8 +102,10 @@ FEATURE_ITEM = re.compile(r"^(?:FEAT|BUG|TASK)-\d{3}$")
 QUEUED_TYPES = ("Feature", "Bug", "Task")   # ce qu'une session joue ; une `Slice` suit sa feature
 SLICE_TYPE = "Slice"
 DEFAULT_MODE = "assisted"
-PLAN_APPROVAL_MODE = "assisted + plan approval"
-REHEARSAL_MODES = (DEFAULT_MODE, PLAN_APPROVAL_MODE, "autopilot")   # le champ Rehearsal mode de l'issue ; vide, `assisted`
+AUTOPILOT = "autopilot"
+REHEARSAL_MODES = (DEFAULT_MODE, AUTOPILOT)          # le champ Rehearsal mode de l'issue ; vide, `assisted`
+PLAN_APPROVALS = {"required": True, "skipped": False}    # le champ Plan approval de l'issue ; vide, le profil
+PLAN_REVIEW_MESSAGES = ("question", "revise", "approve")  # ce que le Director écrit au Choreographer sur un plan en review
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
 ORCA_AGENTS = {"claude": "claude", "codex": "codex", "grok": "grok", "opencode": "opencode"}
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
@@ -151,7 +156,8 @@ class Rehearsal:
     mutation: dict = field(default_factory=dict)     # la mutation en cours : {round, head, run, report, started}
     plan: str = ""                                   # review (le Director approuve le plan) | auto
     feature: str = ""                                # la feature d'une Rehearsal de planification, sans issue au départ
-    plan_issue: str = ""                             # l'issue dont le plan attend `ballet:plan-approved`
+    plan_issue: str = ""                             # l'issue dont le plan est en review
+    queued: list = field(default_factory=list)       # les slices du plan mises en tête de la session
     planned_by: str = ""                             # la Rehearsal de planification dont elle a pris le worktree
     session: str = ""                                # l'élément de sa session : `#12` ou `FEAT-002`
 
@@ -172,11 +178,13 @@ class Session:
     played: list = field(default_factory=list)      # {item, rehearsal}, dans l'ordre
     status: str = "open"                            # open | done
     ballet_status: str = ""                         # le dernier Ballet status connu de l'issue
+    plan_approval: bool = False                     # le plan attend le Director avant le Dancer
+    plan_approval_from: str = ""                    # d'où vient ce choix : issue, project ou autopilot
 
     @property
     def plan(self):
-        """`review` : le plan attend `ballet:plan-approved` du Director ; `auto` : le Dancer enchaîne."""
-        return "review" if self.mode == PLAN_APPROVAL_MODE else "auto"
+        """`review` : le plan attend la review du Director ; `auto` : le Dancer enchaîne."""
+        return "review" if self.plan_approval else "auto"
 
 
 @dataclass
@@ -226,11 +234,12 @@ class Tools:
 def begin(item, home, tools):
     """Ouvre la session d'un élément et joue sa première Rehearsal ; ses slices suivent, chacune depuis `main` après
     la Premiere de la précédente. La session finit à la dernière Premiere de l'élément."""
-    _checked_config(home)
+    config = _checked_config(home)
     _refuse_if_in_session(item, home)
-    session = _new_session(item, tools)
+    session = _new_session(item, config, tools)
     _save_session(session, home)
-    return _follow_on_github(session.item, _play_next(session.item, Step("wait"), home, tools), home, tools)
+    step = Step("wait", done=[_plan_approval_line(session)])
+    return _follow_on_github(session.item, _play_next(session.item, step, home, tools), home, tools)
 
 
 def _begin(item, session, home, tools):
@@ -360,17 +369,43 @@ def status_session(session_item, home, tools):
 # --- la session ---------------------------------------------------------------
 
 
-def _new_session(item, tools):
-    """La session d'un élément : son mode et son statut, lus sur son issue ; une feature sans issue part en `assisted`."""
+def _new_session(item, config, tools):
+    """La session d'un élément : son mode, l'approbation de son plan et son statut, lus sur son issue ; une feature
+    sans issue part en `assisted`, et suit le profil pour son plan."""
     if FEATURE_ITEM.match(item):
-        return Session(item=item, items=[item])
+        return _with_plan_approval(Session(item=item, items=[item]), "", config)
     fields = ballet_github.queue_fields(item, run=tools.gh)
     if fields["type"] not in QUEUED_TYPES:
         raise RehearsalError(_not_a_session_item(item, fields["type"]))
-    mode = fields["mode"] or DEFAULT_MODE
+    mode, approval = _mode_and_approval(item, fields)
+    session = Session(item=item, mode=mode, issue=item[1:], items=[item], ballet_status=fields["status"])
+    return _with_plan_approval(session, approval, config)
+
+
+def _mode_and_approval(item, fields):
+    """Le mode et le champ `Plan approval` de l'issue, chacun parmi ses valeurs connues."""
+    mode, approval = fields["mode"] or DEFAULT_MODE, fields["plan_approval"]
     if mode not in REHEARSAL_MODES:
         raise RehearsalError(f"{item}: unknown Rehearsal mode '{mode}'; known: {', '.join(REHEARSAL_MODES)}")
-    return Session(item=item, mode=mode, issue=item[1:], items=[item], ballet_status=fields["status"])
+    if approval and approval not in PLAN_APPROVALS:
+        raise RehearsalError(f"{item}: unknown Plan approval '{approval}'; known: {', '.join(PLAN_APPROVALS)}")
+    return mode, approval
+
+
+def _with_plan_approval(session, approval, config):
+    """L'issue d'abord, puis le profil ; en autopilot, personne n'approuve."""
+    if session.mode == AUTOPILOT:
+        session.plan_approval, session.plan_approval_from = False, AUTOPILOT
+    elif approval:
+        session.plan_approval, session.plan_approval_from = PLAN_APPROVALS[approval], "issue"
+    else:
+        session.plan_approval, session.plan_approval_from = config["rehearsal"]["plan_approval"], "project"
+    return session
+
+
+def _plan_approval_line(session):
+    choice = "required" if session.plan_approval else "skipped"
+    return f"session of {session.item}: mode {session.mode}, plan approval {choice} ({session.plan_approval_from})"
 
 
 def _not_a_session_item(item, issue_type):
@@ -409,10 +444,12 @@ def _after_premiere(rehearsal, step, home, tools):
 
 
 def _session_first(rehearsal, items, planned, home):
-    """Les slices d'un plan passent en tête de la session ; une feature y gagne son issue."""
+    """Les slices d'un plan passent en tête de la session ; une feature y gagne son issue. Un plan amendé en review
+    remplace celles de sa version précédente."""
     session = _load_session(rehearsal.session, home)
-    session.items = items + session.items
+    session.items = items + [item for item in session.items if item not in rehearsal.queued]
     session.issue = session.issue or planned
+    rehearsal.queued = items
     _save_session(session, home)
 
 
@@ -469,10 +506,12 @@ def _follow_on_github(session_item, step, home, tools):
 
 
 def _ballet_status_of(step, session, home):
-    """`plan-review` quand le plan attend le Director, `escalated` sur une autre escalade, `done` à la dernière
-    Premiere, `in-rehearsal` sinon."""
+    """`plan-review` tant que le plan est en review (la discussion comprise), `escalated` sur une autre escalade,
+    `done` à la dernière Premiere, `in-rehearsal` sinon."""
+    if step.next != "done" and _waits_for_its_plan(session, home):
+        return "plan-review"
     if step.next == "escalate":
-        return "plan-review" if _waits_for_its_plan(session, home) else "escalated"
+        return "escalated"
     if step.next == "done" and session.status == "done":
         return "done"
     return "in-rehearsal"
@@ -510,6 +549,10 @@ def _handle(rehearsal, header, text, question_id, config, home, tools):
 def _route(rehearsal, header, text, question_id, config, home, tools):
     _count_round(rehearsal, header, config)
     kind, sender = header["type"], header["from"]
+    if _in_plan_review(rehearsal, header):
+        return _plan_review(rehearsal, header, text, config, home, tools)
+    if kind in ("revise", "approve"):
+        raise RehearsalError(f"a `{kind}` message answers a plan in review, and no plan waits for the Director")
     if kind == "question":
         return _relay_question(rehearsal, header, text, question_id, config, home, tools)
     if kind == "answer":
@@ -582,7 +625,7 @@ def _after_plan(rehearsal, report, config, home, tools):
     step.done += _hand_over(rehearsal, planned, issues[0], home, tools)
     _session_first(rehearsal, [f"#{number}" for number, _, _ in issues[1:]], planned, home)
     if rehearsal.plan == "review":
-        return _await_plan_approval(rehearsal, planned, step, tools)
+        return _await_plan_approval(rehearsal, planned, step)
     return _dancer_on_the_plan(rehearsal, step, config, home, tools)
 
 
@@ -623,28 +666,79 @@ def _hand_over(rehearsal, planned, first, home, tools):
     return [f"now playing: Rehearsal {rehearsal_id} (issue #{number}) in the worktree of {previous}, branch {rehearsal.branch}"]
 
 
-def _await_plan_approval(rehearsal, planned, step, tools):
+def _await_plan_approval(rehearsal, planned, step):
     rehearsal.blocked_on, rehearsal.plan_issue = "plan", planned
-    ballet_github.ask_plan_approval(run=tools.gh)
-    return Step("escalate", f"plan to review ({PLAN_APPROVAL_MODE}): read #{planned}, label it ballet:plan-approved, then resume",
-                step.done)
+    return Step("escalate", _plan_to_review(planned), step.done)
+
+
+def _plan_to_review(planned):
+    return (f"plan to review: read #{planned} and its slices, then write to the choreographer: "
+            "a `question`, a `revise` with your remarks, or `approve` (receive)")
+
+
+# --- la review du plan --------------------------------------------------------
+
+
+def _in_plan_review(rehearsal, header):
+    """Un plan en review : ce que le Director écrit au Choreographer, et la réponse du Choreographer au Director."""
+    if rehearsal.blocked_on != "plan":
+        return False
+    from_the_director = header["from"] == "director" and header["type"] in PLAN_REVIEW_MESSAGES
+    to_the_director = header["from"] == "choreographer" and header["to"] == "director" and header["type"] == "answer"
+    return from_the_director or to_the_director
+
+
+def _plan_review(rehearsal, header, text, config, home, tools):
+    """La review du plan, une discussion : le Director questionne le Choreographer, lui demande d'amender son plan, ou
+    l'approuve. Chaque échange est publié sur l'issue planifiée ; le plan reste en review jusqu'à `approve`."""
+    if header["from"] == "choreographer":
+        return _choreographer_answers_the_director(rehearsal, text, config, home, tools)
+    if header["to"] != "choreographer":
+        raise RehearsalError(f"in a plan review, the Director writes to the choreographer, not to the {header['to']}")
+    published = _publish_on_the_plan(rehearsal, header["type"], text, home, tools)
+    if header["type"] == "approve":
+        return _plan_approved(rehearsal, published, config, home, tools)
+    _ask_role(rehearsal, "choreographer", _plan_review_assignment(rehearsal, header["type"], text), config, home, tools)
+    return Step("wait", done=[published, f"{header['type']} carried to the choreographer"])
+
+
+def _choreographer_answers_the_director(rehearsal, text, config, home, tools):
+    """Une réponse ne touche ni au plan ni à la branche : la politique le vérifie, puis la review reprend."""
+    found = _policy(rehearsal, "choreographer", config, home, tools, answering=True)
+    if found:
+        return Step("escalate", f"policy: the choreographer broke the rules while answering: {'; '.join(found)}")
+    _own_commits(rehearsal, tools)
+    published = _publish_on_the_plan(rehearsal, "answer", text, home, tools)
+    return Step("escalate", _plan_to_review(rehearsal.plan_issue), [published, "the choreographer answers the Director"])
+
+
+def _plan_approved(rehearsal, published, config, home, tools):
+    rehearsal.blocked_on = ""
+    _log(home, rehearsal, "director-decision", {"plan": rehearsal.plan_issue, "approved": True})
+    step = Step("wait", done=[published, f"the Director approves the plan of #{rehearsal.plan_issue}"])
+    return _dancer_on_the_plan(rehearsal, step, config, home, tools)
+
+
+def _plan_review_assignment(rehearsal, kind, text):
+    planned = rehearsal.plan_issue
+    if kind == "question":
+        return (f"The Director reviews your plan of #{planned} and asks you. Answer as a Ballet message (`type: answer`, "
+                f"to the director, subject `#{planned}`), point by point, without changing the plan nor the branch:\n\n{text}")
+    return (f"The Director reviews your plan of #{planned} and asks for changes. Take them in the plan (`plan`) and in "
+            "the slices (`plan <slice>` to rewrite one, `slice` to add one; a slice to drop: say so, the Director closes "
+            "it), add a line to *Amendments*, commit on this branch what changes in your ADRs and rules, then report "
+            f"again, with `- Issue: #{planned}`:\n\n{text}")
+
+
+def _publish_on_the_plan(rehearsal, what, text, home, tools):
+    ballet_github.comment_issue(rehearsal.plan_issue, _outbox(text, home), run=tools.gh)
+    return f"{what} published on issue #{rehearsal.plan_issue}"
 
 
 def _dancer_on_the_plan(rehearsal, step, config, home, tools):
     _ask_role(rehearsal, "dancer", _first_assignment("dancer", rehearsal, config), config, home, tools)
     step.done.append(f"dancer started on issue #{rehearsal.issue}")
     return step
-
-
-def _plan_decision(rehearsal, config, home, tools):
-    """`ballet:plan-approved` sur l'issue planifiée : le Dancer part ; sinon le plan attend toujours."""
-    approved = ballet_github.plan_approved(rehearsal.plan_issue, run=tools.gh)
-    _log(home, rehearsal, "director-decision", {"plan": rehearsal.plan_issue, "approved": approved})
-    if not approved:
-        return Step("escalate", f"no ballet:plan-approved on #{rehearsal.plan_issue} yet: label it, then resume")
-    rehearsal.blocked_on = ""
-    return _dancer_on_the_plan(rehearsal, Step("wait", done=[f"the Director approves the plan of #{rehearsal.plan_issue}"]),
-                               config, home, tools)
 
 
 def _plan_line(planned, issues):
@@ -754,9 +848,9 @@ def _after_verdict(rehearsal, verdict, text, config, home, tools):
 
 def _apply_decision(rehearsal, config, home, tools):
     """`ballet:approved` : la Premiere ; `ballet:rejected` : le Dancer reprend avec les commentaires du Director.
-    Un plan en review attend `ballet:plan-approved` sur son issue."""
+    Un plan en review ne se reprend pas : il attend un message du Director."""
     if rehearsal.blocked_on == "plan":
-        return _plan_decision(rehearsal, config, home, tools)
+        return Step("escalate", _plan_to_review(rehearsal.plan_issue))
     if not rehearsal.pull_request:
         raise RehearsalError("no pull request yet: answer the pending question with an `answer` message (receive)")
     decision = ballet_github.director_decision(rehearsal.pull_request, run=tools.gh)
@@ -1138,8 +1232,8 @@ def _first_assignment(role, rehearsal, config):
 def _auto_mode(rehearsal, config):
     """La consigne du Choreographer en mode auto : il tranche seul, découpe en slices verticales sous le seuil et publie sans attendre de oui."""
     limit = config["escalation"]["max_diff_lines"]
-    review = ("the Director reviews the published plan before any code" if rehearsal.plan == "review"
-              else "the Dancer starts on it as soon as you report")
+    review = ("the Director reviews the published plan before any code, and may then ask you questions or changes "
+              "through the Conductor" if rehearsal.plan == "review" else "the Dancer starts on it as soon as you report")
     return (f"Auto mode (section *Auto mode* of your skill): nobody says yes in this session; {review}. Settle every "
             "choice yourself and write it in *Decisions*. Product gaps go to the Dramaturg; what neither of you can settle "
             f"goes to the Director (a question `to: director`). Slices: `max_diff_lines` is {limit}; as few slices as "

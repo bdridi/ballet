@@ -10,7 +10,8 @@ il ne modifie ni ne supprime jamais rien. Un champ qui existe sans toutes ses op
 Ce qu'il faut à la file :
 - les types `Task`, `Bug`, `Feature` (là par défaut) et `Slice` ;
 - le champ `Ballet status` : où en est l'issue dans la file (`Status` est un nom réservé par GitHub) ;
-- le champ `Rehearsal mode` : comment la Rehearsal tourne ;
+- le champ `Rehearsal mode` : comment la Rehearsal tourne (`assisted`, `autopilot`) ;
+- le champ `Plan approval` : si le plan attend le Director (`required`, `skipped`) ; vide, le profil décide ;
 - le champ `Priority` : l'ordre de la file, puis l'ancienneté.
 
 Un compte personnel demande le droit `user` au jeton de `gh` (`gh auth refresh -h github.com -s user`) ;
@@ -40,8 +41,11 @@ ISSUE_FIELDS = (
     )),
     ("Rehearsal mode", "How its Rehearsal runs; empty means assisted.", (
         ("assisted", "BLUE", "The Director gets the escalations."),
-        ("assisted + plan approval", "PURPLE", "Same, and the plan waits for the Director's approval."),
         ("autopilot", "GREEN", "Without the Director: each role decides within its perimeter."),
+    )),
+    ("Plan approval", "In assisted, whether the plan waits for the Director; empty means the project's profile.", (
+        ("required", "PURPLE", "The plan waits for the Director's approval before any code."),
+        ("skipped", "GRAY", "The Dancer starts on the plan as soon as it is published."),
     )),
     ("Priority", "The queue's order, before age.", (
         ("Urgent", "RED", ""),

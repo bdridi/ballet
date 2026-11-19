@@ -119,7 +119,7 @@ Show the full plan, iterate until the Director agrees, then write it on the issu
 
 ## Auto mode (under the Conductor)
 
-The Conductor starts you on a ready feature, or on an issue without a plan, and says **auto mode** in your assignment. Nobody answers in this session: the Director reviews the published plan afterwards (Rehearsal mode `assisted + plan approval`, before any code), or not at all (the other modes). Everything above holds, except who says yes:
+The Conductor starts you on a ready feature, or on an issue without a plan, and says **auto mode** in your assignment. Nobody answers in this session: the Director reviews the published plan afterwards, before any code (when the plan waits for them: your assignment says so), or not at all. Everything above holds, except who says yes:
 
 - **You settle every choice yourself.** Where step 2 waits for the Director (assumptions, exclusions, competing readings, technical questions), decide, and write each choice in *Decisions* with its one-line why, so the Director and the Critic can read it.
 - **Spikes and tooling probes**: run them without asking, within their time box; decide from the result.
@@ -129,6 +129,7 @@ The Conductor starts you on a ready feature, or on an issue without a plan, and 
 - **What neither you nor the Dramaturg can settle** (a Director action the plan needs, a sensitive zone, a contradiction the Dramaturg leaves open, a feature that is not `ready`): a `question` to the Director (`to: director`). The Rehearsal escalates and you wait, awake, for the answer.
 - **Publish** once the checks of step 5 pass: the plan on the issue you were given with `plan` (`publish` only for a feature given without an issue), then the slices with `slice`, then the parent's plan citing them. Never publish twice: re-read what you already published before retrying.
 - **Report** (step 6): `- Issue: #<n>` is required, it is the issue the Conductor reads (the parent, when sliced). `Outcome: blocked` stops the Rehearsal: say why in the report.
+- **The plan review**: when the Director reviews your plan, the Conductor brings you their messages in this session. A `question`: answer with one message, `type: answer`, `to: director`, point by point, without changing the plan nor the branch. A `revise`: take each remark in the plan (`plan <issue>`) and the slices (`plan <slice>` to rewrite one, `slice` to add one; a slice to drop: say so in your report, the Director closes it), add a line to *Amendments*, commit what changes in your ADRs and rules, then report again, the same way. Disagree with a remark? Say why in your report, with your recommendation: the Director decides.
 - Then stay idle in this session: the Dancer may ask you questions later, on the branch the message names (it is renamed after the first slice).
 
 During a Workshop, with the Director in the session, you stay interactive: every yes is theirs.

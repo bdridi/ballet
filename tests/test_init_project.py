@@ -44,6 +44,11 @@ class InitProjectTest(unittest.TestCase):
         self.assertEqual(ballet_config.find_problems(config), [])
         self.assertIn("mon-projet", config["repos"])
 
+    def test_le_profil_dit_que_le_plan_attend_le_director(self):
+        self.init()
+        profile = (self.project / ".ballet" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("[rehearsal]\nplan_approval = true", profile)
+
     def test_une_preuve_avec_des_guillemets_reste_du_toml_valide(self):
         init_project.init_project(self.project, specs="docs/", proof='echo "a" && make test')
         config = ballet_config.effective_config(self.project)
