@@ -13,8 +13,8 @@ You are the **Director**. Four roles do the work, each one an agent in its own s
 
 | Role | Does | Touches |
 |---|---|---|
-| **Dramaturg** | frames a need with you into ready features (what and why) | the specs space only |
-| **Choreographer** | turns a feature into a GitHub issue with a technical plan, cut into slices when it is big; writes the ADRs | ADRs and `AGENTS.md` only |
+| **Dramaturg** | frames a need with you into ready features (what and why), then publishes each one's issue, typed and `ready`, with no plan | the specs space; GitHub only to publish that issue |
+| **Choreographer** | writes the technical plan on the feature's issue, cut into slices when it is big; writes the ADRs | ADRs and `AGENTS.md` only |
 | **Dancer** | codes the plan, test first, one commit per task | the code |
 | **Critic** | reviews the pull request and returns a verdict | nothing (read-only) |
 
@@ -110,7 +110,7 @@ From the project's home folder, in Orca:
 What happens:
 
 - **One thing at a time.** The items form a queue, played in the order you gave. Each Rehearsal starts from `main` after the previous merge, so a feature is planned on the code its predecessors left.
-- **A feature is planned first.** The Choreographer reads it with the code, settles the technical choices, and publishes the issue, cut into slices when one pull request would be too big. It asks the Dramaturg when the feature has gaps, and you when neither of them can settle something. The slices then play one after the other, before the next item of the queue. Its ADRs ship with the first slice.
+- **A feature is planned first.** The Choreographer reads its issue (published by the Dramaturg) with the code, settles the technical choices, and writes the plan on it, cut into slices when one pull request would be too big. It asks the Dramaturg when the feature has gaps, and you when neither of them can settle something. The slices then play one after the other, before the next item of the queue. Its ADRs ship with the first slice.
 - **An issue that already has its plan** goes straight to the Dancer; one without a plan is planned first, like a feature.
 - **You approve each plan** (`--plan review`, the default): once the Choreographer has published it, the queue stops until you do (see below). With `--plan auto`, it goes on.
 - **Then, for each issue**: the Dancer codes, the script runs the proof (and the mutation test, if your project declares one), the Critic reviews (up to 2 round trips), and the pull request is merged when the Critic approves and the CI is green. The issue is closed, and its parent after its last slice.
@@ -148,7 +148,7 @@ python3 <path-to-ballet>/scripts/ballet_stage.py <project-folder>
 python3 <path-to-ballet>/scripts/ballet_stage.py --scan <folder-of-projects>
 ```
 
-Then open http://127.0.0.1:7700 (`--port` to change it). For each project: the queue (played, playing, next) and its Rehearsals. For each Rehearsal: what you have to do when it waits for you, the phase it has reached (plan, code, review, Premiere), the round trips and the diff size against their limits, who plays which role, and the whole thread: every message between the roles in full, what the Conductor handed to each one, the policy checks and every step of the script. It listens on 127.0.0.1 only and changes nothing.
+Then open http://127.0.0.1:7700 (`--port` to change it). For each project: its Conductor sessions (the item it was given and its remaining slices), then the program (what waits on GitHub: `Feature`, `Bug` and `Task` issues whose Ballet status is `ready`, by priority then age), what was played, and its Rehearsals. If GitHub does not answer, the page says so. For each Rehearsal: what you have to do when it waits for you, the phase it has reached (plan, code, review, Premiere), the round trips and the diff size against their limits, who plays which role, and the whole thread: every message between the roles in full, what the Conductor handed to each one, the policy checks and every step of the script. It listens on 127.0.0.1 only and changes nothing.
 
 ## Settings you may tune
 

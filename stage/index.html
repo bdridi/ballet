@@ -266,30 +266,31 @@ function phases(r){
   });
 }
 
-function queueEntries(project){
-  const queue = project.queue || {items:[], played:[]};
+function sessionEntries(project, session){
   const states = Object.fromEntries(project.rehearsals.map(s => [s.id, s]));
-  const played = (queue.played || []).map(entry => ({
+  const played = (session.played || []).filter(entry => states[entry.rehearsal]?.status !== 'done').map(entry => ({
     kind:'played', item:entry.item, id:entry.rehearsal, state:states[entry.rehearsal],
-    now:entry.rehearsal === queue.current, title:cleanTitle(project.titles?.[entry.rehearsal], entry.rehearsal),
+    now:entry.rehearsal === session.current, title:cleanTitle(project.titles?.[entry.rehearsal], entry.rehearsal),
   }));
-  const next = (queue.items || []).map(item => ({
+  const next = (session.items || []).map(item => ({
     kind:'next', item, title:cleanTitle(project.queue_titles?.[item], item) || (item.startsWith('#') ? '' : 'feature à planifier'),
   }));
   return [...played, ...next];
 }
+
+const TYPE_LETTER = {Feature:'F', Bug:'B', Task:'T'};
 
 /* --- la colonne : chaque projet, sa file, ses Rehearsals --- */
 
 function renderList(){
   $('#list').innerHTML = data.projects.map(project => {
     const all = rehearsals(project), live = all.filter(r => r.state.status !== 'done'), past = all.filter(r => r.state.status === 'done');
-    const queue = project.queue || {};
-    const stopped = !queue.current && (queue.items || []).length
-      ? `<div class="stopped">File arrêtée avant ${esc(queue.items[0])} : à corriger, puis <code>resume</code>.</div>` : '';
+    const queue = project.queue || {sessions:[], program:[]};
+    const stopped = project.queue_error
+      ? `<div class="stopped">Programme indisponible : ${esc(project.queue_error)}</div>` : '';
     return `<div class="project">
-      <div class="project-head"><h2>${esc(project.name)}</h2>${queue.plan ? `<span class="tag">plan ${esc(queue.plan)}</span>` : ''}</div>
-      ${miniQueue(project)}${stopped}
+      <div class="project-head"><h2>${esc(project.name)}</h2></div>
+      ${(queue.sessions || []).map(session => sessionStrip(project, session)).join('')}${programStrip(queue.program || [])}${stopped}
       ${live.map(card).join('')}
       ${past.length ? `<div class="group-label">Terminées</div>${past.map(card).join('')}` : ''}
       ${all.length ? '' : '<p class="empty">Aucune Rehearsal.</p>'}
@@ -297,13 +298,22 @@ function renderList(){
   }).join('');
 }
 
-function miniQueue(project){
-  const entries = queueEntries(project);
-  if (entries.length < 2) return '';
-  return `<div class="queue" aria-label="File">${entries.map(e => {
+/* Une session de Conductor : l'élément confié, ce qui joue, ses slices à venir. */
+function sessionStrip(project, session){
+  const entries = sessionEntries(project, session);
+  const chips = entries.map(e => {
     const cls = e.kind === 'next' ? 'next' : e.now ? `now ${e.state?.status || ''}` : e.state?.status === 'done' ? 'done' : '';
     return `<span class="q ${cls}" title="${esc(e.title || e.item)}">${esc(e.id || e.item)}</span>`;
-  }).join('<span class="q-arrow">›</span>')}</div>`;
+  }).join('<span class="q-arrow">›</span>');
+  return `<div class="group-label">Session ${esc(session.item)}${session.plan ? ` <span class="tag">plan ${esc(session.plan)}</span>` : ''}</div>
+    <div class="queue" aria-label="Session">${chips}</div>`;
+}
+
+/* Le programme GitHub : ce qui est prêt, par priorité puis ancienneté. */
+function programStrip(program){
+  if (!program.length) return '';
+  return `<div class="group-label">À jouer sur GitHub</div><div class="queue" aria-label="Programme">${program.map(p =>
+    `<span class="q next" title="${esc(`${p.type} · ${p.priority || 'sans priorité'} · ${p.title}`)}">${TYPE_LETTER[p.type] || '?'} ${esc(p.item)}${p.priority ? ` · ${esc(p.priority)}` : ''}</span>`).join('')}</div>`;
 }
 
 function card(r){
@@ -388,10 +398,12 @@ function cast(r){
 }
 
 function queueBlock(r){
-  const entries = queueEntries(r.project);
-  if (entries.length < 2 || !entries.some(e => e.id === r.state.id || e.now)) return '';
-  const plan = r.project.queue?.plan;
-  return `<div class="block"><h3>File${plan ? ` <span class="tag">plan ${esc(plan)}</span>` : ''}</h3><div class="qlist">${entries.map((e, i) => {
+  const session = (r.project.queue?.sessions || []).find(s => s.current === r.state.id || (s.played || []).some(e => e.rehearsal === r.state.id));
+  if (!session) return '';
+  const entries = sessionEntries(r.project, session);
+  if (entries.length < 2) return '';
+  const plan = session.plan;
+  return `<div class="block"><h3>Session ${esc(session.item)}${plan ? ` <span class="tag">plan ${esc(plan)}</span>` : ''}</h3><div class="qlist">${entries.map((e, i) => {
     const status = e.kind === 'next' ? '<span class="muted">à venir</span>' : e.state ? pill(e.state.status) : '';
     const inner = `<span class="n">${i + 1}</span><b class="mono">${esc(e.id || e.item)}</b>
       <span class="t">${esc(e.title || '')}${e.id && e.item !== '#' + (e.state?.issue || '') ? ` <span class="muted">← ${esc(e.item)}</span>` : ''}</span>${status}`;

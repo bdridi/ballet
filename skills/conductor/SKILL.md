@@ -26,7 +26,7 @@ python3 <path>/scripts/ballet_rehearsal.py run <item>... [--plan review|auto]
 The items come from the Piece, in its order: issues (`#12`) or ready features (`FEAT-002`). The script keeps them in a queue (`.ballet/run/queue.json`) and plays them one at a time. For each, it checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `origin/main`, and starts the first role:
 
 - an issue whose plan holds its tasks: the Dancer;
-- an issue without a plan, or a feature: the Choreographer alone, in auto mode. It publishes the issue (and its slices) and reports; the script reads them on GitHub, puts them at the head of the queue, and the first one goes on in the same worktree (`now playing: Rehearsal <ID> …`), with the Choreographer's ADRs.
+- an issue without a plan, or a feature: the Choreographer alone, in auto mode. It writes the plan on the issue (and creates its slices; a feature with no issue yet, it publishes first) and reports; the script reads them on GitHub, puts them at the head of the queue, and the first one goes on in the same worktree (`now playing: Rehearsal <ID> …`), with the Choreographer's ADRs.
 
 `<ID>` is the issue title's prefix (`FEAT-001.2`), or the feature (`FEAT-002`) while it is planned.
 

@@ -29,7 +29,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 |---|---|---|
 | **Director** | — | Moi. Je cadre avec le Dramaturg, je valide en `assisted` et je reçois les escalades. |
 | **Dramaturg** | PM | Cadre le périmètre fonctionnel, rédige l'issue et les specs. |
-| **Choreographer** | architecte | Crée l'issue et son plan technique à partir d'une feature prête. |
+| **Choreographer** | architecte | Écrit le plan technique sur l'issue d'une feature prête, et crée ses slices. |
 | **Dancer** | dev | Exécute le plan. |
 | **Critic** | validateur | Juge le travail et rend un verdict. |
 | **Conductor** | coordinateur | Fait tourner une boucle d'un projet : enchaîne les rôles, porte leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
@@ -103,7 +103,7 @@ Elle est toujours la même. Seul le mode de chaque boucle change la façon dont 
 
 ### 5.2 Les quatre rôles
 
-- **Dramaturg** : cadre le périmètre fonctionnel et rédige l'issue et les specs (dans des fichiers, jamais sur GitHub directement). Répond aux questions de produit. Écrit dans l'espace specs du projet, nulle part ailleurs. Il joue dans le Workshop : avec le Director en `assisted`, seul avec le Choreographer en `autopilot`, où il cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog.
+- **Dramaturg** : cadre le périmètre fonctionnel et rédige les specs (dans des fichiers) ; une feature prête, il publie son issue par le script GitHub, à son type et à son statut (`ready` après le oui du Director, `proposed` en autopilot), sans plan. Répond aux questions de produit. Écrit dans l'espace specs du projet, nulle part ailleurs. Il joue dans le Workshop : avec le Director en `assisted`, seul avec le Choreographer en `autopilot`, où il cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog.
 - **Choreographer** : part d'une feature prête, lit le code, fixe les choix techniques et écrit le plan de l'issue, une section par repo (et crée les issues de slices si besoin), par le script GitHub. Pose ses questions au Dramaturg quand la feature a des manques, et reste éveillé en attendant la réponse. Rend un rapport au Conductor, qui le journalise. Il joue dans les deux boucles (§4). Seul à écrire les ADR (dossier `[project] adr`), les spikes (branches `spike/NN-slug`, jamais mergées) et les règles techniques du projet dans `AGENTS.md`. Pour le reste, lecture seule.
 - **Dancer** : exécute sa section du plan en red → green → refactor, commite sur la branche de Rehearsal. Sur un refus, il reprend à partir de la review de la PR, qu'il lit sans y écrire. Preuve : la commande de preuve de son repo est verte. Écrit dans le code de son repo.
 - **Critic** : relit le travail dans le worktree et rend un verdict. Lecture seule. Première ligne de sa réponse : `VERDICT: APPROVED`, `VERDICT: REJECTED` ou `VERDICT: ESCALATE`, puis les preuves et **tous** les points bloquants, en un seul lot (jamais remarque par remarque), et des notes optionnelles que le Dancer n'est pas tenu de suivre. Le Conductor le publie en une review de la PR. Il ne merge pas : juger et intégrer restent séparés.
@@ -442,7 +442,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 
 - **Sur GitHub**, la trace des échanges : l'issue (plan, amendements, questions et réponses) et la PR (rapports du Dancer, verdicts du Critic).
 - **Dès la V1**, le Conductor écrit un événement par transition (JSON lines) : run, issue, phase, rôle, CLI et modèle, début, fin, résultat, allers-retours, escalades et leur motif (format à figer : OPP-36).
-- **La Scène** (`scripts/ballet_stage.py`) : une page locale en lecture seule, par projet, qui lit `.ballet/run/`, la distribution du profil et le titre des issues : la file, les Rehearsals, le rôle qui a la main, ce que le Director doit faire, et le fil des échanges, mis à jour en direct. C'est un outil d'observation pour se forger des convictions, pas un livrable de la V1 (§14).
+- **La Scène** (`scripts/ballet_stage.py`) : une page locale en lecture seule, par projet, qui lit `.ballet/run/`, la distribution du profil, le titre des issues et le programme sur GitHub (les éléments prêts de la file, `scripts/ballet_program.py`) et les sessions de Conductor ouvertes (l'élément confié, ses slices qui restent) : les sessions, le programme, les Rehearsals, le rôle qui a la main, ce que le Director doit faire, et le fil des échanges, mis à jour en direct. C'est un outil d'observation pour se forger des convictions, pas un livrable de la V1 (§14).
 - **Plus tard**, un vrai tableau de bord par-dessus ces données, à la manière de ce qui était prévu pour Nightshift. Sources complémentaires côté Orca : `orca search` dans les sessions, `worker-list`, `inbox`, hooks de statut des agents.
 - Il sert à piloter, à **comparer les modèles par rôle**, et à décider quand passer une boucle d'`assisted` à `autopilot`.
 

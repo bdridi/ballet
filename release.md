@@ -2,6 +2,17 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.27.0 — 2026-11-19 · `v0.27.0`
+
+- `ballet_program.py` lit le programme sur GitHub : les issues ouvertes `Feature`, `Bug` et `Task` dont `Ballet status` vaut `ready`, dans l'ordre du champ `Priority` puis de l'ancienneté ; les `Slice` n'y figurent pas. Lecture seule, avec un message clair si GitHub ne répond pas.
+- La Scène (v1 et v2) montre ce programme, relu toutes les 30 secondes (« programme indisponible » si `gh` échoue). Les sessions de Conductor ouvertes (aujourd'hui `queue.json`, une seule, prête pour plusieurs) sont montrées à part, chacune avec son élément confié, ses slices qui restent et sa Rehearsal courante ; le programme n'a plus les éléments qu'une session a pris ; l'historique joué vient des événements `begin` du journal, la Rehearsal courante des états. Tant que le Conductor n'a qu'une file globale (OPP-55), `run #12 #14` y montre #14 comme une slice de #12.
+- Le Dramaturg publie l'issue d'une feature prête (ou d'un bug, d'une tâche) par `ballet_github.py publish <fichier> <type> <statut>` : type natif `Feature`, `Bug` ou `Task`, champ `Ballet status` à `ready` après le oui du Director (`proposed` en autopilot). Sans plan : le script ajoute une section `## Plan` vide.
+- Le Choreographer n'écrit plus que le plan sur cette issue (`plan`) et crée les slices, de type `Slice` et sans statut (`slice`). Une feature qui n'existe que dans les specs (sans issue) reste planifiable : il la publie alors à `in-rehearsal`.
+- Le plan de chaque slice se suffit à lui-même (ses décisions, sa preuve, ses tâches, ce qu'il reprend des slices d'avant) : le Dancer ne lit que l'issue de sa slice.
+- Type ou champ absent : l'opération le dit et renvoie vers `init-project`, et si le champ est refusé après la création, l'erreur nomme l'issue créée.
+
+**Opportunités traitées** : OPP-03, OPP-56.
+
 ## 0.26.0 — 2026-11-19 · `v0.26.0`
 
 - `init-project` prépare, chez le propriétaire du repo GitHub, les types et les champs d'issue de la file : le type `Slice` (à côté de `Task`, `Bug`, `Feature`), les champs `Ballet status`, `Rehearsal mode` et `Priority`. Il ne crée que ce qui manque, ne modifie rien, et signale un champ incomplet ; `--no-github` saute l'étape.

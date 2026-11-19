@@ -1,9 +1,9 @@
 """Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues et les PR.
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
-    python3 ballet_github.py publish <brouillon.md>              # crée l'issue, affiche son numéro
+    python3 ballet_github.py publish <brouillon.md> <type> <statut>   # crée l'issue (Feature, Bug ou Task) à son statut, affiche son numéro
     python3 ballet_github.py plan    <issue> <plan.md>           # écrit la section ## Plan de l'issue
-    python3 ballet_github.py slice   <parente> <brouillon.md>    # crée l'issue d'une slice, liée à sa parente
+    python3 ballet_github.py slice   <parente> <brouillon.md>    # crée l'issue d'une slice (type Slice), liée à sa parente
     python3 ballet_github.py read-pr <pr>                        # affiche la PR, ses reviews et ses commentaires, dans l'ordre
     python3 ballet_github.py push    <rehearsal/ID>              # pousse la branche de Rehearsal
     python3 ballet_github.py open-pr <issue> <rehearsal/ID>      # ouvre la PR sur main, liée à l'issue, affiche son numéro
@@ -18,6 +18,10 @@
 
 Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
 Le titre d'une issue est le premier titre `# …` de son brouillon ; le corps, tout le reste.
+`publish` pose le type natif de l'issue (`Feature`, `Bug` ou `Task`) et son champ `Ballet status` (`proposed`, `ready`,
+`in-rehearsal`, `plan-review`, `escalated`, `done`) : c'est ce qui la met dans la file. Il ajoute une section `## Plan`
+vide si le brouillon n'en a pas, pour que le Choreographer l'écrive. `slice` crée une issue de type `Slice`, sans statut :
+elle suit sa feature. Type et champ viennent de `init-project` ; absents, l'opération le dit.
 Un message (review, commentaire) suit `templates/message.md` : en-tête JSON sur la première ligne, publié en entier.
 `review` poste chaque point qui commence par `fichier:ligne` (ou `fichier:début-fin`), sur une ligne du diff,
 en commentaire sur cette ligne ; le corps de la review garde le verdict, la preuve et les autres points.
@@ -43,6 +47,22 @@ from pathlib import Path
 from ballet_message import VERDICT_LINE, MessageError, read_message
 
 PLAN_HEADING = "## Plan"
+PLAN_PLACEHOLDER = "_The Choreographer writes the plan here._"
+PUBLISHED_TYPES = ("Feature", "Bug", "Task")
+SLICE_TYPE = "Slice"
+STATUS_FIELD = "Ballet status"
+BALLET_STATUSES = ("proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done")
+NEXT_GLOBAL_ID = "X-Github-Next-Global-ID: 1"  # les ID d'issue et de champ au format actuel
+ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { issue(number: $number) { id } }
+  repositoryOwner(login: $owner) {
+    ... on User { issueFields(first: 50) { nodes { ... on IssueFieldSingleSelect { id name options { id name } } } } }
+    ... on Organization { issueFields(first: 50) { nodes { ... on IssueFieldSingleSelect { id name options { id name } } } } }
+  }
+}"""
+SET_STATUS = """mutation($issue: ID!, $field: ID!, $option: ID!) {
+  setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option}]}) { issue { id } }
+}"""
 PARENT_LINE = re.compile(r"^Part of #(\d+)\s*$", re.MULTILINE)
 BASE_BRANCH = "main"
 REHEARSAL_BRANCH = re.compile(r"rehearsal/(FEAT|BUG|TASK)-\d{3}(\.\d+)?")
@@ -81,9 +101,15 @@ def read_issue(number, run=None):
     return _issue_body(number, run or _run_gh)
 
 
-def publish_issue(draft_path, run=None):
+def publish_issue(draft_path, issue_type, status, run=None):
+    """Crée l'issue de son type et de son statut : c'est ce qui la met dans la file. Renvoie son numéro."""
+    run = run or _run_gh
+    _require_among(issue_type, PUBLISHED_TYPES, "issue type")
+    _require_among(status, BALLET_STATUSES, "Ballet status")
     title, body = _title_and_body(_read_draft(draft_path))
-    return _create_issue(title, body, run or _run_gh)
+    number = _create_issue(title, _with_plan_section(body), run, issue_type)
+    _set_status(number, status, run)
+    return number
 
 
 def write_plan(number, plan_path, run=None):
@@ -95,7 +121,7 @@ def write_plan(number, plan_path, run=None):
 
 def publish_slice(parent_number, draft_path, run=None):
     title, body = _title_and_body(_read_draft(draft_path))
-    return _create_issue(title, _linked_to_parent(body, parent_number), run or _run_gh)
+    return _create_issue(title, _linked_to_parent(body, parent_number), run or _run_gh, SLICE_TYPE)
 
 
 def read_pull_request(number, run=None):
@@ -275,7 +301,7 @@ def main(argv):
 def _dispatch(operation, arguments):
     operations = {
         "read": (read_issue, 1),
-        "publish": (publish_issue, 1),
+        "publish": (publish_issue, 3),
         "plan": (write_plan, 2),
         "slice": (publish_slice, 2),
         "read-pr": (read_pull_request, 1),
@@ -382,9 +408,49 @@ def _delete_remote_branch(branch, git):
     git(["push", "origin", "--delete", _rehearsal_branch(branch)])
 
 
-def _create_issue(title, body, run):
-    url = run(["issue", "create", "--title", title, "--body", body]).strip()
+def _create_issue(title, body, run, issue_type):
+    url = run(["issue", "create", "--title", title, "--body", body, "--type", issue_type]).strip()
     return url.rsplit("/", 1)[-1]
+
+
+def _set_status(number, status, run):
+    """Le champ `Ballet status` de l'issue. Si GitHub refuse, l'issue existe déjà : l'erreur la nomme."""
+    try:
+        issue, field, option = _status_ids(number, status, run)
+        _graphql(["-f", f"query={SET_STATUS}", "-f", f"issue={issue}", "-f", f"field={field}", "-f", f"option={option}"], run)
+    except GitHubError as error:
+        raise GitHubError(f"issue #{number} was created, but its {STATUS_FIELD} is not '{status}': {error}")
+
+
+def _status_ids(number, status, run):
+    answer = _graphql(["-H", NEXT_GLOBAL_ID, "-f", f"query={ISSUE_AND_STATUS_FIELD}", "-F", "owner={owner}", "-F", "name={repo}",
+                       "-F", f"number={number}"], run)["data"]
+    fields = {node["name"]: node for node in answer["repositoryOwner"]["issueFields"]["nodes"] if node}
+    if STATUS_FIELD not in fields:
+        raise GitHubError(f"the owner has no '{STATUS_FIELD}' field: run /ballet:init-project")
+    options = {option["name"]: option["id"] for option in fields[STATUS_FIELD]["options"]}
+    if status not in options:
+        raise GitHubError(f"the '{STATUS_FIELD}' field has no option '{status}'")
+    return answer["repository"]["issue"]["id"], fields[STATUS_FIELD]["id"], options[status]
+
+
+def _graphql(arguments, run):
+    answer = json.loads(run(["api", "graphql", *arguments]))
+    if answer.get("errors"):
+        raise GitHubError(answer["errors"][0]["message"])
+    return answer
+
+
+def _require_among(value, allowed, what):
+    if value not in allowed:
+        raise GitHubError(f"unknown {what} '{value}'; known: {', '.join(allowed)}")
+
+
+def _with_plan_section(body):
+    """Une issue publiée par le Dramaturg n'a pas encore de plan : sa section attend le Choreographer."""
+    if PLAN_HEADING in body.splitlines():
+        return body
+    return f"{body.rstrip()}\n\n{PLAN_HEADING}\n\n{PLAN_PLACEHOLDER}\n"
 
 
 def _edit_issue(number, body, run):

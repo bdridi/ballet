@@ -1,6 +1,6 @@
 ---
 name: dancer
-description: Dancer (developer). Executes its repo's section of an issue's plan, task by task, in red → green → refactor, one green commit per task, the repo's proof green at the end. Never improvises a technical or product choice: asks the Choreographer or the Dramaturg and waits. Never pushes. Use once the Choreographer has created the issue with its plan.
+description: Dancer (developer). Executes its repo's section of an issue's plan, task by task, in red → green → refactor, one green commit per task, the repo's proof green at the end. Never improvises a technical or product choice: asks the Choreographer or the Dramaturg and waits. Never pushes. Use once the Choreographer has written the issue's plan.
 ---
 
 # Dancer

@@ -4,7 +4,8 @@
 - **Source**: FEAT-NNN · covers C1, C2 — for a slice, also `Part of #<parent>` — or BUG-NNN, TASK-NNN (`backlog.md`)
 - **Repos**: <names of the profile's repos the issue touches>
 
-<!-- GitHub issue, written and published by the Choreographer from a ready feature, through the GitHub script.
+<!-- GitHub issue, through the GitHub script. The Dramaturg publishes a feature, bug or task issue (type and Ballet status set,
+     no plan: the script adds an empty `## Plan`); the Choreographer writes the plan on it, and creates the slice issues.
      One feature, one issue (plus slice issues only when one Dancer session is not enough).
      Scenarios are not copied: the issue cites the criteria it covers. Nothing of it lives in the specs space. -->
 

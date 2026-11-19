@@ -6,30 +6,36 @@
 
 La page d'origine répond sur `/`, la nouvelle (`stage/v2.html`) sur `/v2` : les deux lisent les mêmes données.
 
-Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json`, la file `queue.json` et
-`journal.jsonl`), le profil (CLI et modèle par rôle, seuils d'escalade) et le titre des issues, celles des Rehearsals
-comme celles qui attendent dans la file (`gh issue view`, gardé en mémoire).
+Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json` et `journal.jsonl`), le profil
+(CLI et modèle par rôle, seuils d'escalade) et le titre des issues des Rehearsals (`gh issue view`, gardé en mémoire).
+Le programme, ce qui attend sa Rehearsal, vient de GitHub (`ballet_program.py`, relu toutes les 30 secondes) ;
+chaque session de Conductor ouverte (aujourd'hui `queue.json`, une seule) fournit l'élément confié, ses slices qui restent
+et sa Rehearsal courante ; l'historique vient du journal : chaque `begin` est une Rehearsal jouée. Si GitHub ne répond pas, la page le dit.
 Il n'écoute que sur 127.0.0.1. Sans argument, le projet est le dossier courant.
 """
 
 import json
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import ballet_config
+import ballet_program
 
 STAGE = Path(__file__).resolve().parent.parent / "stage"
 PAGE = STAGE / "index.html"
 PAGES = {"/": PAGE, "/index.html": PAGE, "/v2": STAGE / "v2.html", "/v2.html": STAGE / "v2.html"}
 RUN_DIR = Path(".ballet") / "run"
 QUEUE_FILE = "queue.json"
+PROGRAM_TTL_SECONDS = 30
 LIMITS = ("max_round_trips", "max_diff_lines", "max_diff_strict", "max_exchange_rounds")
 DEFAULT_PORT = 7700
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 TITLES = {}   # (home, issue) → titre : une issue ne change pas de titre pendant qu'on la regarde
+PROGRAMS = {}   # home → (heure de lecture, programme) : GitHub n'est pas interrogé à chaque tour de la page
 
 
 class UsageError(Exception):
@@ -65,7 +71,8 @@ def project_homes(folder):
 
 def _project(home):
     run = Path(home) / RUN_DIR
-    states, queue, profile = _states(run), _queue(run), _profile(home)
+    states, journal, program, profile = _states(run), _journal(run), _program(home), _profile(home)
+    sessions = _sessions(run)
     return {
         "name": Path(home).resolve().name,
         "home": str(Path(home).resolve()),
@@ -73,9 +80,10 @@ def _project(home):
         "limits": _limits(profile),
         "titles": _titles(home, states),
         "rehearsals": states,
-        "queue": queue,
-        "queue_titles": _queue_titles(home, queue),
-        "journal": _journal(run),
+        "queue": _queue(program, sessions, states, journal),
+        "queue_titles": {**{item["item"]: item["title"] for item in program["items"]}, **_session_titles(home, sessions)},
+        "queue_error": program["error"],
+        "journal": journal,
     }
 
 
@@ -97,16 +105,61 @@ def _titles(home, states):
     return {rehearsal: _issue_title(home, issue) for rehearsal, issue in issues.items() if issue}
 
 
-def _queue(run):
-    """La file de la Piece en cours ; une file vide quand il n'y en a pas."""
-    queue = _json(run / QUEUE_FILE) if (run / QUEUE_FILE).is_file() else None
-    return queue or {"plan": "", "items": [], "current": "", "played": []}
+def _queue(program, sessions, states, journal):
+    """Ce que la page affiche : les sessions de Conductor ouvertes, le programme de GitHub sans les éléments qu'une
+    session a déjà pris, et ce qui a déjà été joué."""
+    taken = {item for session in sessions for item in session["items"] + [entry["item"] for entry in session["played"]]}
+    return {
+        "sessions": sessions,
+        "program": [item for item in program["items"] if item["item"] not in taken],
+        "played": _played(journal, states),
+    }
 
 
-def _queue_titles(home, queue):
-    """Le titre des issues qui attendent dans la file (`#15`) ; une feature (`FEAT-003`) n'a pas encore d'issue."""
-    waiting = [item for item in queue.get("items", []) if item.startswith("#")]
+def _played(journal, states):
+    """Chaque `begin` du journal : l'élément et la Rehearsal qui l'a joué (la slice, quand une planification l'a absorbée)."""
+    played_by = {state["planned_by"]: state["id"] for state in states if state.get("planned_by")}
+    return [{"item": entry.get("detail", {}).get("item", ""), "rehearsal": played_by.get(entry["rehearsal"], entry["rehearsal"])}
+            for entry in journal if entry.get("event") == "begin"]
+
+
+def _sessions(run):
+    """Les sessions de Conductor ouvertes, chacune avec son élément confié, ses slices à venir et sa Rehearsal courante.
+    Aujourd'hui la file locale (`queue.json`) est la seule : zéro session quand elle est finie ou illisible."""
+    saved = _json(run / QUEUE_FILE) if (run / QUEUE_FILE).is_file() else None
+    if not saved or not (saved.get("items") or saved.get("current")):
+        return []
+    items, played = list(saved.get("items", [])), list(saved.get("played", []))
+    return [{
+        "item": played[0]["item"] if played else items[0],
+        "plan": saved.get("plan", ""),
+        "current": saved.get("current", ""),
+        "items": items,
+        "played": played,
+    }]
+
+
+def _session_titles(home, sessions):
+    """Le titre des slices qui attendent (`#35`) ; une feature sans issue (`FEAT-003`) n'a pas encore de titre."""
+    waiting = [item for session in sessions for item in session["items"] if item.startswith("#")]
     return {item: _issue_title(home, item[1:]) for item in waiting}
+
+
+def _program(home):
+    """Les éléments prêts sur GitHub, gardés `PROGRAM_TTL_SECONDS` ; `error` dit pourquoi on ne les connaît pas."""
+    key = str(Path(home).resolve())
+    read_at, program = PROGRAMS.get(key, (0, None))
+    if program is None or time.monotonic() - read_at > PROGRAM_TTL_SECONDS:
+        program = _read_program(home)
+        PROGRAMS[key] = (time.monotonic(), program)
+    return program
+
+
+def _read_program(home):
+    try:
+        return {"items": ballet_program.ready_items(home), "error": ""}
+    except ballet_program.ProgramError as error:
+        return {"items": [], "error": str(error)}
 
 
 def _issue_title(home, issue):
@@ -149,9 +202,10 @@ def _json(text_or_path):
 
 
 def _version(homes):
-    """Une empreinte des fichiers lus : elle change dès qu'un état ou le journal change."""
+    """Une empreinte de ce qui est lu : elle change dès qu'un état, le journal ou le programme change."""
     stamps = []
     for home in homes:
+        stamps.append(json.dumps(_program(home), sort_keys=True))
         for path in sorted((Path(home) / RUN_DIR).glob("*.json*")):
             stat = path.stat()
             stamps.append(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size}")

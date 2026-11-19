@@ -290,13 +290,21 @@ function steps(r){
   return list.map((s, i) => ({...s, state:i < reached ? (s.optional && !s.seen ? 'skip' : 'done') : i === reached ? (r.state.status === 'escalated' ? 'wait' : 'now') : 'todo'}));
 }
 
-/* La file dans l'ordre : ce qui est passé, ce qui joue, ce qui attend. */
-function programme(project, all){
-  const queue = project.queue || {};
-  const played = (queue.played || []).map(entry => ({item:entry.item, id:entry.rehearsal, r:all.find(r => r.id === entry.rehearsal || r.planning?.id === entry.rehearsal)}));
-  const next = (queue.items || []).map(item => ({item, next:true, title:cleanTitle(project.queue_titles?.[item]) || (item.startsWith('#') ? '' : 'feature à planifier')}));
+/* Une session de Conductor : ce qui joue, puis les slices qui restent. */
+function sessionEntries(project, session, all){
+  const played = (session.played || []).map(entry => ({item:entry.item, id:entry.rehearsal, r:all.find(r => r.id === entry.rehearsal || r.planning?.id === entry.rehearsal)})).filter(e => e.r && !e.r.done);
+  const next = (session.items || []).map(item => ({item, next:true, title:cleanTitle(project.queue_titles?.[item]) || (item.startsWith('#') ? '' : 'feature à planifier')}));
   return [...played, ...next];
 }
+
+/* Tout ce qui joue ou attend : les sessions ouvertes (il peut y en avoir plusieurs), puis le programme GitHub. */
+function programme(project, all){
+  const sessions = (project.queue?.sessions || []).flatMap(session => sessionEntries(project, session, all));
+  const program = (project.queue?.program || []).map(p => ({item:p.item, next:true, title:cleanTitle(p.title)}));
+  return [...sessions, ...program];
+}
+
+const typeLetter = type => ({Feature:'F', Bug:'B', Task:'T'}[type] || '?');
 
 /* --- les briques --- */
 
@@ -375,8 +383,8 @@ function frise(project, all, only){
   const x = t => Math.min(100, Math.max(0, (new Date(t) - start) / Math.max(end - start, 60000) * 100));
   const lanes = rs.filter(r => new Date(r.end) >= start).map(r => `
     <a class="lane" href="${to('r', r.id, project)}"><span class="who"><b>${esc(r.id)}</b><span>${esc(r.title)}</span></span><span class="track">${segments(r, x, start)}${only?.done ? '' : `<i class="nowline" style="left:${x(now)}%"></i>`}</span></a>`);
-  const ghosts = only ? [] : (project.queue?.items || []).map(item => `
-    <div class="lane"><span class="who"><b>${esc(item)}</b><span>${esc(cleanTitle(project.queue_titles?.[item]))}</span></span><span class="track"><i class="nowline" style="left:${x(now)}%"></i><span class="ghost" style="left:${x(now) + 1}%">à venir</span></span></div>`);
+  const ghosts = only ? [] : programme(project, rehearsals(project)).filter(e => e.next).map(e => `
+    <div class="lane"><span class="who"><b>${esc(e.item)}</b><span>${esc(e.title)}</span></span><span class="track"><i class="nowline" style="left:${x(now)}%"></i><span class="ghost" style="left:${x(now) + 1}%">à venir</span></span></div>`);
   return `<div class="frise ${only ? 'solo' : ''}">${lanes.join('') || '<p class="empty">Rien sur cette période : élargis la fenêtre.</p>'}${ghosts.join('')}
     <div class="lane axis"><span></span><span class="track">${ticks(start, end).map(t => `<i style="left:${x(t)}%">${tickLabel(t, end - start)}</i>`).join('')}</span></div></div>`;
 }
@@ -452,13 +460,17 @@ function pageFrise(project, all){
 }
 
 function pageProgramme(project, all){
-  const entries = programme(project, all), queue = project.queue || {}, done = entries.filter(e => e.r?.done).length;
-  const inQueue = new Set(entries.map(e => e.r?.id)), others = all.filter(r => !r.done && !inQueue.has(r.id));
-  const stopped = ![].concat(queue.current || []).length && (queue.items || []).length
-    ? `<div class="stopped">File arrêtée avant <b>${esc(queue.items[0])}</b> : à corriger, puis <code>resume</code>.</div>` : '';
-  return `<h1>Programme ${queue.plan ? `<span class="chip">plan ${esc(queue.plan)}</span>` : ''}</h1>
-    ${entries.length ? `<p class="muted">${done} jouée(s) sur ${entries.length}</p><div class="progress"><i style="width:${done / entries.length * 100}%"></i></div>` : '<p class="empty">Aucune file en cours.</p>'}
-    ${stopped}${entries.map((e, i) => e.next ? ghostRow(e, i + 1) : e.r ? row(e.r, i + 1, e.item !== '#' + e.r.state.issue ? `<span>← ${esc(e.item)}</span>` : '') : ghostRow({item:e.id, title:e.item}, i + 1)).join('')}
+  const queue = project.queue || {}, sessions = queue.sessions || [], program = queue.program || [];
+  const inSession = new Set(sessions.flatMap(s => sessionEntries(project, s, all).map(e => e.r?.id)));
+  const others = all.filter(r => !r.done && !inSession.has(r.id));
+  const stopped = project.queue_error ? `<div class="stopped">Programme indisponible : ${esc(project.queue_error)}</div>` : '';
+  const sessionRows = session => sessionEntries(project, session, all).map((e, i) => e.next ? ghostRow(e, i + 1)
+    : row(e.r, i + 1, e.item !== '#' + e.r.state.issue ? `<span>← ${esc(e.item)}</span>` : '')).join('');
+  return `<h1>Programme</h1>
+    ${sessions.map(session => `<h3>Session <b class="mono">${esc(session.item)}</b> ${session.plan ? `<span class="chip">plan ${esc(session.plan)}</span>` : ''}<small>un Conductor, ses slices dans l'ordre</small></h3>${sessionRows(session)}`).join('')}
+    <h3>À jouer sur GitHub <small>${program.length} prêt(s), par priorité puis ancienneté</small></h3>
+    ${stopped}${program.map((p, i) => ghostRow({item:p.item, title:`${typeLetter(p.type)} · ${p.priority || 'sans priorité'} · ${cleanTitle(p.title)}`}, i + 1)).join('')
+      || (project.queue_error ? '' : '<p class="empty">Aucun élément prêt.</p>')}
     ${others.length ? `<h3>Hors programme <small>en scène sans passer par la file</small></h3>${others.map(r => row(r, '◆')).join('')}` : ''}`;
 }
 
@@ -564,7 +576,7 @@ function render(){
 }
 
 function renderHeader(project, all){
-  const counts = {scene:all.filter(r => !r.done).length, programme:(project.queue?.items || []).length, archives:all.filter(r => r.done).length};
+  const counts = {scene:all.filter(r => !r.done).length, programme:programme(project, all).filter(e => e.next).length, archives:all.filter(r => r.done).length};
   $('#pages').innerHTML = PAGES.map(([key, label]) => `<a href="${to(key)}" aria-current="${where.page === key}">${label}${counts[key] ? `<small>${counts[key]}</small>` : ''}</a>`).join('');
   $('#projects').innerHTML = data.projects.length < 2 ? '' : data.projects.map(p => {
     const mood = p.rehearsals.some(s => s.status === 'escalated') ? 'escalated' : p.rehearsals.some(s => s.status === 'open') ? 'open' : '';

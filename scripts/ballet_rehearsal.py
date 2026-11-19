@@ -1046,7 +1046,8 @@ def _first_assignment(role, rehearsal, config):
     if role == "dancer":
         return f"Execute your repo's section of the plan of issue #{rehearsal.issue}, task by task."
     if rehearsal.feature:
-        publish = f"Plan the ready feature {rehearsal.feature}: publish its issue (`publish`), and its slices (`slice`) if it needs them."
+        publish = (f"Plan the ready feature {rehearsal.feature}, which has no issue yet: publish it (`publish <file> Feature in-rehearsal`), "
+                   "then its plan, and its slices (`slice`) if it needs them.")
     else:
         publish = (f"Issue #{rehearsal.issue} has no plan yet: write it (`plan {rehearsal.issue}`), or cut it into slices "
                    f"(`slice {rehearsal.issue}`).")

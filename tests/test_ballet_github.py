@@ -93,8 +93,21 @@ VERDICT: REJECTED
 """
 
 
+STATUS_OPTIONS = ["proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done"]
+
+
+def status_answer(fields=None):
+    """La réponse de GitHub à la lecture de l'issue et des champs de son propriétaire."""
+    fields = {"Ballet status": STATUS_OPTIONS} if fields is None else fields
+    nodes = [{"id": f"FIELD-{name}", "name": name, "options": [{"id": f"OPT-{option}", "name": option} for option in options]}
+             for name, options in fields.items()]
+    return json.dumps({"data": {"repository": {"issue": {"id": "ISSUE-42"}}, "repositoryOwner": {"issueFields": {"nodes": nodes}}}})
+
+
 class FakeGh:
-    def __init__(self, body=ISSUE_BODY, pull_request=PULL_REQUEST, timeline=()):
+    def __init__(self, body=ISSUE_BODY, pull_request=PULL_REQUEST, timeline=(), fields=None):
+        self.fields = fields
+        self.mutation_reply = "{}"
         self.body = body
         self.pull_request = pull_request
         self.timeline = [{"event": "commented"}, *timeline]
@@ -107,6 +120,10 @@ class FakeGh:
             return json.dumps({"body": self.body, "title": "FEAT-001.1 · Walking skeleton"})
         if arguments[:2] == ["issue", "create"]:
             return "https://github.com/o/r/issues/42\n"
+        if arguments[:2] == ["api", "graphql"] and any(a.startswith("query=query") for a in arguments):
+            return status_answer(self.fields)
+        if arguments[:2] == ["api", "graphql"]:
+            return self.mutation_reply
         if arguments[:2] == ["pr", "create"]:
             return "https://github.com/o/r/pull/43\n"
         if arguments[:2] == ["pr", "view"] and arguments[-1] == "labels":
@@ -159,14 +176,72 @@ class BalletGitHubTest(unittest.TestCase):
     def test_publie_un_brouillon_avec_son_titre(self):
         gh = FakeGh()
         draft = self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n")
-        self.assertEqual(ballet_github.publish_issue(draft, run=gh), "42")
+        self.assertEqual(ballet_github.publish_issue(draft, "Feature", "ready", run=gh), "42")
         create = gh.calls[0]
         self.assertEqual(create[create.index("--title") + 1], "FEAT-001 · Sign in")
         self.assertTrue(create[create.index("--body") + 1].startswith("## Context"))
 
+    def test_publie_l_issue_a_son_type_natif(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# BUG-002 · Lost basket\n\n## Context\n\nWhy.\n"), "Bug", "ready", run=gh)
+        create = gh.calls[0]
+        self.assertEqual(create[create.index("--type") + 1], "Bug")
+
+    def test_pose_le_statut_ballet_de_l_issue_publiee(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n"), "Feature", "proposed", run=gh)
+        mutation = gh.calls[-1]
+        self.assertIn("issue=ISSUE-42", mutation)
+        self.assertIn("field=FIELD-Ballet status", mutation)
+        self.assertIn("option=OPT-proposed", mutation)
+
+    def test_ajoute_une_section_plan_vide_quand_le_brouillon_n_en_a_pas(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n"), "Feature", "ready", run=gh)
+        body = gh.calls[0][gh.calls[0].index("--body") + 1]
+        self.assertIn("## Plan\n\n_The Choreographer writes the plan here._", body)
+
+    def test_garde_la_section_plan_d_un_brouillon_qui_en_a_une(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# BUG-002 · x\n\n## Plan\n\n- a → b.\n"), "Bug", "ready", run=gh)
+        body = gh.calls[0][gh.calls[0].index("--body") + 1]
+        self.assertEqual(body.count("## Plan"), 1)
+        self.assertNotIn("Choreographer writes", body)
+
+    def test_le_plan_se_range_ensuite_dans_la_section_publiee(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n"), "Feature", "ready", run=gh)
+        gh.body = gh.calls[0][gh.calls[0].index("--body") + 1]
+        ballet_github.write_plan("42", self.file("p.md", "## Plan\n\n### Decisions\n\n- a → b.\n"), run=gh)
+        self.assertIn("- a → b.", gh.body)
+        self.assertNotIn("Choreographer writes", gh.body)
+
+    def test_refuse_un_type_inconnu_et_n_ecrit_rien(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown issue type 'Slice'"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Slice", "ready", run=gh)
+        self.assertEqual(gh.calls, [])
+
+    def test_refuse_un_statut_inconnu_et_n_ecrit_rien(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Ballet status 'wip'"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "wip", run=gh)
+        self.assertEqual(gh.calls, [])
+
+    def test_sans_champ_ballet_status_l_erreur_nomme_l_issue_et_init_project(self):
+        gh = FakeGh(fields={})
+        with self.assertRaisesRegex(ballet_github.GitHubError, r"issue #42 was created.*init-project"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh)
+
+    def test_un_refus_de_github_sur_le_champ_nomme_l_issue(self):
+        gh = FakeGh()
+        gh.mutation_reply = json.dumps({"errors": [{"message": "Resource not accessible"}]})
+        with self.assertRaisesRegex(ballet_github.GitHubError, r"issue #42 was created.*Resource not accessible"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh)
+
     def test_refuse_un_brouillon_sans_titre(self):
         with self.assertRaises(ballet_github.GitHubError):
-            ballet_github.publish_issue(self.file("d.md", "no title\n"), run=FakeGh())
+            ballet_github.publish_issue(self.file("d.md", "no title\n"), "Feature", "ready", run=FakeGh())
 
     def test_ecrit_le_plan_dans_sa_section_sans_toucher_au_reste(self):
         gh = FakeGh()
@@ -190,7 +265,7 @@ class BalletGitHubTest(unittest.TestCase):
 
     def test_un_brouillon_sans_titre_renvoie_vers_plan(self):
         with self.assertRaisesRegex(ballet_github.GitHubError, "plan"):
-            ballet_github.publish_issue(self.file("d.md", "## Plan\n\n- a → b.\n"), run=FakeGh())
+            ballet_github.publish_issue(self.file("d.md", "## Plan\n\n- a → b.\n"), "Feature", "ready", run=FakeGh())
 
     def test_une_slice_pointe_vers_sa_parente(self):
         gh = FakeGh()
@@ -198,6 +273,12 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertEqual(ballet_github.publish_slice("#7", draft, run=gh), "42")
         body = gh.calls[0][gh.calls[0].index("--body") + 1]
         self.assertTrue(body.startswith("Part of #7\n"))
+
+    def test_une_slice_est_de_type_slice_et_n_a_pas_de_statut(self):
+        gh = FakeGh()
+        ballet_github.publish_slice("#7", self.file("s.md", "# FEAT-001.1 · Skeleton\n\n## Plan\n\nx\n"), run=gh)
+        self.assertEqual(gh.calls[0][gh.calls[0].index("--type") + 1], "Slice")
+        self.assertFalse([call for call in gh.calls if call[:2] == ["api", "graphql"]])
 
     def test_lit_une_pr_avec_ses_reviews_et_commentaires_dans_l_ordre(self):
         text = ballet_github.read_pull_request("#5", run=FakeGh())
