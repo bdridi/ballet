@@ -67,6 +67,16 @@ class ScopeTest(unittest.TestCase):
         scoped = ballet_mutation.scopes_of([tool(paths=["crates/*"]), tool(paths=["src/*"])], lambda arguments: git[tuple(arguments)])
         self.assertEqual([scope.files for _, scope in scoped], [["src/lib.rs"]])
 
+    def test_depuis_la_derniere_mutation_verte_seul_ce_qui_a_change_compte(self):
+        git = {("diff", "--no-color", "--no-ext-diff", "abc1234", "HEAD"): DIFF}
+        scoped = ballet_mutation.scopes_of([tool(paths=["src/*"])], lambda arguments: git[tuple(arguments)], since="abc1234")
+        self.assertEqual([scope.files for _, scope in scoped], [["src/lib.rs"]])
+
+    def test_sans_paths_cargo_mutants_ne_retient_que_le_rust(self):
+        entry = {"name": "rust", "command": "c", "config": "m.toml", "report": {"path": "o.json", "format": "cargo-mutants"}}
+        declared = ballet_mutation.tools_of({"mutation": [entry]})[0]
+        self.assertEqual(ballet_mutation.scope_of(DIFF, declared.paths).files, ["src/lib.rs"])
+
     def test_les_placeholders_passent_le_diff_les_fichiers_et_les_plages_quotes(self):
         scope = ballet_mutation.Scope("d", ["src/a b.rs", "src/c.rs"], ["src/a b.rs:1-2"])
         command = ballet_mutation.expand("mutate --in-diff {diff} --files {files} --mutate {ranges}", Path("/run/m 1.diff"), scope)
@@ -85,6 +95,12 @@ class ReportTest(unittest.TestCase):
                          (6, 7, 0, 0, 0.462))
         self.assertEqual(report["survivors"][0], {"file": "src/lib.rs", "line": 2, "mutant": "src/lib.rs:2:5: replace rank -> u8 with 1"})
         self.assertEqual(len(report["survivors"]), 7)
+
+    def test_un_outil_qui_n_a_teste_aucun_mutant_viable_ne_prouve_rien(self):
+        nothing = ballet_mutation._normalized(killed=0, survived=0, invalid=8, timeouts=0, survivors=[])
+        outcome = ballet_mutation.Outcome("rust", True, False, 0, 50, "h", "l", "d", nothing)
+        self.assertTrue(outcome.tested_nothing())
+        self.assertFalse(ballet_mutation.Outcome("rust", True, False, 0, 50, "h", "l", "d", "missing").tested_nothing())
 
     def test_un_rapport_absent_ne_bloque_pas(self):
         self.assertEqual(ballet_mutation.read_report(self.folder / "none.json", "cargo-mutants"), "missing")

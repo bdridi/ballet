@@ -6,13 +6,15 @@ C'est le chemin de la Rehearsal (le nœud après la preuve), lancé à la main p
 `[[repos.<repo>.mutation]]` du profil (`name`, `command`, `config`, `report = { path, format }`, `paths` facultatif).
 Pour chacun :
 
-- le diff de la branche contre son ancêtre commun avec `origin/main`, filtré par `paths` (fnmatch sur le chemin
-  entier, `*` traverse les `/`) ; un outil sans changement est sauté ;
+- le diff de la branche contre son ancêtre commun avec `origin/main` (dans une Rehearsal, contre le commit de la
+  dernière mutation verte, s'il y en a une), filtré par `paths` (fnmatch sur le chemin entier, `*` traverse les `/` ;
+  sans `paths`, le langage du format de rapport : `*.rs` pour `cargo-mutants`) ; un outil sans changement est sauté ;
 - le périmètre passé à la commande par placeholders : `{diff}` (un fichier), `{files}`, `{ranges}` (`fichier:début-fin`,
   les lignes ajoutées ou modifiées) ;
 - l'ancien rapport supprimé, la commande lancée dans le repo ; **son code de sortie décide**, rien d'autre ;
 - son rapport lu et normalisé (tués, survivants, invalides, score) quand il est lisible : absent ou illisible, on le
-  dit, sans jamais bloquer.
+  dit, sans jamais bloquer. Un outil vert qui n'a testé aucun mutant viable (tous invalides) ne prouve rien : il
+  reste vert, et se signale.
 
 Les outils passent l'un après l'autre, même après un rouge, dans un budget commun (`[mutation] timeout_seconds`).
 `[mutation] enabled = false` coupe la mutation ; `--force` la lance quand même. Le log entier, le diff, le rapport
@@ -38,6 +40,7 @@ BASE = "origin/main"
 SURVIVORS_IN_EVENT = 50   # les survivants au journal ; la liste entière est dans le détail
 OUTPUT_LINES = 60         # la fin de la sortie, quand le rapport ne dit rien des survivants
 MANUAL_DIR = Path(".ballet") / "run" / "manual"
+DEFAULT_PATHS = {"cargo-mutants": ["*.rs"]}   # sans `paths`, ce que le format de rapport sait muter
 
 
 @dataclass
@@ -75,6 +78,11 @@ class Outcome:
     def lists_survivors(self):
         return isinstance(self.report, dict) and bool(self.report["survivors"])
 
+    def tested_nothing(self):
+        """Aucun mutant testé, alors que l'outil en a trouvé : tous invalides (ils ne compilent pas), rien n'est prouvé."""
+        report = self.report
+        return isinstance(report, dict) and report["killed"] + report["survived"] == 0 and report["invalid"] > 0
+
     def report_status(self):
         """`read` pour un rapport lu ; sinon sa raison (`missing`, `unreadable: …`)."""
         return "read" if isinstance(self.report, dict) else self.report
@@ -97,12 +105,14 @@ class Outcome:
 def tools_of(repo):
     """Les outils déclarés pour un repo du profil, dans l'ordre."""
     return [Tool(entry["name"], entry["command"], entry["config"], entry["report"]["path"], entry["report"]["format"],
-                 entry.get("paths", [])) for entry in repo.get("mutation", [])]
+                 entry.get("paths") or DEFAULT_PATHS.get(entry["report"]["format"], []))
+            for entry in repo.get("mutation", [])]
 
 
-def scopes_of(tools, git):
-    """Les outils que la branche touche, chacun avec son périmètre ; les autres sont sautés."""
-    diff = _branch_diff(git)
+def scopes_of(tools, git, since=""):
+    """Les outils que la branche touche, chacun avec son périmètre ; les autres sont sautés. Avec `since` (le commit
+    de la dernière mutation verte), seul ce qui a changé depuis compte."""
+    diff = _diff_since(since, git) if since else _branch_diff(git)
     scoped = [(tool, scope_of(diff, tool.paths)) for tool in tools]
     return [(tool, scope) for tool, scope in scoped if scope.files]
 
@@ -243,8 +253,11 @@ def _report_line(report):
 
 
 def _branch_diff(git):
-    base = git(["merge-base", BASE, "HEAD"]).strip()
-    return git(["diff", "--no-color", "--no-ext-diff", base, "HEAD"])
+    return _diff_since(git(["merge-base", BASE, "HEAD"]).strip(), git)
+
+
+def _diff_since(commit, git):
+    return git(["diff", "--no-color", "--no-ext-diff", commit, "HEAD"])
 
 
 def _file_sections(diff):

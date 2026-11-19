@@ -40,8 +40,14 @@ refait son rapport) ou `approve` (le Dancer part). Chaque échange est publié s
 Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
 
+Un rapport du Dancer dont une tâche cochée n'a pas sa ligne `Red:` (le test et son échec, vus avant le code) est
+refusé avant tout : rien ne tourne, le Dancer le complète ; la seconde fois, escalade. Les tests qu'il déclare renommés
+(`- Renamed test: <ancien> → <nouveau>`) passent à la politique, qui juge la branche face à son point de départ (le
+`HEAD` du worktree à son ouverture).
+
 À chaque rapport du Dancer, après la politique, le script lance lui-même la preuve du repo (`proof` du profil) dans
-le worktree, sans croire le rapport sur parole (`proof-start` et `proof-end` au journal). Rouge, ou un worktree sali par la preuve : rien
+le worktree, sans croire le rapport sur parole (`proof-start` et `proof-end` au journal) ; déjà verte sur ce commit,
+elle ne repasse pas (`proof-reused`). Le Critic ne la relance pas, ni la mutation. Rouge, ou un worktree sali par la preuve : rien
 n'est poussé, le Critic n'est pas mobilisé, le Dancer reprend avec la fin de la sortie ; au-delà de `max_round_trips`
 preuves rouges, ou une preuve encore en cours après `proof_timeout_seconds`, la Rehearsal escalade.
 
@@ -51,7 +57,13 @@ trop long pour un appel du Conductor, il part en arrière-plan (`mutate <ID>`, i
 (`receive --message`). Le code de sortie de chaque outil décide : rouge, rien n'est poussé, le Critic n'est pas
 mobilisé, le Dancer reprend avec les survivants ; au-delà de `max_round_trips` mutations rouges, ou après
 `[mutation] timeout_seconds`, la Rehearsal escalade. `[mutation] enabled = false`, aucune entrée, ou un diff qui ne
-touche aucun outil : le nœud est sauté (`mutation-skipped` au journal).
+touche aucun outil : le nœud est sauté (`mutation-skipped` au journal). Après une mutation verte, la suivante ne porte
+que sur ce qui a changé depuis son commit. Un outil vert qui n'a testé aucun mutant viable ne prouve rien : il ne
+bloque pas, il se signale (`mutation-inconclusive`).
+
+Une approbation avec des notes renvoie au Dancer seul : il les prend en un commit, ou les décline. Rien de commité :
+la Premiere tout de suite ; sinon la politique, la preuve et la mutation, puis `ballet:approved` reposé et la
+Premiere, sans nouveau tour du Critic. Une question adressée au Conductor, qui ne fait que relayer, va au Director.
 
 À chaque rapport du Dancer, le script compte la taille du diff (`ballet_size.py`) et la journalise (`diff-size`).
 Au-delà de `max_diff_lines`, la PR porte `ballet:oversized` ; en mode strict (`max_diff_strict`), la Rehearsal
@@ -117,6 +129,10 @@ MAX_NUDGES = 1
 MAX_POLICY_RESENDS = 1
 PROOF_OUTPUT_LINES = 60   # la fin de la sortie d'une preuve rouge, remise au Dancer
 ANSWERING_ROLES = ("choreographer", "dramaturg")   # vérifiés à chaque réponse, sur la branche de Rehearsal
+MAX_SLICES = 3            # au plus, par feature : une slice par critère, ou par groupe de critères
+TASK_LINE = re.compile(r"^- \[([ xX])\]\s*(.+?)(?:\s+—\s+.*)?$")   # une tâche du rapport du Dancer
+RED_LINE = re.compile(r"^- Red:\s*\S")                                 # son rouge, sous elle
+RENAMED_TEST = re.compile(r"^\s*- Renamed test:\s*(.+?)\s*(?:→|->)\s*(.+?)\s*$", re.MULTILINE)
 REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
 
 
@@ -144,7 +160,7 @@ class Rehearsal:
     label: str = ""                                  # le dernier verdict posé en libellé par le script
     size: dict = field(default_factory=dict)         # la dernière mesure du diff
     blocked_on: str = ""                             # "size" : le Critic attend que le Director accepte la taille
-    notes: str = ""                                  # "" | "asked" (le Dancer prend les notes) | "reviewed" (le Critic a relu)
+    notes: str = ""                                  # "" | "asked" (le Dancer prend ou décline les notes) | "taken" (fait, sans nouveau tour du Critic)
     nudges: dict = field(default_factory=dict)       # rôle → relances sans `worker_done`, remis à zéro à son prochain message
     checkpoint: str = ""                             # `HEAD` du worktree quand le dernier rôle a reçu la main
     refs: list = field(default_factory=list)         # branches et tags au dernier passage en règle
@@ -160,6 +176,11 @@ class Rehearsal:
     queued: list = field(default_factory=list)       # les slices du plan mises en tête de la session
     planned_by: str = ""                             # la Rehearsal de planification dont elle a pris le worktree
     session: str = ""                                # l'élément de sa session : `#12` ou `FEAT-002`
+    base: str = ""                                   # le `HEAD` du worktree à son ouverture : le point de départ de la branche
+    proven: str = ""                                 # le `HEAD` de la dernière preuve verte
+    mutated: str = ""                                # le `HEAD` de la dernière mutation verte : la suivante part de là
+    renamed_tests: dict = field(default_factory=dict)  # les tests renommés que le Dancer déclare : ancien nom → nouveau
+    refused_reports: int = 0                         # rapports du Dancer refusés pour une ligne `Red:` manquante
 
     @property
     def branch(self):
@@ -205,6 +226,7 @@ class Proof:
     passed: bool
     output: str = ""
     timed_out: bool = False
+    reused: bool = False      # déjà verte sur ce commit : pas relancée
 
 
 class Tools:
@@ -255,6 +277,7 @@ def _begin(item, session, home, tools):
     _log(home, rehearsal, "begin", {"item": _item_of(rehearsal), "plan": rehearsal.plan, "mode": session.mode, "session": session.item})
     git = tools.git(rehearsal.worktree)
     rehearsal.checkpoint, rehearsal.refs = ballet_policy.head(git), ballet_policy.refs(git)
+    rehearsal.base = rehearsal.checkpoint
     _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal, config), config, home, tools)
     step.done.append(f"{first_role} started on {_target(rehearsal)}")
     _join_session(rehearsal, _item_of(rehearsal), home)
@@ -587,14 +610,21 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
     if not question_id:
         raise RehearsalError("a question needs the Orca message id (--question) to send the answer back")
     step = Step("wait", done=[_publish_exchange(rehearsal, "question", text, home, tools)])
-    rehearsal.pending.append({"id": question_id, "from": header["from"], "to": header["to"]})
-    if header["to"] == "director":
-        return Step("escalate", f"the {header['from']} asks the Director: answer with an `answer` message", step.done)
+    to = "director" if header["to"] in ("director", "conductor") else header["to"]
+    rehearsal.pending.append({"id": question_id, "from": header["from"], "to": to})
+    if to == "director":
+        return Step("escalate", _for_the_director(header), step.done)
     _ask_role(rehearsal, header["to"], f"Rehearsal {rehearsal.id}, {_target(rehearsal)}, branch `{rehearsal.branch}`. "
               f"Answer this question from the {header['from']}, then return your answer "
               f"as a Ballet message (`type: answer`, to the {header['from']}):\n\n{text}", config, home, tools)
     step.done.append(f"question carried to the {header['to']}")
     return step
+
+
+def _for_the_director(header):
+    """Le Conductor ne fait que relayer : une question qui lui est adressée va au Director."""
+    asked = "the Conductor, who only relays" if header["to"] == "conductor" else "the Director"
+    return f"the {header['from']} asks {asked}: answer with an `answer` message, from the director"
 
 
 def _relay_answer(rehearsal, header, text, config, home, tools):
@@ -748,19 +778,90 @@ def _plan_line(planned, issues):
 
 
 def _after_code(rehearsal, report, config, home, tools):
-    """La politique d'abord, puis la preuve, puis la mutation : rien n'est poussé en violation, rouge, ni avant la fin
-    de la mutation, qui part en arrière-plan. Sans mutation à lancer, la branche part tout de suite."""
+    """Le rapport d'abord (une ligne `Red:` par tâche faite), puis la politique, la preuve et la mutation : rien n'est
+    poussé en violation, rouge, ni avant la fin de la mutation, qui part en arrière-plan. Sans mutation à lancer, la
+    branche part tout de suite. Le tour des notes a son propre chemin, sans le Critic."""
+    rehearsal.renamed_tests.update(_declared_renames(report))
+    if rehearsal.notes == "asked":
+        return _after_notes(rehearsal, report, config, home, tools)
+    without_red = _tasks_without_red(report)
+    if without_red:
+        return _refused_report(rehearsal, without_red, config, home, tools)
     found = _policy(rehearsal, "dancer", config, home, tools)
     if found:
         return _refused_by_policy(rehearsal, "dancer", found, config, home, tools)
+    return _proven_then_mutated(rehearsal, report, config, home, tools)
+
+
+def _proven_then_mutated(rehearsal, report, config, home, tools):
+    """La preuve, puis la mutation de ce qui a changé depuis la dernière mutation verte, puis la branche part."""
     proof = _prove(rehearsal, config, home, tools)
     if not proof.passed:
         return _refused_by_proof(rehearsal, proof, config, home, tools)
     scoped = _mutated_tools(rehearsal, config, tools)
     if scoped:
-        return _launch_mutation(rehearsal, report, scoped, home, tools)
-    return _publish_code(rehearsal, report, Step("wait", done=["proof green", _skip_mutation(rehearsal, config, home)]),
+        return _launch_mutation(rehearsal, report, proof, scoped, home, tools)
+    return _publish_code(rehearsal, report, Step("wait", done=[_proof_line(proof), _skip_mutation(rehearsal, config, home)]),
                          config, home, tools)
+
+
+def _after_notes(rehearsal, report, config, home, tools):
+    """Les notes d'une approbation, prises ou déclinées : pas de nouveau tour du Critic. `HEAD` n'a pas bougé depuis
+    l'approbation : la Premiere tout de suite ; sinon la politique, la preuve et la mutation, puis la Premiere."""
+    found = _policy(rehearsal, "dancer", config, home, tools)
+    if found:
+        return _refused_by_policy(rehearsal, "dancer", found, config, home, tools)
+    if ballet_policy.head(tools.git(rehearsal.worktree)) != rehearsal.checkpoint:
+        return _proven_then_mutated(rehearsal, report, config, home, tools)
+    _comment_pull_request(rehearsal, report, home, tools)
+    step = Step("wait", done=[f"notes declined, nothing committed: Dancer report published on #{rehearsal.pull_request}"])
+    return _premiere_after_notes(rehearsal, step, config, tools)
+
+
+def _premiere_after_notes(rehearsal, step, config, tools):
+    """Le tour des notes ne repasse pas par le Critic : son approbation est reposée sur le commit des notes."""
+    rehearsal.notes = "taken"
+    _label(rehearsal, "APPROVED", tools)
+    step.done.append(f"notes round without a new Critic round: ballet:approved renewed on #{rehearsal.pull_request}")
+    return _then_premiere(rehearsal, step, config, tools)
+
+
+def _tasks_without_red(report):
+    """Les tâches cochées du rapport sans leur ligne `Red:` (le test et son échec, vus avant le code)."""
+    missing, task, seen_red = [], None, False
+    for line in report.splitlines() + ["- end"]:
+        if task and RED_LINE.match(line.strip()):
+            seen_red = True
+        elif _starts_an_item(line):
+            if task and not seen_red:
+                missing.append(task)
+            task, seen_red = _done_task(line), False
+    return missing
+
+
+def _starts_an_item(line):
+    """Une tâche, ou une ligne du premier niveau du rapport (`- Proof:`, un titre) : la tâche d'avant est finie."""
+    return bool(TASK_LINE.match(line.strip())) or line.startswith(("- ", "#"))
+
+
+def _done_task(line):
+    found = TASK_LINE.match(line.strip())
+    return found.group(2) if found and found.group(1) in "xX" else None
+
+
+def _declared_renames(report):
+    """Les tests que le Dancer déclare renommés : `- Renamed test: <ancien> → <nouveau>`."""
+    return {match.group(1).strip("` "): match.group(2).strip("` ") for match in RENAMED_TEST.finditer(report)}
+
+
+def _refused_report(rehearsal, without_red, config, home, tools):
+    """Un rapport sans le rouge d'une tâche n'est pas reçu : rien n'est lancé ; une seconde fois, escalade."""
+    rehearsal.refused_reports += 1
+    listed = "; ".join(without_red)
+    if rehearsal.refused_reports > MAX_POLICY_RESENDS:
+        return Step("escalate", f"the Dancer's report has no `Red:` line again for: {listed}")
+    _ask_role(rehearsal, "dancer", _red_fix_assignment(without_red), config, home, tools)
+    return Step("wait", done=[f"Dancer report refused, nothing run: no `Red:` line for {listed}"])
 
 
 def _publish_code(rehearsal, report, step, config, home, tools):
@@ -781,11 +882,13 @@ def _publish_code(rehearsal, report, step, config, home, tools):
         return Step("escalate", f"diff of {size.counted} lines, over max_diff_lines ({config['escalation']['max_diff_lines']}) "
                     f"in strict mode: label #{rehearsal.pull_request} ballet:size-accepted, or ballet:rejected with a comment, "
                     "then resume", step.done)
+    if rehearsal.notes == "asked":
+        return _premiere_after_notes(rehearsal, step, config, tools)
     return _to_the_critic(rehearsal, step, config, home, tools)
 
 
 def _notes_to_the_dancer(rehearsal, count, step, config, home, tools):
-    """Approuvé avec des notes : le Dancer les prend en un seul commit, le Critic ne relit que celui-ci.
+    """Approuvé avec des notes : le Dancer les prend en un seul commit, ou les décline ; le Critic ne relit pas.
     Ce tour ne compte pas dans `max_round_trips`, et n'a lieu qu'une fois."""
     rehearsal.notes = "asked"
     _ask_role(rehearsal, "dancer", _notes_assignment(rehearsal), config, home, tools)
@@ -794,10 +897,7 @@ def _notes_to_the_dancer(rehearsal, count, step, config, home, tools):
 
 
 def _to_the_critic(rehearsal, step, config, home, tools):
-    assignment = _notes_review_assignment(rehearsal) if rehearsal.notes == "asked" else _critic_assignment(rehearsal)
-    if rehearsal.notes == "asked":
-        rehearsal.notes = "reviewed"
-    _ask_role(rehearsal, "critic", assignment, config, home, tools)
+    _ask_role(rehearsal, "critic", _critic_assignment(rehearsal, config), config, home, tools)
     step.done.append(f"critic asked to review #{rehearsal.pull_request}, round {_review_round(rehearsal)}")
     return step
 
@@ -882,7 +982,8 @@ def _back_to_the_dancer(rehearsal, comments, config, home, tools):
 def _policy(rehearsal, role, config, home, tools, answering=False):
     """Les violations du passage qui s'achève, journalisées à chaque fois ; en règle, ses branches font foi."""
     git = tools.git(rehearsal.worktree)
-    passage = ballet_policy.Passage(role, rehearsal.branch, rehearsal.checkpoint, rehearsal.refs, rehearsal.owned, answering)
+    passage = ballet_policy.Passage(role, rehearsal.branch, rehearsal.checkpoint, rehearsal.refs, rehearsal.owned, answering,
+                                    rehearsal.base, rehearsal.renamed_tests)
     found = ballet_policy.violations(passage, ballet_policy.policy_of(config), git)
     _log(home, rehearsal, "policy", {"role": role, "violations": found})
     if not found:
@@ -902,8 +1003,12 @@ def _refused_by_policy(rehearsal, role, found, config, home, tools):
 
 def _prove(rehearsal, config, home, tools):
     """Lance la preuve du repo dans le worktree, journalisée à son début (`proof-start`) et à sa fin (`proof-end`,
-    avec son statut et sa durée) ; une preuve qui salit le worktree n'est pas verte."""
+    avec son statut et sa durée) ; une preuve qui salit le worktree n'est pas verte. Déjà verte sur ce commit, elle
+    ne repasse pas (`proof-reused`)."""
     command, head = _proof_command(config), ballet_policy.head(tools.git(rehearsal.worktree))
+    if head == rehearsal.proven:
+        _log(home, rehearsal, "proof-reused", {"command": command, "head": head})
+        return Proof(True, reused=True)
     _log(home, rehearsal, "proof-start", {"command": command, "head": head})
     started = time.monotonic()
     proof = tools.prove(command, rehearsal.worktree, config["escalation"]["proof_timeout_seconds"])
@@ -913,7 +1018,13 @@ def _prove(rehearsal, config, home, tools):
         proof = Proof(False, "The proof left the worktree dirty:\n" + "\n".join(dirty))
     _log(home, rehearsal, "proof-end", {"passed": proof.passed, "timed_out": proof.timed_out, "head": head,
                                         "seconds": seconds})
+    if proof.passed:
+        rehearsal.proven = head
     return proof
+
+
+def _proof_line(proof):
+    return "proof already green on this commit: not run again" if proof.reused else "proof green"
 
 
 def _refused_by_proof(rehearsal, proof, config, home, tools):
@@ -942,7 +1053,7 @@ def _mutated_tools(rehearsal, config, tools):
     declared = _mutation_tools(config)
     if not config["mutation"]["enabled"] or not declared:
         return []
-    return ballet_mutation.scopes_of(declared, tools.git(rehearsal.worktree))
+    return ballet_mutation.scopes_of(declared, tools.git(rehearsal.worktree), since=rehearsal.mutated)
 
 
 def _skip_mutation(rehearsal, config, home):
@@ -951,13 +1062,15 @@ def _skip_mutation(rehearsal, config, home):
         reason = "disabled in the profile"
     elif not _mutation_tools(config):
         reason = "no mutation tool in the profile"
+    elif rehearsal.mutated:
+        reason = f"nothing changed for a mutation tool since the last green mutation ({rehearsal.mutated[:7]})"
     else:
         reason = "the diff touches no mutation tool"
     _log(home, rehearsal, "mutation-skipped", {"reason": reason})
     return f"mutation skipped: {reason}"
 
 
-def _launch_mutation(rehearsal, report, scoped, home, tools):
+def _launch_mutation(rehearsal, report, proof, scoped, home, tools):
     """Trop long pour un appel du Conductor : la mutation part en arrière-plan, et le réveille par Orca à sa fin.
     Le rapport du Dancer attend avec elle, pour être publié avec la branche."""
     rehearsal.mutations += 1
@@ -966,14 +1079,14 @@ def _launch_mutation(rehearsal, report, scoped, home, tools):
     _save(rehearsal, home)
     tools.launch([sys.executable, str(Path(__file__).resolve()), "mutate", rehearsal.id], str(Path(home).resolve()))
     names = ", ".join(tool.name for tool, _ in scoped)
-    return Step("wait", done=["proof green", f"mutation started in the background ({names}, round {rehearsal.mutations}): "
+    return Step("wait", done=[_proof_line(proof), f"mutation started in the background ({names}, round {rehearsal.mutations}): "
                               "it wakes the Conductor when it is done"])
 
 
 def _mutate_each_tool(rehearsal, config, home, tools):
     """Le même chemin que `ballet_mutation.py run`, journalisé dans la Rehearsal (`mutation-start`, `mutation-end`)."""
     git = tools.git(rehearsal.worktree)
-    scoped = ballet_mutation.scopes_of(_mutation_tools(config), git)
+    scoped = ballet_mutation.scopes_of(_mutation_tools(config), git, since=rehearsal.mutated)
     folder, prefix = _run_dir(home) / rehearsal.id, f"mutation-{rehearsal.mutation['round']}"
 
     def journal(event, detail):
@@ -1020,7 +1133,20 @@ def _after_mutation(rehearsal, round_, config, home, tools):
     red = [outcome for outcome in outcomes if not outcome.passed]
     if red:
         return _refused_by_mutation(rehearsal, red, config, home, tools)
-    return _publish_code(rehearsal, pending["report"], Step("wait", done=[_mutation_green_line(outcomes)]), config, home, tools)
+    rehearsal.mutated = pending["head"]
+    step = Step("wait", done=[_mutation_green_line(outcomes)] + _inconclusive_lines(rehearsal, outcomes, home))
+    return _publish_code(rehearsal, pending["report"], step, config, home, tools)
+
+
+def _inconclusive_lines(rehearsal, outcomes, home):
+    """Un outil vert qui n'a testé aucun mutant viable ne prouve rien : il ne bloque pas, il se signale au Director."""
+    lines = []
+    for outcome in outcomes:
+        if outcome.tested_nothing():
+            _log(home, rehearsal, "mutation-inconclusive", {"tool": outcome.tool, "log": outcome.log})
+            lines.append(f"mutation inconclusive: {outcome.tool} tested no viable mutant ({outcome.report['invalid']} "
+                         f"unviable): it proves nothing; check the tool, its log: {outcome.log}")
+    return lines
 
 
 def _refused_by_mutation(rehearsal, red, config, home, tools):
@@ -1236,32 +1362,38 @@ def _auto_mode(rehearsal, config):
               "through the Conductor" if rehearsal.plan == "review" else "the Dancer starts on it as soon as you report")
     return (f"Auto mode (section *Auto mode* of your skill): nobody says yes in this session; {review}. Settle every "
             "choice yourself and write it in *Decisions*. Product gaps go to the Dramaturg; what neither of you can settle "
-            f"goes to the Director (a question `to: director`). Slices: `max_diff_lines` is {limit}; as few slices as "
-            f"possible, each one estimated under {limit * 2 // 3} lines, tests included, and each one vertical: it delivers "
-            "at least one whole criterion end to end, never one layer (API, then client, then screen). "
+            f"goes to the Director (a question `to: director`). Slices: one plan when it can; otherwise at most "
+            f"{MAX_SLICES} slices, cut by criterion: each one delivers one or more whole criteria end to end, never one "
+            f"layer (API, then client, then screen). `max_diff_lines` ({limit}) only marks a pull request too big to "
+            "review: it does not cut slices. "
             "Commit your ADRs and `AGENTS.md` rules on this branch: they ship with the first slice. "
             "Then report, with `- Issue: #<n>` (the parent, when sliced).")
 
 
 def _review_round(rehearsal):
-    """Le numéro du prochain tour de review ; le tour des notes en prend un, hors `max_round_trips`."""
-    return rehearsal.round_trips + 1 + (1 if rehearsal.notes else 0)
+    """Le numéro du prochain tour de review."""
+    return rehearsal.round_trips + 1
 
 
-def _critic_assignment(rehearsal):
+def _critic_assignment(rehearsal, config):
     return (f"Review pull request #{rehearsal.pull_request} of issue #{rehearsal.issue}, round {_review_round(rehearsal)}: "
-            f"the branch `{rehearsal.branch}` against the plan.")
+            f"the branch `{rehearsal.branch}` against the plan. Ballet already ran the proof (`{_proof_command(config)}`) "
+            f"on {rehearsal.proven[:7] or 'HEAD'}, green, and the mutation test when the profile has one: do not run "
+            "them again.")
 
 
 def _notes_assignment(rehearsal):
     return (f"The Critic approved pull request #{rehearsal.pull_request} with notes. Read its review "
-            f"(`read-pr {rehearsal.pull_request}`) and take its notes in one single commit, then report again.")
+            f"(`read-pr {rehearsal.pull_request}`), take its notes in one single commit, or decline each one with why, "
+            "then report again. No new Critic round: Ballet checks the policy and the proof, then merges.")
 
 
-def _notes_review_assignment(rehearsal):
-    return (f"Notes round of pull request #{rehearsal.pull_request}, round {_review_round(rehearsal)}: you approved it, "
-            "and the Dancer took your notes in one commit. Review only the commits since your approval: the notes "
-            "taken or declined with a reason, nothing broken, the proof green. No new notes in this round.")
+def _red_fix_assignment(without_red):
+    listed = "\n".join(f"- {task}" for task in without_red)
+    return ("Ballet refused your report: nothing was pushed nor run. These done tasks have no `Red:` line:\n\n"
+            f"{listed}\n\nEach done task quotes its red on the line under it: `- Red: <test name>: <the failure line, "
+            "as the runner printed it, before the code>`. A task with no behaviour to test (a chore) says `- Red: none — <why>`. "
+            "Then report again, whole. Change no code for this.")
 
 
 def _director_fix_assignment(rehearsal, comments):

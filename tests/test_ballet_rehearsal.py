@@ -393,6 +393,54 @@ class BalletRehearsalTest(unittest.TestCase):
         step = self.red_report()
         self.assertEqual((step.next, step.reason), ("escalate", "proof: `pnpm proof` red 3 times, over max_round_trips"))
 
+    def test_une_preuve_deja_verte_sur_le_meme_commit_n_est_pas_relancee(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.receive(message("dancer", "conductor", "report", "- Disagree with point 1: see why.", round_=2))
+        self.assertEqual(len(self.world.proofs), 1)
+        self.assertEqual(self.journal("proof-reused"), [{"command": "pnpm proof", "head": "c0ffee1"}])
+        self.assertIn("round 2", self.last_send_body()[1])
+
+    def test_le_critic_sait_que_la_preuve_et_la_mutation_ont_deja_tourne(self):
+        self.to_the_critic()
+        assignment = self.journal("handoff")[-1]["text"]
+        self.assertIn("Ballet already ran the proof (`pnpm proof`) on c0ffee1, green", assignment)
+        self.assertIn("do not run them again", assignment)
+
+    # --- le rouge de chaque tâche, dans le rapport du Dancer ---
+
+    def test_un_rapport_sans_le_rouge_d_une_tache_est_refuse_sans_rien_lancer(self):
+        self.begin()
+        report = "- Tasks:\n  - [x] [C1] Do it — abc1234\n  - [x] [C2] Show it — def5678\n    - Red: `shows`: expected 1, got 0\n- Proof: green"
+        step = self.receive(message("dancer", "conductor", "report", report))
+        self.assertEqual(step.done, ["Dancer report refused, nothing run: no `Red:` line for [C1] Do it"])
+        self.assertEqual(self.world.proofs, [])
+        self.assertFalse(self.world.ran("gh", "pr", "create"))
+        self.assertIn("- [C1] Do it", self.last_send_body()[1])
+
+    def test_un_rapport_refuse_deux_fois_escalade(self):
+        self.begin()
+        report = "- Tasks:\n  - [x] [C1] Do it — abc1234\n- Proof: green"
+        self.receive(message("dancer", "conductor", "report", report))
+        step = self.receive(message("dancer", "conductor", "report", report))
+        self.assertEqual((step.next, step.reason), ("escalate", "the Dancer's report has no `Red:` line again for: [C1] Do it"))
+
+    def test_un_rapport_qui_cite_le_rouge_de_chaque_tache_part_a_la_preuve(self):
+        self.begin()
+        report = "- Tasks:\n  - [x] [C1] Do it — abc1234\n    - Red: `does`: expected 1, got 0\n  - [ ] [C2] Later — not done: blocked\n- Proof: green"
+        self.receive(message("dancer", "conductor", "report", report))
+        self.assertEqual(len(self.world.proofs), 1)
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+
+    def test_un_test_renomme_declare_dans_le_rapport_est_transmis_a_la_politique(self):
+        self.begin()
+        self.receive(message("dancer", "conductor", "report", "- Done.\n- Renamed test: `disabled link` → `live link`"))
+        self.assertEqual(self.state()["renamed_tests"], {"disabled link": "live link"})
+
+    def test_le_point_de_depart_de_la_branche_est_note_a_l_ouverture_du_worktree(self):
+        self.begin()
+        self.assertEqual(self.state()["base"], "c0ffee1")
+
     def test_une_preuve_trop_longue_escalade(self):
         self.begin()
         self.world.proof = ballet_rehearsal.Proof(False, "", timed_out=True)
@@ -519,6 +567,29 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertIn("- Tasks: all done, mutation pending.", comment[comment.index("--body") + 1])
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
         self.assertEqual(self.state()["mutation"], {})
+
+    def test_la_mutation_suivante_part_du_commit_de_la_derniere_mutation_verte(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, CARGO_REPORT.replace('"missed": 7', '"missed": 0'))
+        self.mutated_report()
+        self.wake()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.world.head = "beef002"
+        self.receive(message("dancer", "conductor", "report", "- Fixed.", round_=2))
+        self.assertTrue(self.world.ran("git", "-C", "/wt/FEAT-001.2", "diff", "--no-color", "--no-ext-diff", "c0ffee1", "HEAD"))
+
+    def test_une_mutation_sans_mutant_viable_se_signale_sans_bloquer(self):
+        self.mutation_profile()
+        unviable = json.loads(CARGO_REPORT)
+        unviable.update({"caught": 0, "missed": 0, "unviable": 8})
+        unviable["outcomes"] = [outcome for outcome in unviable["outcomes"] if outcome["summary"] != "MissedMutant"]
+        self.mutation_result = (0, False, json.dumps(unviable))
+        self.mutated_report()
+        step = self.wake()
+        self.assertTrue(any(line.startswith("mutation inconclusive: cargo-mutants tested no viable mutant (8 unviable)")
+                            for line in step.done))
+        self.assertEqual(len(self.journal("mutation-inconclusive")), 1)
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
 
     def test_une_mutation_rouge_n_est_pas_poussee_et_renvoie_les_survivants_au_dancer(self):
         self.mutation_profile()
@@ -723,6 +794,15 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.begin()
         step = self.receive(message("dancer", "director", "question", "1. Touch the CI?"), question_id="msg_3")
         self.assertEqual(step.next, "escalate")
+
+    def test_une_question_au_conductor_va_au_director_qui_y_repond(self):
+        self.begin()
+        step = self.receive(message("dancer", "conductor", "question", "1. Which branch?"), question_id="msg_q")
+        self.assertEqual((step.next, step.reason), ("escalate", "the dancer asks the Conductor, who only relays: answer with "
+                                                    "an `answer` message, from the director"))
+        self.receive(message("director", "dancer", "answer", "1. This one."))
+        reply = self.world.ran("orca", "orchestration", "reply")[0]
+        self.assertEqual(reply[reply.index("--id") + 1], "msg_q")
 
     def test_une_question_sans_identifiant_orca_escalade(self):
         self.begin()
@@ -960,18 +1040,18 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
 
     def test_chaque_rapport_mesure_et_journalise_la_taille_meme_sous_le_seuil(self):
         self.to_the_critic()
-        self.assertEqual(self.journal("diff-size"), [{"counted": 12, "excluded": 0, "excluded_files": [], "limit": 400,
+        self.assertEqual(self.journal("diff-size"), [{"counted": 12, "excluded": 0, "excluded_files": [], "limit": 1500,
                                                       "strict": False, "over": False, "round": 1}])
         diffs = [command[3:] for command in self.world.ran("git") if "--numstat" in command]
         self.assertEqual(diffs, [["diff", "--numstat", "origin/main...rehearsal/FEAT-001.2"]])
 
     def test_hors_mode_strict_un_gros_diff_est_marque_et_part_au_critic(self):
-        self.world.numstat = "500\t0\tsrc/a.rs\n"
+        self.world.numstat = "1600\t0\tsrc/a.rs\n"
         self.begin()
         step = self.receive(message("dancer", "conductor", "report", "- Done."))
         self.assertEqual(step.next, "wait")
         self.assertIn("ballet:oversized", self.world.labels())
-        self.assertIn("diff: 500 lines counted, 0 excluded, limit 400: over the limit, not blocking", step.done)
+        self.assertIn("diff: 1600 lines counted, 0 excluded, limit 1500: over the limit, not blocking", step.done)
         self.assertEqual(len(self.world.started_roles()), 2)
 
     def test_en_mode_strict_un_gros_diff_escalade_avant_le_critic(self):
@@ -1018,7 +1098,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
 
     def test_status_montre_la_derniere_mesure(self):
         self.to_the_critic()
-        self.assertIn("- diff: 12 lines counted, 0 excluded, limit 400: within the limit", self.run_main("status", "FEAT-001.2")[1])
+        self.assertIn("- diff: 12 lines counted, 0 excluded, limit 1500: within the limit", self.run_main("status", "FEAT-001.2")[1])
 
     # --- notes du Critic ---
 
@@ -1040,16 +1120,36 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertIn("one single commit", body)
         self.assertIn("approved with 2 note(s): dancer asked to take them in one commit", step.done)
 
-    def test_le_critic_ne_relit_que_le_commit_des_notes_puis_la_premiere(self):
+    def test_des_notes_toutes_declinees_mergent_sans_preuve_ni_critic(self):
         self.to_the_critic()
         self.critic_says("APPROVED", "- Cache the key.")
-        self.receive(message("dancer", "conductor", "report", "- Notes taken.\n\n## Fixed\n\n- Note `a.rs:1`: abc1234", round_=2))
-        to, body = self.last_send_body()
-        self.assertEqual(to, "dispatch:ctx_2")
-        self.assertIn("Notes round of pull request #8, round 2", body)
-        step = self.critic_says("APPROVED", "- Another idea.")
+        step = self.receive(message("dancer", "conductor", "report", "- Notes.\n\n## Notes declined\n\n- Cache: out of scope.", round_=2))
         self.assertEqual(step.next, "done")
+        self.assertIn("notes declined, nothing committed: Dancer report published on #8", step.done)
+        self.assertEqual(len(self.world.proofs), 1)
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 1)
         self.assertEqual(self.state()["round_trips"], 0)
+
+    def test_le_commit_des_notes_passe_la_preuve_puis_merge_sans_nouveau_tour_du_critic(self):
+        self.to_the_critic()
+        self.critic_says("APPROVED", "- Cache the key.")
+        self.world.head = "beef002"
+        step = self.receive(message("dancer", "conductor", "report", "- Notes taken.\n\n## Fixed\n\n- Note: beef002", round_=2))
+        self.assertEqual(step.next, "done")
+        self.assertEqual(len(self.world.proofs), 2)
+        self.assertIn("notes round without a new Critic round: ballet:approved renewed on #8", step.done)
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 1)
+        self.assertTrue(self.world.ran("gh", "pr", "merge"))
+
+    def test_un_commit_des_notes_qui_casse_la_preuve_revient_au_dancer(self):
+        self.to_the_critic()
+        self.critic_says("APPROVED", "- Cache the key.")
+        self.world.head = "beef002"
+        self.world.proof = ballet_rehearsal.Proof(False, "FAIL\n")
+        step = self.receive(message("dancer", "conductor", "report", "- Notes taken.", round_=2))
+        self.assertEqual(step.done, ["proof red, nothing pushed: dancer asked to fix it (1/2)"])
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
 
     def test_approuve_sans_note_merge_directement(self):
         self.to_the_critic()
@@ -1415,14 +1515,15 @@ class PlanningTest(unittest.TestCase):
         """L'issue #13 attend son plan, et son plan attend le Director (`Plan approval` à `required`)."""
         self.world.fields = {"13": {"plan_approval": "required"}}
 
-    def test_le_choreographer_planifie_en_mode_auto_en_slices_verticales_sous_les_deux_tiers_du_seuil(self):
+    def test_le_choreographer_planifie_en_mode_auto_en_trois_slices_au_plus_par_critere(self):
         self.in_review()
         self.run_main("begin", "#13")
         text = self.journal("handoff")[0]["text"]
         self.assertIn("Auto mode", text)
         self.assertIn("nobody says yes in this session; the Director reviews the published plan before any code", text)
-        self.assertIn("each one estimated under 266 lines", text)
-        self.assertIn("at least one whole criterion end to end", text)
+        self.assertIn("at most 3 slices, cut by criterion", text)
+        self.assertIn("one or more whole criteria end to end", text)
+        self.assertIn("only marks a pull request too big to review: it does not cut slices", text)
         self.assertIn("goes to the Director", text)
 
     def test_en_assisted_le_choreographer_sait_que_le_dancer_suit(self):

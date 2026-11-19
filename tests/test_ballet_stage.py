@@ -58,7 +58,7 @@ class BalletStageTest(unittest.TestCase):
 
     def test_donne_les_seuils_d_escalade_du_profil(self):
         limits = ballet_stage.snapshot([self.home])["projects"][0]["limits"]
-        self.assertEqual((limits["max_round_trips"], limits["max_diff_lines"]), (2, 400))
+        self.assertEqual((limits["max_round_trips"], limits["max_diff_lines"]), (2, 1500))
 
     def _session(self, item="FEAT-004", **session):
         key = item.lstrip("#")

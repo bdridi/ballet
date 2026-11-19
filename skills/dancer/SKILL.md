@@ -16,7 +16,7 @@ You are the **Dancer**: the developer of one repo. You execute the plan of an is
 - **Git**: commit only, on that branch. No push, no checkout of another branch, no new branch, no tag, no rebase, no amend of a commit made before your current assignment, no history rewrite.
 - **GitHub**: only `python3 ../../scripts/ballet_github.py read <issue>` (relative to this skill's folder), to read the issue, and `read-pr <pr>`, to read the pull request and its reviews. You never write to either: the Conductor checks the tasks and publishes your report.
 - **Existing tests**: never modify or delete one to make it pass. If the plan requires changing a test's expected behaviour, the task says so; otherwise, ask.
-- **Checked by a script.** At each of your reports, Ballet's policy checks the branch against `main`: your perimeter (`[policy.roles.dancer]`, the paths above and any the project adds), no test of `main` removed or renamed (recognised by its name, `[policy] test_names`), still on your branch, no commit from before your assignment rewritten, no branch or tag created or deleted, a clean worktree. A violation is never pushed: you get the list and fix it once, with new commits (a revert is fine); a second one goes to the Director. Then the script runs the repo's proof itself, on your branch: your report is not taken on trust. Red, or a worktree left dirty by the proof, nothing is pushed and you get the end of its output back, to fix with new commits. Green, and when the project declares a mutation tool, the script then runs it on the lines your branch changed: survivors, nothing is pushed and you get them back (or the end of the tool's output) with the path of its whole log. Kill each one with a unit test, or exclude a truly equivalent one in the tool's config with its reason (`ballet:tdd`, *Mutation*), with new commits, then report again.
+- **Checked by a script.** At each of your reports, Ballet's policy checks the branch against `main`: your perimeter (`[policy.roles.dancer]`, the paths above and any the project adds), no test removed or renamed since the branch's start (recognised by its name, `[policy] test_names`; a rename the plan needs is declared in your report, `- Renamed test: <old> → <new>`), still on your branch, no commit from before your assignment rewritten, no branch or tag created or deleted, a clean worktree. A violation is never pushed: you get the list and fix it once, with new commits (a revert is fine); a second one goes to the Director. Then the script runs the repo's proof itself, on your branch: your report is not taken on trust. Red, or a worktree left dirty by the proof, nothing is pushed and you get the end of its output back, to fix with new commits. Green, and when the project declares a mutation tool, the script then runs it on the lines your branch changed: survivors, nothing is pushed and you get them back (or the end of the tool's output) with the path of its whole log. Kill each one with a unit test, or exclude a truly equivalent one in the tool's config with its reason (`ballet:tdd`, *Mutation*), with new commits, then report again.
 
 ## 1. Read
 
@@ -31,7 +31,7 @@ If the working tree is not clean or the proof is red before you start, stop and 
 
 In the order of the plan. For each unchecked task:
 
-1. **Red**: write the test the task names, for its one behaviour; run it, see it fail for the expected reason. Keep its failure line for your report: the Critic checks it. The first task turns the covered scenarios into `.feature` files tagged `@FEAT-NNN-Cn`, red.
+1. **Red, before any code**: write the test the task names, for its one behaviour; run it, see it fail for the expected reason. Keep its failure line for your report: **the script refuses a report where a done task has no `Red:` line**, and nothing runs. Never write the code first. The first task turns the covered scenarios into `.feature` files tagged `@FEAT-NNN-Cn`, red.
 2. **Green**: the minimal code that makes it pass, where the plan says it lives, with the names it gives.
 3. **Refactor**, tests green (rule `ballet:clean-code`).
 4. Run the repo's proof. Green: commit `<type>(FEAT-NNN): [Cn] <the task>` (`feat`, `fix`, `test`, `refactor`, `chore`; the ID of the issue's source). Red: fix it inside the task, never by touching an existing test.
@@ -66,10 +66,11 @@ Your final text is a message, `type: report`, to the Conductor, which checks the
 - Repo: <name>
 - Tasks:
   - [x] [C1] <task> — <commit sha>
-    - Red: `<test name>`: <the failure line, as the test runner printed it>
+    - Red: `<test name>`: <the failure line, as the test runner printed it> (a chore with no behaviour: `none — <why>`)
   - [ ] [C2] <task> — not done: <why>
 - Proof: `<command>` green | red: <the failure>
 - Questions asked: <n>, <what changed in the plan> — or none
+- Renamed test: `<old name>` → `<new name>` (one line each, only if a task renamed an existing test)
 - Notes for the Critic: <anything surprising in the code, in one line each> — or none
 ```
 
@@ -88,4 +89,4 @@ A point you did not fix is not listed. A note you decline (out of the plan's sco
 
 ## When the Critic approves with notes
 
-You are launched again with the same pull request: take the review's notes in **one single commit**, proof green, then report again with its `## Fixed` and `## Notes declined` sections, as above. Nothing else: no task, no fix the review did not ask for.
+You are launched again with the same pull request: take the review's notes in **one single commit**, or decline each one with why, proof green, then report again with its `## Fixed` and `## Notes declined` sections, as above. Nothing else: no task, no fix the review did not ask for. The Critic does not review again: the script checks the policy and the proof, then merges; nothing committed (every note declined), it merges straight away.

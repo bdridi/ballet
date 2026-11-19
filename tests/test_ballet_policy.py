@@ -109,6 +109,25 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
         self.assertEqual(self.repo.violations(passage), ["src/a.test.ts: existing test removed or renamed: sorts by deadline"])
 
+    def test_un_renommage_declare_par_le_dancer_n_est_pas_une_violation(self):
+        passage = self.repo.passage("dancer", renamed={"sorts by deadline": "sorts by due date"})
+        self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts by due date")})
+        self.assertEqual(self.repo.violations(passage), [])
+
+    def test_un_renommage_declare_vers_un_nom_absent_reste_une_violation(self):
+        passage = self.repo.passage("dancer", renamed={"sorts by deadline": "sorts by due date"})
+        self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
+        self.assertEqual(self.repo.violations(passage), ["src/a.test.ts: existing test removed or renamed: sorts by deadline"])
+
+    def test_la_branche_se_compare_a_son_point_de_depart_et_non_a_origin_main(self):
+        self.repo.git(["checkout", "-q", "main"])
+        self.repo.commit({"specs/backlog.md": "from the Director\n"}, "on main, not pushed")
+        self.repo.git(["checkout", "-q", "-b", "rehearsal/FEAT-001.3"])
+        start = ballet_policy.head(self.repo.git)
+        passage = Passage("dancer", "rehearsal/FEAT-001.3", checkpoint=start, refs=ballet_policy.refs(self.repo.git), base=start)
+        self.repo.commit({"src/b.ts": "b\n"})
+        self.assertEqual(self.repo.violations(passage), [])
+
     def test_un_fichier_de_tests_existant_supprime_perd_tous_ses_tests(self):
         passage = self.repo.passage("dancer")
         self.repo.remove("src/a.test.ts")

@@ -51,7 +51,7 @@ class ConfigTest(unittest.TestCase):
         config = ballet_config.effective_config(self.project)
         self.assertEqual(config["roles"]["dancer"], {"cli": "claude", "model": "haiku"})
         self.assertEqual(config["roles"]["critic"], {"cli": "claude", "model": "opus"})
-        self.assertEqual(config["escalation"]["max_diff_lines"], 400)
+        self.assertEqual(config["escalation"]["max_diff_lines"], 1500)
 
     def test_toml_invalide_est_refuse(self):
         self.write_project_config("ceci n'est pas du toml")

@@ -159,7 +159,7 @@ model = "sonnet"                # the Critic must differ from the Dancer: anothe
 
 [escalation]
 max_round_trips = 2             # Dancer ↔ Critic round trips before it comes to you
-max_diff_lines = 400            # lines changed by a pull request; the Choreographer keeps each slice under two thirds
+max_diff_lines = 1500           # lines changed by a pull request; over it, the pull request is marked oversized
 max_diff_strict = false         # true: over the limit, it stops before the Critic
 ci_wait_seconds = 480           # how long the merge waits for a running CI
 proof_timeout_seconds = 420     # how long the proof run on each Dancer report may take

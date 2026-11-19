@@ -2,6 +2,21 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.30.0 — 2026-11-19 · `v0.30.0`
+
+Le coût d'un run (retour FEAT-004 sur antimurphy : 8 slices, des tours sans travail, la preuve et la mutation en double).
+
+- Le Choreographer découpe par critère, 3 slices au plus, et fait un seul plan par défaut ; la règle des deux tiers disparaît. `max_diff_lines` passe à 1500 par défaut et ne fait que marquer une PR trop grosse pour la review.
+- Une approbation avec des notes ne relance plus le Critic : le Dancer les prend en un commit ou les décline ; rien de commité, la Premiere tout de suite ; sinon la politique, la preuve et la mutation, puis `ballet:approved` reposé par le script et la Premiere.
+- Le Critic ne relance ni la preuve ni la mutation : sa consigne dit le commit où le script les a passées. Une preuve déjà verte sur le même commit ne repasse pas (`proof-reused`).
+- La mutation ne porte que sur ce qui a changé depuis la dernière mutation verte ; sans `paths`, une entrée `cargo-mutants` ne retient que le Rust (`*.rs`). Un outil vert qui n'a testé aucun mutant viable (FEAT-004.3 : 8 mutants, tous invalides, lu « 0 killed, 0 survived ») se signale, `mutation inconclusive`, sans bloquer.
+- Le script refuse un rapport du Dancer dont une tâche cochée n'a pas sa ligne `Red:`, avant de rien lancer ; la seconde fois, escalade. Pour le Critic, un rouge qui n'est pas le bon devient une note.
+- Une question adressée au Conductor va au Director au lieu de faire planter le script (`KeyError: 'conductor'`).
+- La politique juge le Dancer face au point de départ de sa branche (le `HEAD` du worktree à son ouverture), plus face à `origin/main` : un commit de `main` pas encore poussé ne lui est plus attribué.
+- Un test renommé que le Dancer déclare dans son rapport (`- Renamed test: <ancien> → <nouveau>`) n'est plus une violation.
+
+**Opportunités traitées** : OPP-14, OPP-18, OPP-25, OPP-60, OPP-61, OPP-62, OPP-63, OPP-64, OPP-65.
+
 ## 0.29.0 — 2026-11-19 · `v0.29.0`
 
 - En `assisted`, le plan attend la review du Director par défaut. Le champ d'issue `Plan approval` (`required`, `skipped`) l'emporte, sinon `[rehearsal] plan_approval` du profil (`true` par défaut, écrit par `init-project`) ; une feature sans issue suit le profil, l'`autopilot` n'attend jamais. Le début de session dit ce qui est retenu et d'où (`plan approval required (issue)`).

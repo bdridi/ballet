@@ -86,7 +86,7 @@ plan_approval = true             # en assisted, le plan attend le Director ; le 
 [escalation]
 max_round_trips = 2              # allers-retours Dancer ↔ Critic
 max_exchange_rounds = 3          # tours de questions entre deux rôles sur un même sujet (message.md)
-max_diff_lines = 400             # lignes changées (ajoutées + supprimées) de la branche, comptées par le script
+max_diff_lines = 1500            # lignes changées (ajoutées + supprimées) de la branche, comptées par le script
 max_diff_strict = false          # false : au-delà, la PR porte ballet:oversized et rien ne bloque ; true : escalade avant le Critic
 ci_wait_seconds = 480             # la Premiere attend une CI en cours jusque-là, puis escalade ; sous 600 (limite d'un appel du Conductor)
 proof_timeout_seconds = 420       # au rapport du Dancer, le script lance la preuve du repo ; encore en cours après, escalade ; sous 600
