@@ -5,7 +5,7 @@ Ballet is a plugin: install it once, and all your projects benefit.
 
 You frame the work with an agent; then Ballet plans it, codes it, reviews it and merges it, one pull request at a time, and stops to ask you whenever something needs your decision.
 
-> Status: under construction (v0.25.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), what is shipped in [`release.md`](release.md), what comes next in [`opportunities.md`](opportunities.md) (all in French for now).
+> Status: under construction (v0.26.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), what is shipped in [`release.md`](release.md), what comes next in [`opportunities.md`](opportunities.md) (all in French for now).
 
 ## How it works
 
@@ -26,7 +26,7 @@ One issue played this way is a **Rehearsal**; its merge is the **Premiere**. A *
 
 - macOS with Orca installed and running.
 - At least one of these CLIs, authenticated: Claude Code (`claude`), Grok (`grok`), Mistral Vibe (`vibe`).
-- The GitHub CLI (`gh`), authenticated, and a GitHub remote for each project.
+- The GitHub CLI (`gh`), authenticated, and a GitHub remote for each project. For a repo owned by your personal account, `gh` needs the `user` scope, so that Ballet can create its issue types and fields: `gh auth refresh -h github.com -s user`. For a repo owned by an organization, you need to be one of its owners.
 - A CI on the project's pull requests that runs its proof command: Ballet never merges without a green CI (no CI counts as not green).
 - Python 3.11 or later (standard library only).
 - A clone of this repo, e.g. `~/Workspace/ballet`. In the commands below, replace `<path-to-ballet>` with that path.
@@ -72,7 +72,14 @@ The skill asks for the specs space, the proof command (the one that says "it's g
 - `.ballet/config.toml`: the project profile (repos, proof, rules, specs language, which CLI and model plays each role, thresholds);
 - `AGENTS.md` and `CLAUDE.md` (which imports `AGENTS.md`), without overwriting your existing files;
 - `.claude/skills/` and the `.agents/skills` link to that folder, so that Vibe sees the project's skills;
-- `.ballet/run/` in the `.gitignore`: Ballet keeps its state and journal there.
+- `.ballet/run/` in the `.gitignore`: Ballet keeps its state and journal there;
+- on GitHub, for the repo's owner (your account or your organization, shared by all its repos): the issue type `Slice` next to `Task`, `Bug` and `Feature`, and three issue fields, `Ballet status` (`proposed`, `ready`, `in-rehearsal`, `plan-review`, `escalated`, `done`), `Rehearsal mode` (`assisted`, `assisted + plan approval`, `autopilot`) and `Priority`. Only what is missing is created, nothing is changed; a field that exists without all its options is reported, to complete in Settings → Planning. Ballet's queue will read them (coming next); `--no-github` skips this step.
+
+To prepare the GitHub issue types and fields again, e.g. for a project whose remote did not exist yet:
+
+```sh
+python3 <path-to-ballet>/scripts/ballet_planning.py <project-folder>
+```
 
 To check the configuration by hand:
 

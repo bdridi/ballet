@@ -1,9 +1,11 @@
 """Amorce un projet pour Ballet, dans son home.
 
-    python3 init_project.py <dossier> --specs specs/ --proof "make test" [--specs-language fr] [--repo nom] [--rules tdd,bdd]
+    python3 init_project.py <dossier> --specs specs/ --proof "make test" [--specs-language fr] [--repo nom] [--rules tdd,bdd] [--no-github]
 
 Ne remplace jamais un fichier existant : il le signale. Seule exception, le `.gitignore` du projet,
 complété d'une ligne qui ignore l'état des Rehearsals (`.ballet/run/`).
+Prépare ensuite, chez le propriétaire du repo GitHub, les types et les champs d'issue dont vit la file
+(`ballet_planning.py`), sauf avec `--no-github`.
 """
 
 import argparse
@@ -12,6 +14,7 @@ import sys
 from pathlib import Path
 
 import ballet_config
+import ballet_planning
 
 DEFAULT_RULES = ("tdd", "bdd", "ddd", "clean-code")
 RUN_STATE_IGNORE = ".ballet/run/"
@@ -61,7 +64,7 @@ def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES, spec
     return report
 
 
-def main(argv):
+def main(argv, prepare_planning=ballet_planning.prepare):
     arguments = _parse(argv)
     report = init_project(
         arguments.project_dir,
@@ -72,7 +75,19 @@ def main(argv):
         arguments.specs_language,
     )
     _print(report)
-    return _check(arguments.project_dir)
+    config_status = _check(arguments.project_dir)
+    planning_status = 0 if arguments.no_github else _prepare_github(arguments.project_dir, prepare_planning)
+    return config_status or planning_status
+
+
+def _prepare_github(project_dir, prepare_planning):
+    """Les types et les champs d'issue de la file, chez le propriétaire du repo ; un refus n'annule pas les fichiers."""
+    try:
+        ballet_planning.print_report(prepare_planning(project_dir))
+    except ballet_planning.PlanningError as error:
+        print(f"✗ GitHub planning: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 # --- étapes -----------------------------------------------------------------
@@ -156,6 +171,7 @@ def _parse(argv):
     parser.add_argument("--specs-language", default="en", help="specs language (default: en)")
     parser.add_argument("--repo", help="repo name (default: folder name)")
     parser.add_argument("--rules", type=_split_rules, default=DEFAULT_RULES)
+    parser.add_argument("--no-github", action="store_true", help="skip the GitHub issue types and fields")
     return parser.parse_args(argv[1:])
 
 

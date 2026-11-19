@@ -2,6 +2,14 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.26.0 — 2026-11-19 · `v0.26.0`
+
+- `init-project` prépare, chez le propriétaire du repo GitHub, les types et les champs d'issue de la file : le type `Slice` (à côté de `Task`, `Bug`, `Feature`), les champs `Ballet status`, `Rehearsal mode` et `Priority`. Il ne crée que ce qui manque, ne modifie rien, et signale un champ incomplet ; `--no-github` saute l'étape.
+- `ballet_planning.py` relance cette préparation à la main, et dit quel droit manque quand GitHub refuse (`user` pour un compte personnel).
+- PRD recentré sur la méthode et réécrit autour des deux boucles (Workshop, Rehearsal), de leurs modes (`assisted`, `autopilot`) et de la file sur GitHub ; `release.md` et `opportunities.md` remplacent `TASKS.md`.
+
+**Opportunités traitées** : OPP-03, en partie (types et champs créés ; la file qui les lit reste à faire).
+
 ## 0.25.0 — 2026-11-19 · `v0.25.0`
 
 Première entrée du journal : ce que Ballet sait faire à cette version. Les versions d'avant sont dans l'historique git.

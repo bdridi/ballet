@@ -1,3 +1,5 @@
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
@@ -6,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_config  # noqa: E402
+import ballet_planning  # noqa: E402
 import init_project  # noqa: E402
 
 
@@ -79,6 +82,39 @@ class InitProjectTest(unittest.TestCase):
         self.init()
         self.init()
         self.assertEqual((self.project / ".gitignore").read_text(), ".ballet/run/\n")
+
+
+class InitProjectGitHubTest(unittest.TestCase):
+    """La planification GitHub (types et champs d'issue) suit la création des fichiers."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project = Path(self._tmp.name)
+        self.calls = []
+
+    def main(self, *options, prepare=None):
+        argv = ["init_project.py", str(self.project), "--specs", "docs/", "--proof", "make test", *options]
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return init_project.main(argv, prepare_planning=prepare or self.prepared)
+
+    def prepared(self, project_dir):
+        self.calls.append(project_dir)
+        return {"owner": "bdridi", "created": ["issue type Slice"], "kept": [], "incomplete": []}
+
+    def test_prepare_les_types_et_les_champs_du_repo(self):
+        self.assertEqual(self.main(), 0)
+        self.assertEqual(self.calls, [str(self.project)])
+
+    def test_sans_github_rien_n_est_demande_a_github(self):
+        self.assertEqual(self.main("--no-github"), 0)
+        self.assertEqual(self.calls, [])
+
+    def test_un_refus_de_github_echoue_sans_defaire_les_fichiers(self):
+        def refused(project_dir):
+            raise ballet_planning.PlanningError("no permission")
+        self.assertEqual(self.main(prepare=refused), 1)
+        self.assertTrue((self.project / ".ballet" / "config.toml").exists())
 
 
 if __name__ == "__main__":
