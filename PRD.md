@@ -45,7 +45,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 - **Mode** : la façon dont une boucle tourne, choisie à son lancement :
   - **`assisted`** (par défaut) : le Director est dans la boucle ; il cadre, valide le plan et reçoit les escalades ;
   - **`autopilot`** : la boucle tourne sans lui ; chaque rôle décide dans son périmètre et trace sa décision. La Rehearsal en autopilot, c'est le mode nuit.
-- **File** : les issues GitHub du projet qui attendent leur Rehearsal, une `task`, un `bug` ou une `feature` au statut prêt ; les `slice` suivent leur feature. C'est GitHub qui la tient, pas un fichier local.
+- **File** : les issues GitHub du projet qui attendent leur Rehearsal : type `Task`, `Bug` ou `Feature`, champ Status à `ready`, dans l'ordre du champ Priority puis de l'ancienneté ; les `Slice` suivent leur feature. C'est GitHub qui la tient, par les types et les champs natifs des issues, pas un fichier local.
 - **Observateur** : un script déterministe, pas un agent, qui surveille la file et lance une session de Conductor neuve pour l'élément prêt suivant, une à la fois.
 
 **Le reste**
@@ -63,7 +63,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
   - **Task** (`TASK-NNN`) : un travail sans comportement visible nouveau.
 - **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi, le signal de réussite, les règles métier transverses et les limites, sans critères.
 - **Feature** (`FEAT-NNN`) : un comportement visible, quatre critères Gherkin au plus, une issue.
-- **Issue** : l'issue GitHub d'une feature prête, d'un bug ou d'une tâche, publiée par le script GitHub à la sortie du Workshop, avec son type (`task`, `bug`, `feature`, `slice`) et son statut (proposée, prête). Le Choreographer y écrit son plan au début de la Rehearsal, et crée les issues de slices. L'issue et son plan ne vivent que sur GitHub, jamais dans l'espace specs.
+- **Issue** : l'issue GitHub d'une feature prête, d'un bug ou d'une tâche, publiée par le script GitHub à la sortie du Workshop. Elle porte son type natif (`Feature`, `Bug`, `Task`, `Slice`) et deux champs : **Status** (`proposed`, `ready`, `in-rehearsal`, `plan-review`, `escalated`, `done`) et **Rehearsal mode** (`assisted`, `assisted + plan approval`, `autopilot`). Le Choreographer y écrit son plan au début de la Rehearsal, et crée les issues de slices. L'issue et son plan ne vivent que sur GitHub, jamais dans l'espace specs.
 - **Slice** (`FEAT-NNN.K`) : une part d'une feature trop grosse pour une seule session du Dancer, proposée par le Choreographer seulement si besoin. Chaque slice est une Rehearsal complète (sa branche, code, validation, preuve verte, merge de sa PR sur `main`) et livre au moins un critère entier de bout en bout (slice verticale, jamais une couche : API, puis client, puis écran) ; une slice sans critère n'est admise que pour le walking skeleton d'un repo vide, ou quand le plus petit critère seul dépasse le seuil. Le moins de slices possible, chacune estimée sous les deux tiers de `max_diff_lines`.
 - **Branche de Rehearsal** (`rehearsal/<ID>`) : la branche courte d'une Rehearsal, dans son propre worktree, créée par le Conductor depuis `main` et supprimée après la Premiere. Le Choreographer et le Dancer y commitent, à tour de rôle ; la PR qui l'intègre porte la validation. Avec des slices, chacune a sa branche, partie de `main` après le merge de la précédente ; les ADR et les règles du plan voyagent avec la première.
 - **Glossary** (`glossary.md`) : la langue du projet ; chaque terme avec son nom de code et son texte affiché.
@@ -433,7 +433,7 @@ En mono-repo, une seule entrée `[repos.<nom>]` avec `path = "."` et sans `needs
 **Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca. Chaque boucle a sa commande (noms à trancher, OPP-08) :
 
 1. le Workshop, `/ballet:workshop [--autopilot]` : en `assisted`, le Director cadre avec le Dramaturg (`/ballet:dramaturg`) et le Choreographer ; la feature prête est publiée en issue et entre dans la file ;
-2. l'observateur surveille la file et lance, pour chaque élément prêt, `/ballet:rehearsal [--autopilot | --require-plan-approval] <élément>` dans une session neuve ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
+2. l'observateur surveille la file et lance, pour chaque élément prêt, `/ballet:rehearsal <élément>` dans une session neuve, au mode lu sur son champ Rehearsal mode (`--autopilot`, `--require-plan-approval`) ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
 3. le Conductor lit le profil et lance Choreographer, Dancer et Critic dans les bons repos (`orca orchestration worker-start --worktree path:<repo>`).
 
 Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte sans effort, Mistral Vibe n'y charge `AGENTS.md` et les skills que dans un dossier de confiance, et une session y correspond à un projet.
@@ -486,8 +486,7 @@ Tranchées : voir `docs/ADR/`.
 
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
-- L'ordre de la file sur GitHub (OPP-03).
-- Le mode se choisit par boucle (un Workshop `assisted` peut précéder une Rehearsal `autopilot`) : quand l'observateur lance, il le lit sur un libellé de l'issue, un défaut du profil, ou les deux (OPP-03) ?
+- Les types et les champs natifs des issues, par l'API : lecture, écriture, et trace de leurs changements dans la timeline (OPP-03, à vérifier par un spike).
 - En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas (OPP-54) ?
 - L'observateur : un script lancé à intervalle, ou les automations Orca ? Et pour réveiller le Workshop en autopilot ?
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.
