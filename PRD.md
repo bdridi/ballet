@@ -188,8 +188,8 @@ Chaque boucle se lance en `assisted` (par défaut) ou en `autopilot`.
 - **`autopilot`** : le Dramaturg et le Choreographer, sans le Director. Le Dramaturg cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog. La feature sort **proposée** : elle n'entre dans la file qu'une fois acceptée par le Director. En option, le **full autopilot** la rend prête d'emblée : de l'idée à `main` sans humain, réservé aux projets et aux types de travail où le Director l'a choisi.
 
 **Rehearsal**
-- **`assisted`** : le Director valide le plan publié par le Choreographer (`ballet:plan-approved`) et reçoit les escalades ; la file attend sa décision.
-- **`autopilot`** (le mode nuit) : le plan part sans validation, et les décisions sont prises par périmètre au lieu de remonter.
+- **`assisted`** : le Director reçoit les escalades, et la file attend sa décision. Le Choreographer enchaîne sur son plan et ne sollicite le Director que s'il le faut vraiment (une escalade) ; avec `--require-plan-approval`, il attend que le Director valide le plan (`ballet:plan-approved`) avant le Dancer.
+- **`autopilot`** (le mode nuit) : le Director est hors de la boucle ; le plan part sans validation, et les décisions sont prises par périmètre au lieu de remonter.
 
 **En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier ; le Choreographer l'architecture, et demande le métier au Dramaturg ; le Dancer suit l'architecture, et demande au Choreographer. Le Dramaturg ne sait pas plus que les specs : ce qu'il tranche seul, il le devine. Chaque décision prise sans le Director est donc tracée (ADR pour l'architecture, specs ou rapport pour le métier), **marquée** sur l'issue ou la PR, et réunie dans un **rapport du matin** (OPP-52). Ne remonte au Director en direct que ce qui sort de tous les périmètres, et les déclencheurs mécaniques ci-dessous.
 
@@ -253,7 +253,7 @@ L'observateur joue la file dans son ordre (à trancher, §17). Une seule Rehears
 - **Une feature sans plan** ouvre une Rehearsal de **planification**, dont le seul rôle est le Choreographer : il tranche, découpe et publie sans attendre de oui ; les questions de produit vont au Dramaturg, ce qu'il ne peut pas trancher au Director (escalade). Une issue sans plan suit le même chemin.
 - **À son rapport**, le script lit sur GitHub l'issue et ses slices (`Part of #N` en première ligne) et les place en tête de file ; une issue sans slices entre seule.
 - **Les ADR** du Choreographer (et `AGENTS.md`) partent avec la première slice, ou l'issue unique : le worktree de la planification devient le sien, ses commits restent au Choreographer pour la politique et arrivent sur `main` au premier merge. Pas de PR d'ADR à part.
-- **Le plan** : en `assisted`, la file s'arrête après sa publication, jusqu'à `ballet:plan-approved` posé par le Director sur l'issue ; en `autopilot`, on enchaîne.
+- **Le plan** : on enchaîne, sauf en `assisted` avec `--require-plan-approval`, où la file s'arrête après sa publication, jusqu'à `ballet:plan-approved` posé par le Director sur l'issue.
 - **La Premiere** : le Conductor merge la PR dès que le Critic rend `APPROVED`, que la politique et la CI sont vertes.
 
 On mesure la qualité du Critic grâce au journal (refus, allers-retours, builds rouges, merges à corriger après coup) avant de lâcher la main ; les garde-fous restent actifs dans les deux modes : déclencheurs d'escalade, plafond d'allers-retours, politique déterministe.
@@ -433,7 +433,7 @@ En mono-repo, une seule entrée `[repos.<nom>]` avec `path = "."` et sans `needs
 **Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca. Chaque boucle a sa commande (noms à trancher, OPP-08) :
 
 1. le Workshop, `/ballet:workshop [--autopilot]` : en `assisted`, le Director cadre avec le Dramaturg (`/ballet:dramaturg`) et le Choreographer ; la feature prête est publiée en issue et entre dans la file ;
-2. l'observateur surveille la file et lance, pour chaque élément prêt, `/ballet:rehearsal [--autopilot] <élément>` dans une session neuve ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
+2. l'observateur surveille la file et lance, pour chaque élément prêt, `/ballet:rehearsal [--autopilot | --require-plan-approval] <élément>` dans une session neuve ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
 3. le Conductor lit le profil et lance Choreographer, Dancer et Critic dans les bons repos (`orca orchestration worker-start --worktree path:<repo>`).
 
 Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte sans effort, Mistral Vibe n'y charge `AGENTS.md` et les skills que dans un dossier de confiance, et une session y correspond à un projet.
@@ -487,6 +487,7 @@ Tranchées : voir `docs/ADR/`.
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
 - L'ordre de la file sur GitHub (OPP-03).
+- Qui choisit le mode d'une Rehearsal lancée par l'observateur (`autopilot`, `--require-plan-approval`) : un défaut du profil, un libellé sur l'issue, ou les deux (OPP-03) ?
 - En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas (OPP-54) ?
 - L'observateur : un script lancé à intervalle, ou les automations Orca ? Et pour réveiller le Workshop en autopilot ?
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.
