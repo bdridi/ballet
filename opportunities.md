@@ -2,19 +2,20 @@
 
 Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est dans `PRD.md`, ce qui est livré dans `release.md`.
 
-- 🆕 à traiter · ✅ traité (avec la version qui l'a livré, reportée dans `release.md`)
+- 🆕 à traiter · ✅ traité (avec la version qui l'a livré, reportée dans `release.md`) · ↪️ fusionné dans un autre sujet
 - Un sujet garde son numéro pour toujours ; un sujet traité reste ici, coché.
 - Dans chaque section, du plus pressé au plus lointain.
 
 ## Les deux boucles : Workshop et Rehearsal
 
 - 🆕 **OPP-46 · Un Conductor par projet**, une seule session par boucle : une pour le Workshop, une pour la Rehearsal.
-- 🆕 **OPP-47 · Workshop assisté, Director et Dramaturg** : le cadrage seul, sans automatisation. Sortie : une feature prête. C'est le `/ballet:dramaturg` d'aujourd'hui, à nommer comme un mode de la boucle.
-- 🆕 **OPP-48 · Workshop assisté, Director, Dramaturg et Choreographer** : sortie, une feature prête ou déjà planifiée (l'issue et ses slices créées, chacune avec son plan).
-- 🆕 **OPP-49 · Workshop autopilot, Dramaturg et Choreographer** : la boucle automatisée, sans le Director. Sortie : des features prêtes, et des issues découpées en slices avec leur plan. Recoupe OPP-40 (Workshop auto) et OPP-43 (discovery).
-- 🆕 **OPP-50 · Rehearsal autonome (le mode nuit)** : elle tourne seule, avec escalade, ou en autopilot où les décisions sont prises sans le Director et partagées (ADR, rapport) pour qu'il les relise après coup.
-- 🆕 **OPP-51 · Deux points d'entrée de la Rehearsal** : une feature prête sans plan (le Choreographer commence), ou un plan déjà fait pendant le Workshop (le Dancer enchaîne). Les deux existent déjà dans `hybrid-track` ; reste à les rattacher aux modes du Workshop (OPP-48, OPP-49).
-- 🆕 **OPP-52 · En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier, le Choreographer l'architecture (il demande le métier au Dramaturg), le Dancer suit l'architecture (il demande au Choreographer). Le Director ne reçoit que ce qui sort de tous les périmètres. Chaque décision est tracée : ADR pour l'architecture, specs ou rapport pour le métier.
+- 🆕 **OPP-47 · Deux modes par boucle** : `assisted` par défaut, `autopilot` choisi au lancement. Le Choreographer est le pivot : il peut jouer dans les deux boucles.
+- 🆕 **OPP-48 · Workshop assisted** : le Director et le Dramaturg, et le Choreographer quand on veut aller jusqu'au plan. Sortie : une feature prête, ou l'issue et ses slices créées avec leur plan. Sans le Choreographer, rien à automatiser : c'est le `/ballet:dramaturg` d'aujourd'hui.
+- 🆕 **OPP-49 · Workshop autopilot** : le Dramaturg et le Choreographer, sans le Director ; la boucle est automatisée. Sortie : des features prêtes, et des issues découpées en slices avec leur plan. Absorbe OPP-40 ; lié à OPP-43 (le Dramaturg qui choisit lui-même dans le backlog).
+- 🆕 **OPP-50 · Rehearsal assisted ou autopilot** : assisted, elle escalade vers le Director (ce que fait le Conductor aujourd'hui, approbation du plan comprise) ; autopilot, c'est le mode nuit : les décisions sont prises sans le Director (OPP-52) et partagées (ADR, rapport) pour qu'il les relise après coup.
+- 🆕 **OPP-51 · Deux points d'entrée de la Rehearsal** : une feature prête sans plan (le Choreographer commence la Rehearsal), ou un plan déjà fait au Workshop (le Dancer enchaîne). Les deux existent déjà dans le Conductor ; reste à les rattacher aux sorties du Workshop (OPP-48, OPP-49).
+- 🆕 **OPP-52 · En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier ; le Choreographer l'architecture, et demande le métier au Dramaturg ; le Dancer suit l'architecture, et demande au Choreographer. Le Director ne reçoit que ce qui sort de tous les périmètres. Chaque décision est tracée : ADR pour l'architecture, specs ou rapport pour le métier.
+- 🆕 **OPP-53 · Retirer `hybrid-track`** : on lance une boucle par son nom et son mode (par exemple `/ballet:workshop`, `/ballet:rehearsal --autopilot`, noms à trancher). Le PRD suit : la Piece, les axes et le répertoire (§3, §6, §7.1) laissent la place aux deux boucles et à leurs deux modes ; `--plan review|auto` devient le mode de la boucle.
 
 ## Premier vrai run de la mutation (antimurphy)
 
@@ -81,7 +82,7 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 ## Plus loin
 
 - 🆕 **OPP-39 · Projet multi-repos** : le Conductor, la preuve et la mutation ne lisent que le premier repo du profil.
-- 🆕 **OPP-40 · Workshop auto** (`auto-track`).
+- ↪️ **OPP-40 · Workshop auto** (`auto-track`) : fusionné dans OPP-49.
 - 🆕 **OPP-41 · Déclencheurs d'escalade subtils** : désaccord persistant, build instable.
 - 🆕 **OPP-42 · `parallel-conductor`** (`hybrid-parallel`, principes au PRD §7). Déjà isolé par Rehearsal : ID, worktree, état `<ID>.json`, dossier `.ballet/run/<ID>/`, dispatches. À reprendre : la file à une seule Rehearsal `current` et l'ID facultatif des commandes ; un verrou sur le journal (le processus de mutation détaché et le Conductor y écrivent) ; les ports des preuves e2e simultanées ; un plafond de tâches lourdes (preuves, mutations) sur la machine ; les caches partagés (mise, `target/`) sans écriture concurrente.
 - 🆕 **OPP-43 · Workshop discovery**, en propositions d'abord.
