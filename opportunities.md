@@ -25,7 +25,7 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 - 🆕 **OPP-05 · Workshop assisted** : le Director et le Dramaturg (le `/ballet:dramaturg` d'aujourd'hui), et le Choreographer quand on veut aller jusqu'au plan. Sortie : une feature prête, ou l'issue et ses slices créées avec leur plan, versées à la file du projet.
 - 🆕 **OPP-06 · Workshop autopilot** : le Dramaturg et le Choreographer, sans le Director. Il cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog (en propositions d'abord : des features que le Director valide). Sortie : des features prêtes et des issues découpées en slices avec leur plan, versées à la file du projet.
 - 🆕 **OPP-07 · Rehearsal : deux points d'entrée, deux modes** : une feature prête sans plan (le Choreographer commence) ou un plan fait au Workshop (le Dancer enchaîne), les deux existent déjà ; assisted, elle escalade vers le Director (approbation du plan comprise, aujourd'hui `--plan review`) ; autopilot, le mode nuit, les décisions prises par périmètre et partagées (ADR, rapport).
-- 🆕 **OPP-08 · Retirer `hybrid-track`** : on lance une boucle par son nom et son mode (par exemple `/ballet:workshop`, `/ballet:rehearsal --autopilot`, noms à trancher). Le PRD suit : la Piece, les axes et le répertoire (§3, §6, §7.1) laissent la place aux deux boucles, à leurs deux modes et au Supervisor.
+- 🆕 **OPP-08 · Retirer `hybrid-track`** des skills, du README et des scripts : une commande par boucle avec son mode (`/ballet:workshop`, `/ballet:rehearsal [--autopilot]`, noms à trancher), `--plan review|auto` remplacé par le mode. Le PRD décrit déjà les deux boucles, leurs modes et le Supervisor.
 
 ## Premier vrai run de la mutation (antimurphy)
 
@@ -93,7 +93,7 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 
 - 🆕 **OPP-47 · Projet multi-repos** : le Conductor, la preuve et la mutation ne lisent que le premier repo du profil.
 - 🆕 **OPP-48 · Déclencheurs d'escalade subtils** : désaccord persistant, build instable.
-- 🆕 **OPP-49 · `parallel-conductor`** (`hybrid-parallel`, principes au PRD §7). Déjà isolé par Rehearsal : ID, worktree, état `<ID>.json`, dossier `.ballet/run/<ID>/`, dispatches. À reprendre : la file à une seule Rehearsal `current` et l'ID facultatif des commandes ; un verrou sur le journal (le processus de mutation détaché et le Conductor y écrivent) ; les ports des preuves e2e simultanées ; un plafond de tâches lourdes (preuves, mutations) sur la machine ; les caches partagés (mise, `target/`) sans écriture concurrente.
+- 🆕 **OPP-49 · La Rehearsal en parallèle** (`parallel-conductor`, principes au PRD §7). Déjà isolé par Rehearsal : ID, worktree, état `<ID>.json`, dossier `.ballet/run/<ID>/`, dispatches. À reprendre : la file à une seule Rehearsal `current` et l'ID facultatif des commandes ; un verrou sur le journal (le processus de mutation détaché et le Conductor y écrivent) ; les ports des preuves e2e simultanées ; un plafond de tâches lourdes (preuves, mutations) sur la machine ; les caches partagés (mise, `target/`) sans écriture concurrente.
 - 🆕 **OPP-50 · Migrer Flownest** (PRD §16).
 
 ## Ménage

@@ -14,9 +14,9 @@
 
 - **Simple is complex enough** : la méthode ajoute le moins de mécanique possible.
 - **Les rôles ne connaissent pas la plomberie.** Un rôle reçoit un travail et rend un résultat ; il ignore la chaîne, les autres agents, le parallélisme, et qui tamponne après lui.
-- **Les axes règlent la plomberie, jamais les rôles.** Changer les axes ne touche à aucun rôle.
+- **Les modes règlent la plomberie, jamais les rôles.** Passer une boucle d'`assisted` à `autopilot` ne touche à aucun rôle.
 - **Un harnais commun, hérité sans duplication.** Les règles vivent une fois, dans Ballet ; un projet n'ajoute que ce qui lui est propre.
-- **L'auto peut toujours escalader vers moi**, sur des déclencheurs écrits.
+- **L'automatique peut toujours escalader vers moi**, sur des déclencheurs écrits.
 - **Tout est tracé** dès la première version, pour pouvoir mesurer avant de lâcher la main.
 
 ## 3. Vocabulaire
@@ -27,28 +27,31 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 
 | Terme (et skill) | Équivalent fonctionnel | Ce qu'il fait |
 |---|---|---|
-| **Director** | — | Moi. Je cadre avec le Dramaturg, je tamponne en manuel et je reçois les escalades. |
+| **Director** | — | Moi. Je cadre avec le Dramaturg, je valide en `assisted` et je reçois les escalades. |
 | **Dramaturg** | PM | Cadre le périmètre fonctionnel, rédige l'issue et les specs. |
 | **Choreographer** | architecte | Crée l'issue et son plan technique à partir d'une feature prête. |
 | **Dancer** | dev | Exécute le plan. |
 | **Critic** | validateur | Juge le travail et rend un verdict. |
-| **Conductor** (`conductor`, `parallel-conductor`) | coordinateur | Enchaîne les rôles, répond à leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
+| **Conductor** | coordinateur | Fait tourner une boucle d'un projet : enchaîne les rôles, porte leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
+| **Supervisor** (nom à trouver) | superviseur | Mon point d'entrée unique, pour tous les projets : il passe mes instructions aux Conductors. |
 
-- **Rôle** : Dramaturg, Choreographer, Dancer ou Critic. Le Conductor n'est pas un rôle : il les fait jouer.
+- **Rôle** : Dramaturg, Choreographer, Dancer ou Critic. Ni le Conductor ni le Supervisor ne sont des rôles : ils les font jouer.
 - **Worker** : l'instance d'agent (un CLI et un modèle) qu'Orca lance pour jouer un rôle.
 
-**La chaîne et ses réglages**
+**Les boucles et leurs modes**
 
 - **Chaîne** : la suite fixe des phases d'une issue, en deux boucles :
-  - **Workshop** : le cadrage (Director, Dramaturg, et le Choreographer en conseil, sans plan) ;
-  - **Rehearsal** : plan, code et validation (Choreographer, Dancer, Critic), jusqu'à la **Premiere**, le merge de sa PR sur `main`.
-- **Axes** (*Parameters*) : les réglages de la chaîne (qui cadre, qui tamponne, comment ça tourne).
-- **Piece** : une combinaison nommée des axes, lancée par une commande. Le **répertoire** est la liste des Pieces.
+  - **Workshop** : le cadrage (Director, Dramaturg), et le plan quand le Choreographer y joue ; il sort une feature prête, ou l'issue et ses slices avec leur plan ;
+  - **Rehearsal** : plan s'il manque, code et validation (Choreographer, Dancer, Critic), jusqu'à la **Premiere**, le merge de sa PR sur `main`.
+- **Mode** : la façon dont une boucle tourne, choisie à son lancement :
+  - **`assisted`** (par défaut) : le Director est dans la boucle ; il cadre, valide le plan et reçoit les escalades ;
+  - **`autopilot`** : la boucle tourne sans lui ; chaque rôle décide dans son périmètre et trace sa décision. La Rehearsal en autopilot, c'est le mode nuit.
+- **File du projet** : les features et les issues qui attendent leur Rehearsal, dans l'ordre. Le Workshop et le Supervisor y écrivent ; le Conductor de Rehearsal la surveille.
 
 **Le reste**
 
 - **Profil projet** : `.ballet/config.toml`, dans le home du projet (repos, preuves, zones sensibles, seuils), que Ballet lit au lieu de la deviner. Le même fichier surcharge les défauts du plugin (routage, seuils).
-- **Tampon** : la validation d'une phase, par un rôle (auto) ou par le Director (manuel).
+- **Tampon** : la validation d'une phase, par un rôle ou par le Director (en `assisted`).
 - **Escalade** : le Conductor ou un worker s'arrête et demande au Director de décider.
 
 **L'espace specs** (tenu par le Dramaturg, modèles dans `templates/` du plugin, en anglais)
@@ -71,9 +74,9 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 
 **Workshop** (Dramaturg) → **Rehearsal** : plan (Choreographer) → code (Dancer) → validation (Critic) → **Premiere** : merge de la PR sur `main`
 
-Elle est toujours la même. Seuls les axes changent la façon dont elle tourne.
+Elle est toujours la même. Seul le mode de chaque boucle change la façon dont elle tourne.
 
-En Workshop, le Choreographer peut être consulté, mais il ne rend son plan officiel qu'en Rehearsal.
+**Le Choreographer est le pivot** : il joue dans les deux boucles. Il planifie au Workshop quand on veut en sortir avec des issues prêtes, sinon au début de la Rehearsal. La Rehearsal a donc deux points d'entrée : une feature prête sans plan (le Choreographer commence), ou un plan déjà fait (le Dancer enchaîne).
 
 ## 5. Les rôles
 
@@ -100,8 +103,8 @@ En Workshop, le Choreographer peut être consulté, mais il ne rend son plan off
 
 ### 5.2 Les quatre rôles
 
-- **Dramaturg** : cadre le périmètre fonctionnel et rédige l'issue et les specs (dans des fichiers, jamais sur GitHub directement). Répond aux questions de produit. Écrit dans l'espace specs du projet, nulle part ailleurs. Il travaille en amont du Conductor (Workshop interactif) ou lancé par lui (Workshop auto ou discovery).
-- **Choreographer** : part d'une feature prête, lit le code, fixe les choix techniques et crée l'issue avec son plan, une section par repo (et les issues de slices si besoin), par le script GitHub. Pose ses questions au Dramaturg quand la feature a des manques, et reste éveillé en attendant la réponse. Rend un rapport au Conductor, qui le journalise. Seul à écrire les ADR (dossier `[project] adr`), les spikes (branches `spike/NN-slug`, jamais mergées) et les règles techniques du projet dans `AGENTS.md`. Pour le reste, lecture seule.
+- **Dramaturg** : cadre le périmètre fonctionnel et rédige l'issue et les specs (dans des fichiers, jamais sur GitHub directement). Répond aux questions de produit. Écrit dans l'espace specs du projet, nulle part ailleurs. Il joue dans le Workshop : avec le Director en `assisted`, seul avec le Choreographer en `autopilot`, où il cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog.
+- **Choreographer** : part d'une feature prête, lit le code, fixe les choix techniques et crée l'issue avec son plan, une section par repo (et les issues de slices si besoin), par le script GitHub. Pose ses questions au Dramaturg quand la feature a des manques, et reste éveillé en attendant la réponse. Rend un rapport au Conductor, qui le journalise. Il joue dans les deux boucles (§4). Seul à écrire les ADR (dossier `[project] adr`), les spikes (branches `spike/NN-slug`, jamais mergées) et les règles techniques du projet dans `AGENTS.md`. Pour le reste, lecture seule.
 - **Dancer** : exécute sa section du plan en red → green → refactor, commite sur la branche de Rehearsal. Sur un refus, il reprend à partir de la review de la PR, qu'il lit sans y écrire. Preuve : la commande de preuve de son repo est verte. Écrit dans le code de son repo.
 - **Critic** : relit le travail dans le worktree et rend un verdict. Lecture seule. Première ligne de sa réponse : `VERDICT: APPROVED`, `VERDICT: REJECTED` ou `VERDICT: ESCALATE`, puis les preuves et **tous** les points bloquants, en un seul lot (jamais remarque par remarque), et des notes optionnelles que le Dancer n'est pas tenu de suivre. Le Conductor le publie en une review de la PR. Il ne merge pas : juger et intégrer restent séparés.
 
@@ -176,28 +179,25 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
 - **Les rôles produisent, le script publie :** le Choreographer publie lui-même l'issue et ses slices, puis rend son rapport au Conductor, qui le journalise ; le Critic rend son verdict, le Conductor le publie.
 - **Garde-fous :** couche 2, les workers sont lancés sans accès à `gh` ni au jeton GitHub quand le CLI le permet ; couche 3, la politique vérifie que l'état GitHub de l'issue n'a pas bougé pendant le passage d'un rôle (OPP-29).
 
-## 6. Les axes
+## 6. Les modes
 
-**Workshop** — qui cadre :
-- **interactif** : le Director et le Dramaturg ;
-- **auto** : le Dramaturg cadre seul une demande, un bug, un retour ou une issue GitHub ;
-- **discovery** : le Dramaturg choisit seul dans le backlog et les opportunités.
+Chaque boucle se lance en `assisted` (par défaut) ou en `autopilot`.
 
-**Plan** — qui tamponne le plan du Choreographer :
-- **auto** ;
-- **manuel** : le Director.
+**Workshop**
+- **`assisted`** : le Director et le Dramaturg cadrent ; le Choreographer les rejoint quand on veut aller jusqu'au plan. Sortie : une feature prête, ou l'issue et ses slices avec leur plan, versées à la file du projet. Sans le Choreographer, rien à automatiser.
+- **`autopilot`** : le Dramaturg et le Choreographer, sans le Director. Le Dramaturg cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog (en propositions d'abord : des features que le Director valide). Sortie : des features prêtes et des issues découpées en slices avec leur plan, versées à la file.
 
-**Validation** — qui tamponne le code avant la Premiere :
-- **auto** : le Critic tamponne ;
-- **manuel** : le Director tamponne, avec le rapport du Critic sous les yeux.
+**Rehearsal**
+- **`assisted`** : le Director valide le plan publié par le Choreographer (`ballet:plan-approved`) et reçoit les escalades ; la file attend sa décision.
+- **`autopilot`** (le mode nuit) : le plan part sans validation, et les décisions sont prises par périmètre au lieu de remonter.
 
-**Exécution** — comment la chaîne tourne :
-- **séquentielle** : une Rehearsal ouverte à la fois, dans son worktree, une PR à la fois ;
-- **parallèle** : plusieurs Rehearsals ouvertes, chacune dans son worktree, une file de merge.
+**En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier ; le Choreographer l'architecture, et demande le métier au Dramaturg ; le Dancer suit l'architecture, et demande au Choreographer. Chaque décision est tracée (ADR pour l'architecture, specs ou rapport pour le métier) pour que le Director la relise après coup. Ne remonte au Director que ce qui sort de tous les périmètres, et les déclencheurs mécaniques ci-dessous.
 
-### 6.1 L'escalade, contrat de l'auto
+**Exécution** : une Rehearsal ouverte à la fois, dans son worktree, une PR à la fois ; plus tard, plusieurs en parallèle, chacune dans son worktree, avec une file de merge (§7).
 
-Toute phase en auto peut escalader vers le Director. Les déclencheurs par défaut :
+### 6.1 L'escalade, contrat de l'automatique
+
+Toute phase sans le Director peut escalader vers lui. Les déclencheurs par défaut :
 
 **Côté Critic**
 - deux refus de suite (le ping-pong ne converge pas) ;
@@ -229,43 +229,32 @@ Attendre le tampon du Director n'est jamais un échec : le Conductor prévient l
 
 ## 7. Le Conductor
 
-- **L'axe Exécution choisit le skill du Conductor** :
-  - `conductor` : séquentiel, une Rehearsal ouverte à la fois (sa branche, son worktree, sa PR) ;
-  - `parallel-conductor` : plusieurs Rehearsals ouvertes, le même mécanisme, plus une file de merge (plus tard, hors V1) :
-    - il ne lance en parallèle que des Rehearsals indépendantes : pas de `needs` entre leurs repos, pas de slices d'une même feature ;
-    - l'ordre de merge : d'abord les dépendances (`needs`, ordre des slices), puis la première PR prête (verdict, CI, tampon) ;
-    - après chaque merge, il rebase les autres branches ouvertes sur `main` ; un conflit retourne au Dancer dans sa session, qui le résout et repasse sa preuve ; le Critic relit la résolution avant le merge ;
-    - un conflit mal résolu ou une deuxième résolution ratée : escalade (section 6.1), seule cette Rehearsal sort de la file.
-- **Le plan et la validation** sont ses points d'arrêt : il continue seul (auto, sauf escalade) ou il attend le Director (manuel).
-- **Le Workshop dit d'où il part** :
-  - interactif : le Workshop se fait avant lui, il démarre sur une issue prête ;
-  - auto : il lance d'abord un Dramaturg qui cadre la demande ;
-  - discovery : il lance d'abord un Dramaturg qui choisit quoi faire.
-- Les deux skills font jouer **les mêmes rôles**.
+- **Deux Conductors par projet, toujours actifs** : une session pour le Workshop, une pour la Rehearsal, sur la machine du Director ou un VPS. Quand la file est vide et que le contexte passe un seuil, la session se vide (`/clear`) sans perdre sa casquette de Conductor.
+- **Le Supervisor** (nom à trouver) est le point d'entrée du Director. Il passe ses instructions aux Conductors : par message entre sessions, ou, pour les features à traiter, en les inscrivant dans la file du projet.
+- **Le Conductor de Rehearsal surveille la file** et ouvre l'élément qui arrive ; le Conductor de Workshop la remplit de ce qu'il sort.
+- **Plus tard, en parallèle**, le Conductor de Rehearsal ouvre plusieurs Rehearsals, avec une file de merge (`parallel-conductor`, hors V1) :
+  - il ne lance en parallèle que des Rehearsals indépendantes : pas de `needs` entre leurs repos, pas de slices d'une même feature ;
+  - l'ordre de merge : d'abord les dépendances (`needs`, ordre des slices), puis la première PR prête (verdict, CI, tampon) ;
+  - après chaque merge, il rebase les autres branches ouvertes sur `main` ; un conflit retourne au Dancer dans sa session, qui le résout et repasse sa preuve ; le Critic relit la résolution avant le merge ;
+  - un conflit mal résolu ou une deuxième résolution ratée : escalade (section 6.1), seule cette Rehearsal sort de la file.
+- **Le plan et la validation** sont ses points d'arrêt : il attend le Director en `assisted`, il continue seul en `autopilot`, sauf escalade.
+- Les deux Conductors font jouer **les mêmes rôles**.
 - Le Conductor ne code pas et n'écrit pas de plan : il lance, répond, juge les preuves et intègre.
 - Un plafond d'allers-retours Dancer ↔ Critic (2 par défaut) existe dès le séquentiel.
 - **La preuve ne se croit pas sur parole** : à chaque rapport du Dancer, après la politique et avant le push, le script lance lui-même la preuve du repo dans le worktree. Rouge (ou un worktree sali par la preuve), rien n'est poussé, le Critic n'est pas mobilisé : le Dancer reprend avec la fin de la sortie. Au-delà de `max_round_trips` preuves rouges, ou trop longue, escalade.
 - **Le test de mutation, après la preuve** : Ballet porte la méthode, le projet l'outil. Le projet fige l'outil, sa config (où s'excluent les équivalents, chacun avec sa raison) et déclare une entrée par outil dans son profil (`[[repos.<repo>.mutation]]`) ; Ballet calcule le diff de la branche contre son ancêtre commun avec `origin/main`, le passe à chaque outil (`{diff}`, `{files}`, `{ranges}`), et le code de sortie décide. Trop long pour un appel du Conductor, il part en arrière-plan et le réveille par Orca à sa fin. Rouge : rien n'est poussé, le Critic n'est pas mobilisé, le Dancer reprend avec les survivants ; au-delà de `max_round_trips`, ou d'une heure, escalade. Un survivant se tue par un test unitaire ; le Critic juge chaque exclusion (`ballet:tdd`). `[mutation] enabled = false` coupe le nœud sans retirer les entrées.
 - Rien de destructeur ni de sortant hors du repo sans l'accord du Director.
 
-### 7.1 Le répertoire
+### 7.1 La Rehearsal séquentielle
 
-- `hybrid-track` = Workshop interactif · plan manuel (`--plan review`, défaut) ou auto (`--plan auto`) · validation auto · séquentielle
-- `auto-track` = Workshop auto · plan auto · validation auto · séquentielle
-- `auto-track-discovery` = Workshop discovery · plan manuel · validation manuelle · séquentielle (pour commencer)
-- `hybrid-parallel` = Workshop interactif · plan auto · validation auto · parallèle
-
-Une Piece n'est pas un skill de plus : c'est un raccourci qui appelle le bon skill du Conductor avec ses paramètres. Toute autre combinaison reste possible sans rien écrire.
-
-**Piece v0 : `hybrid-track`.** Le Director cadre avec le Dramaturg (Workshop interactif), puis **déclenche en personne le Conductor** (`/ballet:hybrid-track`) : ce geste est son tampon de Workshop, rien ne part automatiquement à la fin du Workshop. Ensuite la Rehearsal (plan, code, validation) s'enchaîne en **auto** jusqu'à la Premiere, sauf escalade. Le Conductor merge la PR dès que le Critic rend `APPROVED`, que la politique et la CI sont vertes.
-
-**Le flow séquentiel.** La Piece prend une **file** : une issue (`#12`), plusieurs (`#12 #13 #14`), ou des features prêtes (`FEAT-002 FEAT-003`). Tout est séquentiel : une seule Rehearsal ouverte à la fois, un seul worker actif, l'ordre de la commande fait foi (pas de dépendances entre features). À la Premiere d'une Rehearsal, le script ouvre lui-même la suivante, depuis `main` : une feature est donc planifiée sur le vrai `main`, après la dernière Premiere de la précédente. La file vit dans `.ballet/run/queue.json` ; une escalade la met en pause, `resume` reprend la Rehearsal, puis la file.
-- **Une feature** ouvre une Rehearsal de **planification**, dont le seul rôle est le Choreographer, en **mode auto** : il tranche, découpe et publie sans attendre de oui ; les questions de produit vont au Dramaturg, ce qu'il ne peut pas trancher au Director (escalade). En Workshop, il reste interactif. Une issue sans plan suit le même chemin.
+La file se joue dans l'ordre : une issue, plusieurs, ou des features prêtes. Une seule Rehearsal ouverte à la fois, un seul worker actif, pas de dépendances entre features. À la Premiere d'une Rehearsal, le script ouvre lui-même la suivante, depuis `main` : une feature est donc planifiée sur le vrai `main`, après la dernière Premiere de la précédente. Une escalade met la file en pause ; le Director tranche, puis la Rehearsal reprend, et la file avec elle.
+- **Une feature sans plan** ouvre une Rehearsal de **planification**, dont le seul rôle est le Choreographer : il tranche, découpe et publie sans attendre de oui ; les questions de produit vont au Dramaturg, ce qu'il ne peut pas trancher au Director (escalade). Une issue sans plan suit le même chemin.
 - **À son rapport**, le script lit sur GitHub l'issue et ses slices (`Part of #N` en première ligne) et les place en tête de file ; une issue sans slices entre seule.
-- **Les ADR** du Choreographer (et `AGENTS.md`) partent avec la première slice, ou l'issue unique : le worktree de la planification devient le sien (sa branche est renommée), ses commits restent au Choreographer pour la politique et arrivent sur `main` au premier merge. Pas de PR d'ADR à part.
-- **Le plan** : en `--plan review` (défaut, `[escalation] plan_approval = true`), la file s'arrête après la publication ; le Director pose `ballet:plan-approved` sur l'issue planifiée, puis `resume`. En `--plan auto`, on enchaîne.
+- **Les ADR** du Choreographer (et `AGENTS.md`) partent avec la première slice, ou l'issue unique : le worktree de la planification devient le sien, ses commits restent au Choreographer pour la politique et arrivent sur `main` au premier merge. Pas de PR d'ADR à part.
+- **Le plan** : en `assisted`, la file s'arrête après sa publication, jusqu'à `ballet:plan-approved` posé par le Director sur l'issue ; en `autopilot`, on enchaîne.
+- **La Premiere** : le Conductor merge la PR dès que le Critic rend `APPROVED`, que la politique et la CI sont vertes.
 
-On part en auto dès le début, pour mesurer la qualité du Critic grâce au journal (refus, allers-retours, builds rouges, merges à corriger après coup). Les garde-fous restent actifs : déclencheurs d'escalade, plafond d'allers-retours, politique déterministe. Des Pieces avec **tampon manuel** (plan, validation) viendront plus tard, au fil des besoins.
+On mesure la qualité du Critic grâce au journal (refus, allers-retours, builds rouges, merges à corriger après coup) avant de lâcher la main ; les garde-fous restent actifs dans les deux modes : déclencheurs d'escalade, plafond d'allers-retours, politique déterministe.
 
 ## 8. La communication entre workers
 
@@ -294,13 +283,12 @@ On part en auto dès le début, pour mesurer la qualité du Critic grâce au jou
 ### 10.1 Ballet est un plugin
 
 - Le repo `ballet` est **la source** d'un plugin Claude Code, installé une fois au niveau utilisateur. On modifie la méthode dans son repo, on la versionne, chaque projet récupère la mise à jour.
-- Les skills s'appellent `/ballet:<skill>` : `/ballet:dramaturg`, `/ballet:hybrid-track #12`, `/ballet:init-project`.
+- Les skills s'appellent `/ballet:<skill>` : `/ballet:dramaturg`, `/ballet:rehearsal #12`, `/ballet:init-project`.
 
 **Le repo Ballet contient :**
 - les règles communes : tdd, ddd, bdd, clean code, trunk-based… ;
 - les skills de rôles : `dramaturg`, `choreographer`, `dancer`, `critic`, chacun avec son équivalent fonctionnel dans sa description ;
-- les skills du Conductor : `conductor`, puis `parallel-conductor` ;
-- le répertoire des Pieces ;
+- le skill du Conductor, et une commande par boucle (Workshop, Rehearsal) avec son mode ;
 - les réglages par défaut (`config.toml`) : routage (CLI et modèle par rôle), déclencheurs d'escalade, plafonds ;
 - le modèle de `.ballet/config.toml` et le skill d'amorçage `init-project` ;
 - les scripts déterministes (config, politique, GitHub) : **Python**, dernière version, bibliothèque standard uniquement. Un script a un seul objectif ; ses fonctions publiques se lisent comme une histoire, à un niveau d'abstraction élevé et constant, et les détails techniques descendent dans des fonctions privées ;
@@ -440,15 +428,11 @@ En mono-repo, une seule entrée `[repos.<nom>]` avec `path = "."` et sans `needs
 
 ## 11. Lancer Ballet
 
-**Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca :
+**Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca. Le Director passe par le Supervisor, ou lance lui-même chaque boucle par sa commande (noms à trancher, OPP-08) :
 
-1. `/ballet:dramaturg` : le Director cadre avec le Dramaturg (Workshop), jusqu'à une feature prête dans l'espace specs.
-2. `/ballet:hybrid-track FEAT-NNN` : la Piece appelle `conductor` ; le Conductor lance le Choreographer, qui crée l'issue et son plan (#12, et ses slices), puis enchaîne les Rehearsals. Une issue déjà créée se lance aussi : `/ballet:hybrid-track #12` ; plusieurs, en file : `/ballet:hybrid-track #12 #13`, `/ballet:hybrid-track FEAT-002 FEAT-003` ; `--plan auto` pour se passer de la validation du plan.
-3. Le Conductor lit le profil et lance Choreographer, Dancer et Critic dans les bons repos (`orca orchestration worker-start --worktree path:<repo>`).
-
-Autres entrées :
-- `/ballet:auto-track "<besoin, bug ou retour>"` : le Dramaturg cadre seul, la Rehearsal suit (OPP-06) ;
-- le Workshop discovery : à déclencher à heure fixe (automations Orca, à étudier ; OPP-06).
+1. le Workshop, `/ballet:workshop [--autopilot]` : en `assisted`, le Director cadre avec le Dramaturg (`/ballet:dramaturg`), et le Choreographer s'il veut aller jusqu'au plan ; ce qui en sort entre dans la file du projet ;
+2. la Rehearsal, `/ballet:rehearsal [--autopilot] [<éléments…>]` : le Conductor joue la file (des features prêtes `FEAT-NNN`, des issues `#12`), une Rehearsal après l'autre, puis surveille la file pour ce qui arrive ;
+3. le Conductor lit le profil et lance Choreographer, Dancer et Critic dans les bons repos (`orca orchestration worker-start --worktree path:<repo>`).
 
 Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte sans effort, Mistral Vibe n'y charge `AGENTS.md` et les skills que dans un dossier de confiance, et une session y correspond à un projet.
 
@@ -458,21 +442,20 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 - **Dès la V1**, le Conductor écrit un événement par transition (JSON lines) : run, issue, phase, rôle, CLI et modèle, début, fin, résultat, allers-retours, escalades et leur motif (format à figer : OPP-36).
 - **La Scène** (`scripts/ballet_stage.py`) : une page locale en lecture seule, par projet, qui lit `.ballet/run/`, la distribution du profil et le titre des issues : la file, les Rehearsals, le rôle qui a la main, ce que le Director doit faire, et le fil des échanges, mis à jour en direct. C'est un outil d'observation pour se forger des convictions, pas un livrable de la V1 (§14).
 - **Plus tard**, un vrai tableau de bord par-dessus ces données, à la manière de ce qui était prévu pour Nightshift. Sources complémentaires côté Orca : `orca search` dans les sessions, `worker-list`, `inbox`, hooks de statut des agents.
-- Il sert à piloter, à **comparer les modèles par rôle**, et à décider quand passer une phase de manuel à auto.
+- Il sert à piloter, à **comparer les modèles par rôle**, et à décider quand passer une boucle d'`assisted` à `autopilot`.
 
 ## 13. Contraintes et limites connues
 
-- **Orca tourne en local** : Mac allumé et Orca ouvert, sinon rien n'avance. Les serveurs appariés d'Orca (`--on <environment>`) sont à étudier.
+- **Orca tourne sur la machine du Director ou un VPS** : allumée et Orca ouvert, sinon rien n'avance. Les serveurs appariés d'Orca (`--on <environment>`) sont à étudier.
 - **Branches courtes** : une branche de Rehearsal vit le temps d'une issue ; `main` ne reçoit que des PR validées, mergées une par une par le Conductor.
 - **Deux workers ne tournent jamais en même temps sur le même worktree.**
-- **Workshop discovery** : c'est le mode le plus risqué ; il commence en mode propositions (issues que le Director valide) avant d'enchaîner seul, et seulement pour certains types de travail.
+- **Le Workshop en autopilot qui choisit seul dans le backlog** est le plus risqué : il commence en propositions (des features que le Director valide) avant d'enchaîner seul, et seulement pour certains types de travail.
 
 ## 14. Hors périmètre de la V1
 
-- `parallel-conductor` et la file de merge ;
-- le Workshop discovery autonome ;
+- la Rehearsal en parallèle et la file de merge ;
+- le Workshop en autopilot qui choisit seul dans le backlog, sans propositions ;
 - le tableau de bord de monitoring abouti (le journal est dans la V1 ; la Scène n'en est que le concept, voir §12) ;
-- un cockpit dans le repo Ballet pour piloter plusieurs projets depuis un seul endroit (registre des projets, discovery entre projets) ;
 - la migration de Flownest.
 
 ## 15. Plan de test
@@ -480,19 +463,19 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 La méthode s'éprouve sur un **projet de test** (`../antimurphy`, mono-repo Rust et TS) avant d'être étendue, une marche à la fois, en notant ce qui casse avant de passer à la suivante :
 
 1. la plomberie : chaque CLI reçoit sa spec, voit les skills, sait appeler `ask` et `worker_done` (ADR 0001) ;
-2. le séquentiel `hybrid-track`, plan et validation en auto, avec le journal ;
+2. la Rehearsal séquentielle, avec le journal ;
 3. les mêmes issues rejouées avec un Dancer Claude puis Mistral, et comparées ;
-4. le Workshop auto (`auto-track`) ;
-5. un projet multi-repos, pour éprouver le profil ;
-6. le parallèle (`hybrid-parallel`) ;
-7. le Workshop discovery, en propositions d'abord ;
+4. les deux boucles en `autopilot`, Workshop puis Rehearsal (le mode nuit) ;
+5. les deux Conductors permanents et le Supervisor ;
+6. un projet multi-repos, pour éprouver le profil ;
+7. la Rehearsal en parallèle ;
 8. la migration de Flownest.
 
 ## 16. Ce que la migration de Flownest changera
 
 - Les règles génériques de Flownest (tdd, ddd, clean code, trunk-based) montent dans Ballet ; le domaine (glossaire, invariants du moteur) reste dans le projet.
 - `/code` pousse aujourd'hui sur `main` après chaque tâche : dans Ballet, le push sort du Dancer et passe au Conductor.
-- `/feature`, `/plan`, `/code`, `/slice` sont remplacés par les rôles et les Pieces de Ballet.
+- `/feature`, `/plan`, `/code`, `/slice` sont remplacés par les rôles et les boucles de Ballet.
 
 ## 17. Questions ouvertes
 
@@ -500,7 +483,10 @@ Tranchées : voir `docs/ADR/`.
 
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
-- Les automations Orca suffisent-elles pour déclencher le Workshop discovery ?
+- Le nom du Supervisor (PRD §3).
+- En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas ?
+- Le seuil de contexte qui vide une session de Conductor, et ce qu'elle doit relire pour reprendre sa casquette.
+- Le Conductor de Rehearsal sonde la file, ou le Supervisor le réveille par un message ? Les automations Orca suffisent-elles pour réveiller le Workshop en autopilot ?
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.
 - Le Dramaturg consulté pendant la Rehearsal reste-t-il éphémère, ou devient-il persistant ?
 - Le format exact du journal d'événements (OPP-36).

@@ -4,7 +4,7 @@ Ce repo est la source du plugin Ballet. La méthode est décrite dans `PRD.md`, 
 
 ## Vocabulaire
 
-Un seul nom par concept, celui de la section 3 du PRD, partout : doc, skills, clés de config, commandes (Dramaturg, Choreographer, Dancer, Critic, Conductor, Director, Workshop, Rehearsal, Premiere, Piece). L'équivalent fonctionnel (PM, architecte, dev, validateur) n'apparaît que dans la description d'un skill.
+Un seul nom par concept, celui de la section 3 du PRD, partout : doc, skills, clés de config, commandes (Dramaturg, Choreographer, Dancer, Critic, Conductor, Director, Supervisor, Workshop, Rehearsal, Premiere ; modes `assisted` et `autopilot`). L'équivalent fonctionnel (PM, architecte, dev, validateur) n'apparaît que dans la description d'un skill.
 
 ## Scripts
 
