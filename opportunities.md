@@ -8,24 +8,28 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 
 ## La vision
 
-- **Deux sessions de Conductor par projet, toujours actives**, sur la machine du Director ou un VPS : une pour le Workshop, une pour la Rehearsal. Quand la file est vide et que le contexte passe un seuil, la session se vide (`/clear`) sans perdre sa casquette de Conductor.
-- **Un Supervisor** (nom à trouver) est le point d'entrée unique du Director. Il passe ses instructions aux Conductors : par message entre sessions, ou, plus simple pour les features à traiter, en les inscrivant dans la file du projet, que le Conductor de Rehearsal surveille.
+- **La file, c'est GitHub.** Une issue a un type (`task`, `bug`, `feature`, `slice`) et un statut ; une `task`, un `bug` ou une `feature` au statut prêt attend sa Rehearsal. Les slices naissent de la planification d'une feature et se jouent à sa suite.
+- **Un observateur déterministe** (un script, pas un agent) surveille la file et lance une session de Conductor neuve pour l'élément prêt suivant, une à la fois. L'état vit dans les scripts et sur GitHub : rien à garder en mémoire d'une session à l'autre.
 - **Chaque boucle tourne en `assisted` par défaut**, ou en `autopilot` quand on la lance ainsi.
-- **Le Workshop** : en assisted, le Director et le Dramaturg, et le Choreographer quand on veut aller jusqu'au plan ; en autopilot, le Dramaturg et le Choreographer seuls. Sortie : une feature prête, ou l'issue et ses slices créées avec leur plan.
-- **La Rehearsal** part d'une feature prête (le Choreographer planifie d'abord) ou d'un plan fait au Workshop (le Dancer enchaîne), jusqu'à la Premiere. En assisted, elle escalade vers le Director ; en autopilot, c'est le mode nuit.
-- **Le Choreographer est le pivot** : il joue dans les deux boucles.
-- **En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier ; le Choreographer l'architecture, et demande le métier au Dramaturg ; le Dancer suit l'architecture, et demande au Choreographer. Le Director ne reçoit que ce qui sort de tous les périmètres, et relit après coup les décisions, tracées en ADR (architecture), specs ou rapport (métier).
+- **Le Workshop sort une feature prête, jamais un plan.** Le Choreographer y donne son avis technique tôt, parce qu'il peut changer le choix produit. En assisted, le Director, le Dramaturg et le Choreographer ; en autopilot, le Dramaturg et le Choreographer seuls, et la feature sort proposée, prête une fois que le Director l'accepte ; le full autopilot (prête d'emblée) reste une option.
+- **La Rehearsal planifie sur le vrai `main`** : le Choreographer commence par le plan, juste avant le Dancer, pour qu'il ne se périme pas. En assisted, elle escalade vers le Director ; en autopilot, c'est le mode nuit.
+- **En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier ; le Choreographer l'architecture, et demande le métier au Dramaturg ; le Dancer suit l'architecture, et demande au Choreographer. Ce qui est décidé sans le Director est marqué et réuni dans un rapport du matin ; il ne reçoit en direct que ce qui sort de tous les périmètres.
+- **Un budget** borne ce que l'autopilot dépense.
+- **Plus tard, un Supervisor** (nom à trouver), le point d'entrée du Director pour plusieurs projets.
 
-## Les deux boucles et le Supervisor
+## Les deux boucles et la file
 
-- 🆕 **OPP-01 · Deux sessions de Conductor permanentes par projet** (Workshop, Rehearsal) : chacune attend du travail au lieu de s'arrêter en fin de file ; file vide et contexte au-delà d'un seuil, elle se vide (`/clear`) et recharge son skill de Conductor.
-- 🆕 **OPP-02 · Le Supervisor** (nom à trouver, au vocabulaire du PRD §3) : le point d'entrée du Director, pour tous ses projets. Il inscrit les features à traiter dans la file du projet, et parle aux Conductors par message entre sessions pour le reste.
-- 🆕 **OPP-03 · La file du projet, surveillée par le Conductor de Rehearsal** : une file qui vit au-delà d'un run (aujourd'hui `.ballet/run/queue.json`, créée par `run` et finie à son dernier élément), où le Supervisor et le Workshop écrivent ; le Conductor de Rehearsal la sonde et ouvre l'élément qui arrive.
-- 🆕 **OPP-04 · Deux modes par boucle, `assisted` par défaut et `autopilot` au lancement** : en autopilot, chacun décide dans son périmètre (voir la vision) et trace sa décision ; le Director ne reçoit que ce qui sort de tous les périmètres.
-- 🆕 **OPP-05 · Workshop assisted** : le Director et le Dramaturg (le `/ballet:dramaturg` d'aujourd'hui), et le Choreographer quand on veut aller jusqu'au plan. Sortie : une feature prête, ou l'issue et ses slices créées avec leur plan, versées à la file du projet.
-- 🆕 **OPP-06 · Workshop autopilot** : le Dramaturg et le Choreographer, sans le Director. Il cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog (en propositions d'abord : des features que le Director valide). Sortie : des features prêtes et des issues découpées en slices avec leur plan, versées à la file du projet.
-- 🆕 **OPP-07 · Rehearsal : deux points d'entrée, deux modes** : une feature prête sans plan (le Choreographer commence) ou un plan fait au Workshop (le Dancer enchaîne), les deux existent déjà ; assisted, elle escalade vers le Director (approbation du plan comprise, aujourd'hui `--plan review`) ; autopilot, le mode nuit, les décisions prises par périmètre et partagées (ADR, rapport).
-- 🆕 **OPP-08 · Retirer `hybrid-track`** des skills, du README et des scripts : une commande par boucle avec son mode (`/ballet:workshop`, `/ballet:rehearsal [--autopilot]`, noms à trancher), `--plan review|auto` remplacé par le mode. Le PRD décrit déjà les deux boucles, leurs modes et le Supervisor.
+- 🆕 **OPP-01 · L'observateur** : un script déterministe (ou une automation Orca) qui surveille la file sur GitHub et lance une session de Conductor neuve par élément prêt, une à la fois ; à la Premiere, il passe au suivant. Remplace la file locale `.ballet/run/queue.json` et la commande qui la joue.
+- 🆕 **OPP-02 · Le Supervisor** (nom à trouver), pour plusieurs projets : arbitrer les priorités et le budget entre eux, résumer le matin. À affiner une fois deux projets en route.
+- 🆕 **OPP-03 · La file sur GitHub** : un type par issue (`task`, `bug`, `feature`, `slice` : des libellés, les types natifs de GitHub étant réservés aux organisations), un statut (proposée, prête), et l'ordre de passage, à trancher. Seules les `task`, `bug` et `feature` prêtes réveillent l'observateur ; les slices suivent leur feature (lié à OPP-28, sous-issues natives). Une feature prête au Workshop devient une issue de type `feature`, sans plan.
+- 🆕 **OPP-04 · Deux modes par boucle, `assisted` par défaut et `autopilot` au lancement** : en autopilot, chacun décide dans son périmètre et trace sa décision ; ce qui est décidé sans le Director porte une marque (par exemple `ballet:decided-alone`) et entre au rapport du matin.
+- 🆕 **OPP-05 · Workshop assisted** : le Director, le Dramaturg (le `/ballet:dramaturg` d'aujourd'hui) et le Choreographer pour l'avis technique, tôt. Sortie : une feature prête, versée à la file.
+- 🆕 **OPP-06 · Workshop autopilot** : le Dramaturg et le Choreographer, sans le Director. Il cadre une demande, un bug ou un retour, ou choisit lui-même dans le backlog. Sortie : des features proposées, que le Director accepte avant qu'elles entrent dans la file ; en option, le full autopilot les rend prêtes d'emblée.
+- 🆕 **OPP-07 · Rehearsal assisted ou autopilot** : le Choreographer planifie au début, sur le vrai `main` (une issue qui a déjà son plan va droit au Dancer) ; assisted, le Director valide le plan (aujourd'hui `--plan review`) et reçoit les escalades ; autopilot, le mode nuit, les décisions prises par périmètre.
+- 🆕 **OPP-08 · Retirer `hybrid-track`** des skills, du README et des scripts : une commande par boucle avec son mode (`/ballet:workshop`, `/ballet:rehearsal [--autopilot]`, noms à trancher), `--plan review|auto` remplacé par le mode. Le PRD décrit déjà les deux boucles et leurs modes.
+- 🆕 **OPP-52 · Le rapport du matin** : ce que la nuit a mergé, escaladé, et décidé sans le Director (ADR, specs, rapports), de quoi relire en quelques minutes.
+- 🆕 **OPP-53 · Le budget de l'autopilot** : un plafond (par nuit, par projet ; en tokens, en temps ou en Rehearsals, à affiner) ; atteint, l'observateur n'ouvre plus rien et le dit.
+- 🆕 **OPP-54 · Une escalade la nuit** : aujourd'hui, elle arrête toute la file et la nuit est perdue. Passer à l'élément suivant qui n'en dépend pas suppose de connaître les dépendances entre éléments (par exemple les dépendances natives de GitHub, « blocked by »).
 
 ## Premier vrai run de la mutation (antimurphy)
 
