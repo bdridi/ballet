@@ -2,6 +2,15 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.30.1 — 2026-11-19 · `v0.30.1`
+
+Un Dancer refusé pour des fichiers qu'il n'a pas touchés (FEAT-005 sur antimurphy : `AGENTS.md` et l'ADR 0009, commités par le Choreographer).
+
+- La politique juge le Dancer sur ce qu'il a fait : face au `HEAD` qu'il a reçu à sa première mission (`dancer_start`, noté une fois, jamais déplacé aux tours suivants), plus face à l'ouverture du worktree. Les commits du Choreographer et du Dramaturg d'avant ne comptent plus contre lui ; ce qu'il édite lui-même (`AGENTS.md`, un ADR) reste refusé, à chaque tour. Un ancien état sans `dancer_start` se juge comme avant.
+- Le Choreographer ou le Dramaturg qui pose une question est vérifié par la politique, et ses commits lui sont notés (`owned`), avant que la question parte : le point de contrôle ne saute plus ses commits quand elle va à l'autre rôle. Un commit hors de son périmètre escalade avant la question.
+
+**Opportunités traitées** : OPP-71.
+
 ## 0.30.0 — 2026-11-19 · `v0.30.0`
 
 Le coût d'un run (retour FEAT-004 sur antimurphy : 8 slices, des tours sans travail, la preuve et la mutation en double).

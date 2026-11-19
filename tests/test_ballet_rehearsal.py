@@ -61,6 +61,7 @@ class FakeWorld:
         self.head = "c0ffee1"
         self.dirty = ""
         self.changed = []
+        self.changed_since = {}     # départ d'un diff `<départ>..HEAD` → fichiers changés ; sinon `changed`
         self.new_commits = []
         self.issues = {}            # numéro → {title, body, state, labels} ; les autres issues sont #3
         self.fields = {}            # numéro → {type, mode, status} ; par défaut une Feature sans mode ni statut
@@ -122,6 +123,8 @@ class FakeWorld:
         }
         if arguments[0] == "rev-list" and arguments[1] != "--count":
             return "\n".join(self.new_commits)
+        if arguments[:2] == ["diff", "--name-only"]:
+            return "\n".join(self.changed_since.get(arguments[-1].split("..")[0], self.changed))
         return answers.get(tuple(arguments[:2]), "")
 
     def gh(self, arguments):
@@ -440,6 +443,68 @@ class BalletRehearsalTest(unittest.TestCase):
     def test_le_point_de_depart_de_la_branche_est_note_a_l_ouverture_du_worktree(self):
         self.begin()
         self.assertEqual(self.state()["base"], "c0ffee1")
+
+    def choreographer_plans_then_the_dancer_follows(self):
+        """Le projet enchaîne sur le plan : le Dancer part au rapport du Choreographer, qui a écrit le plan sur l'issue."""
+        (self.home / ".ballet" / "config.toml").write_text(CHAINED_PROFILE, encoding="utf-8")
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.begin()
+
+    def planned(self):
+        self.world.issue_body = PLANNED_ISSUE
+        return self.receive(message("choreographer", "conductor", "report", "- Plan written."))
+
+    def test_le_dancer_lance_a_l_ouverture_note_le_head_qu_il_a_recu(self):
+        self.begin()
+        self.assertEqual(self.state()["dancer_start"], "c0ffee1")
+
+    def test_le_dancer_lance_apres_le_plan_note_le_head_d_apres_les_commits_du_choreographer(self):
+        self.choreographer_plans_then_the_dancer_follows()
+        self.world.head = "plan001"
+        self.planned()
+        self.assertEqual(self.state()["dancer_start"], "plan001")
+
+    def test_le_dancer_juge_depuis_son_point_de_depart_apres_les_commits_du_choreographer_et_du_dramaturg(self):
+        self.choreographer_plans_then_the_dancer_follows()
+        self.world.head, self.world.new_commits = "adr0009", ["adr0009", "rule505"]
+        self.receive(message("choreographer", "dramaturg", "question", "1. Empty stock?"), question_id="msg_1")
+        self.world.head, self.world.new_commits = "spec0c18", ["spec0c18"]
+        self.receive(message("dramaturg", "choreographer", "answer", "1. Rectified."))
+        self.world.head, self.world.new_commits = "plan001", []
+        self.planned()
+        self.world.head, self.world.new_commits = "dance01", ["dance01"]
+        self.world.changed = ["AGENTS.md", "docs/ADR/0009-stock.md", "src/a.rs"]
+        self.world.changed_since = {"plan001": ["src/a.rs"]}
+        step = self.receive(message("dancer", "conductor", "report", "- Tasks: all done."))
+        self.assertEqual((self.state()["violations"], self.state()["owned"], self.state()["dancer_start"]),
+                         ({}, ["adr0009", "rule505", "spec0c18"], "plan001"))
+        self.assertEqual(step.next, "wait")
+        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+
+    def test_le_choreographer_qui_pose_une_question_est_verifie_avant_qu_elle_parte(self):
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.begin()
+        self.world.changed = ["src/a.rs"]
+        step = self.receive(message("choreographer", "dramaturg", "question", "1. A?"), question_id="msg_1")
+        self.assertEqual(step.next, "escalate")
+        self.assertEqual((self.state()["pending"], self.world.started_roles()), ([], ["Choreographer · FEAT-001.2"]))
+
+    def test_une_question_au_director_ne_fait_pas_des_commits_du_choreographer_les_siens(self):
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.begin()
+        self.world.new_commits = ["adr0009"]
+        self.receive(message("choreographer", "director", "question", "1. A?"), question_id="msg_1")
+        self.assertEqual(self.state()["owned"], [])
+
+    def test_un_etat_d_avant_dancer_start_se_charge_et_juge_depuis_la_base(self):
+        self.begin()
+        state_path = self.home / ".ballet" / "run" / "FEAT-001.2.json"
+        old_state = {key: value for key, value in self.state().items() if key != "dancer_start"}
+        state_path.write_text(json.dumps(old_state), encoding="utf-8")
+        self.world.changed_since = {"c0ffee1": ["src/a.rs"]}
+        self.world.changed = ["AGENTS.md"]
+        step = self.receive(message("dancer", "conductor", "report", "- Tasks: all done."))
+        self.assertEqual((step.next, self.state()["violations"]), ("wait", {}))
 
     def test_une_preuve_trop_longue_escalade(self):
         self.begin()

@@ -13,9 +13,10 @@ Le périmètre d'un rôle vient de `[policy.roles.<rôle>]` : un chemin est perm
 
 Pour tous : rester sur la branche de Rehearsal, ne pas réécrire l'historique (le `HEAD` d'avant reste un ancêtre),
 ne créer ni supprimer de branche ni de tag, laisser l'arbre de travail propre (sauf un rôle qui répond au Dancer :
-l'arbre du Dancer est alors en cours). Le Dancer est jugé sur le diff net de sa branche face à son point de départ
-(le `HEAD` du worktree à son ouverture, noté par le Conductor ; à défaut, l'ancêtre commun avec `origin/main`), hors
-des fichiers que seuls les commits des autres rôles ont touchés ; aucun test présent au départ ne doit y disparaître
+l'arbre du Dancer est alors en cours). Le Dancer est jugé sur le diff net de sa branche face au `HEAD` qu'il a reçu
+(noté par le Conductor à sa première mission : les commits du Choreographer et du Dramaturg d'avant ne comptent pas ;
+à défaut, le `HEAD` du worktree à son ouverture, puis l'ancêtre commun avec `origin/main`), hors des fichiers que
+seuls les commits des autres rôles, venus pendant son travail, ont touchés ; aucun test présent au départ ne doit y disparaître
 ni changer de nom, sauf un renommage que le Dancer déclare dans son rapport (`- Renamed test: <ancien> → <nouveau>`).
 
 Les données viennent de la config (`[policy]` du plugin, surchargé par le projet) : `forbidden_zones`,
@@ -71,7 +72,8 @@ class Passage:
     refs: list = field(default_factory=list)      # branches et tags à ce moment
     owned: list = field(default_factory=list)     # les commits des autres rôles, vérifiés à leur passage
     answering: bool = False                       # le rôle répond pendant que le Dancer attend
-    base: str = ""                                # le point de départ de la branche ; vide, l'ancêtre commun avec `origin/main`
+    dancer_start: str = ""                        # `HEAD` quand le Dancer a reçu la branche : ce qu'il a fait en part
+    base: str = ""                                # sans `dancer_start`, le point de départ de la branche ; vide, l'ancêtre commun avec `origin/main`
     renamed: dict = field(default_factory=dict)   # les tests renommés que le Dancer déclare : ancien nom → nouveau
 
 
@@ -178,8 +180,8 @@ def _passage_within_perimeter(passage, policy, git):
 
 
 def _branch_within_perimeter(passage, policy, git):
-    """Le Dancer : ce que la branche change face à son point de départ, au net (un changement annulé n'en est plus
-    un), hors des fichiers que seuls les commits des autres rôles ont touchés."""
+    """Le Dancer : ce que la branche change depuis qu'il l'a reçue, au net (un changement annulé n'en est plus un),
+    hors des fichiers que seuls les commits des autres rôles, venus pendant son travail, ont touchés."""
     base = _base(passage, git)
     found = []
     for path in git(["diff", "--name-only", "--no-renames", f"{base}..HEAD"]).split():
@@ -190,7 +192,7 @@ def _branch_within_perimeter(passage, policy, git):
 
 
 def _kept_tests(passage, policy, git):
-    """Chaque test présent au départ de la branche existe encore sous le même nom, ou sous celui que le Dancer déclare."""
+    """Chaque test présent quand le Dancer a reçu la branche existe encore sous le même nom, ou sous celui que le Dancer déclare."""
     base = _base(passage, git)
     found = []
     for status, path in _modified_or_deleted(base, git):
@@ -243,8 +245,8 @@ def _folder_globs(folder):
 
 
 def _base(passage, git):
-    """Le point de départ noté à l'ouverture du worktree ; une branche sans lui se compare à `origin/main`."""
-    return passage.base or git(["merge-base", BASE, "HEAD"]).strip()
+    """Où le Dancer a reçu la branche ; sans ce `HEAD` (un ancien état), l'ouverture du worktree, puis `origin/main`."""
+    return passage.dancer_start or passage.base or git(["merge-base", BASE, "HEAD"]).strip()
 
 
 def _declared_rename(name, after, passage):

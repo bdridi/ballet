@@ -104,6 +104,52 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.commit({"AGENTS.md": "rules\nand mine\n"})
         self.assertEqual(self.repo.violations(passage), ["AGENTS.md: a forbidden zone of [policy] forbidden_zones"])
 
+    def planned_before_the_dancer(self):
+        """Le Choreographer puis le Dramaturg commitent avant le Dancer : un ADR, une règle, un correctif de spec."""
+        self.repo.commit({"docs/ADR/0009-stock.md": "adr\n"}, "choreographer: adr")
+        self.repo.commit({"AGENTS.md": "rules\nand one more\n"}, "choreographer: rule")
+        self.repo.commit({"specs/features/FEAT-005.md": "fixed\n"}, "dramaturg: spec")
+        return ballet_policy.head(self.repo.git)
+
+    def test_les_commits_d_avant_le_dancer_ne_comptent_pas_contre_lui_sans_liste_owned(self):
+        start = self.planned_before_the_dancer()
+        passage = self.repo.passage("dancer", dancer_start=start)
+        self.repo.commit({"src/b.ts": "b\n"})
+        self.assertEqual(self.repo.violations(passage), [])
+
+    def test_le_dancer_qui_edite_agents_md_apres_ces_commits_est_en_violation(self):
+        start = self.planned_before_the_dancer()
+        passage = self.repo.passage("dancer", dancer_start=start)
+        self.repo.commit({"src/b.ts": "b\n", "AGENTS.md": "rules\nand mine\n"})
+        self.assertEqual(self.repo.violations(passage), ["AGENTS.md: a forbidden zone of [policy] forbidden_zones"])
+
+    def test_le_dancer_qui_edite_un_adr_est_en_violation(self):
+        start = self.planned_before_the_dancer()
+        passage = self.repo.passage("dancer", dancer_start=start)
+        self.repo.commit({"docs/ADR/0010-mine.md": "adr\n"})
+        self.assertEqual(self.repo.violations(passage), ["docs/ADR/0010-mine.md: the ADR folder"])
+
+    def test_un_second_tour_du_dancer_est_juge_depuis_son_point_de_depart(self):
+        start = self.planned_before_the_dancer()
+        self.repo.passage("dancer", dancer_start=start)
+        self.repo.commit({"AGENTS.md": "rules\nand mine\n"})
+        second_round = self.repo.passage("dancer", dancer_start=start)
+        self.repo.commit({"src/b.ts": "b\n"})
+        self.assertEqual(self.repo.violations(second_round), ["AGENTS.md: a forbidden zone of [policy] forbidden_zones"])
+
+    def test_un_test_retire_avant_le_dancer_ne_compte_pas_contre_lui(self):
+        self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")}, "choreographer: spec of the test")
+        start = ballet_policy.head(self.repo.git)
+        passage = self.repo.passage("dancer", dancer_start=start)
+        self.repo.commit({"src/b.ts": "b\n"})
+        self.assertEqual(self.repo.violations(passage), [])
+
+    def test_sans_dancer_start_la_branche_se_compare_encore_a_son_point_de_depart(self):
+        start = ballet_policy.head(self.repo.git)
+        passage = self.repo.passage("dancer", base=start)
+        self.repo.commit({"AGENTS.md": "rules\nand mine\n"})
+        self.assertEqual(self.repo.violations(passage), ["AGENTS.md: a forbidden zone of [policy] forbidden_zones"])
+
     def test_un_test_existant_supprime_ou_renomme_est_une_violation(self):
         passage = self.repo.passage("dancer")
         self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
