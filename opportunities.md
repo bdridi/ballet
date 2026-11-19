@@ -56,7 +56,7 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 ## CLI et modèles
 
 - 🆕 **OPP-33 · Grok** : vérifier `/ballet:dramaturg`, le priver du jeton GitHub par l'environnement du lancement, le limiter au dossier de travail (`--sandbox workspace` n'a rien bloqué sous `/tmp`). Bloqué par la limite d'usage gratuit.
-- 🆕 **OPP-34 · Dancer Claude puis Dancer Mistral** sur les mêmes issues, et comparaison (PRD §15.4) ; Mistral Vibe lancé par le Conductor.
+- 🆕 **OPP-34 · Dancer Claude puis Dancer Mistral** sur les mêmes issues, et comparaison (PRD §9) ; Mistral Vibe lancé par le Conductor.
 
 ## La Scène
 
