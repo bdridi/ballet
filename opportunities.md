@@ -6,6 +6,16 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 - Un sujet garde son numéro pour toujours ; un sujet traité reste ici, coché.
 - Dans chaque section, du plus pressé au plus lointain.
 
+## Les deux boucles : Workshop et Rehearsal
+
+- 🆕 **OPP-46 · Un Conductor par projet**, une seule session par boucle : une pour le Workshop, une pour la Rehearsal.
+- 🆕 **OPP-47 · Workshop assisté, Director et Dramaturg** : le cadrage seul, sans automatisation. Sortie : une feature prête. C'est le `/ballet:dramaturg` d'aujourd'hui, à nommer comme un mode de la boucle.
+- 🆕 **OPP-48 · Workshop assisté, Director, Dramaturg et Choreographer** : sortie, une feature prête ou déjà planifiée (l'issue et ses slices créées, chacune avec son plan).
+- 🆕 **OPP-49 · Workshop autopilot, Dramaturg et Choreographer** : la boucle automatisée, sans le Director. Sortie : des features prêtes, et des issues découpées en slices avec leur plan. Recoupe OPP-40 (Workshop auto) et OPP-43 (discovery).
+- 🆕 **OPP-50 · Rehearsal autonome (le mode nuit)** : elle tourne seule, avec escalade, ou en autopilot où les décisions sont prises sans le Director et partagées (ADR, rapport) pour qu'il les relise après coup.
+- 🆕 **OPP-51 · Deux points d'entrée de la Rehearsal** : une feature prête sans plan (le Choreographer commence), ou un plan déjà fait pendant le Workshop (le Dancer enchaîne). Les deux existent déjà dans `hybrid-track` ; reste à les rattacher aux modes du Workshop (OPP-48, OPP-49).
+- 🆕 **OPP-52 · En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier, le Choreographer l'architecture (il demande le métier au Dramaturg), le Dancer suit l'architecture (il demande au Choreographer). Le Director ne reçoit que ce qui sort de tous les périmètres. Chaque décision est tracée : ADR pour l'architecture, specs ou rapport pour le métier.
+
 ## Premier vrai run de la mutation (antimurphy)
 
 - 🆕 **OPP-01 · Le projet porte l'outil** : la TASK du Choreographer (ADR 0007 mise, `mise.toml` avec cargo-mutants 27.1.0, `.cargo/mutants.toml`, `mutants.out/` dans le `.gitignore`), la CI passée à mise à la main, puis l'entrée `[[repos.antimurphy.mutation]]` du profil, à la main par le Director.
