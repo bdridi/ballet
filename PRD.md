@@ -487,7 +487,7 @@ Tranchées : voir `docs/ADR/`.
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
 - L'ordre de la file sur GitHub (OPP-03).
-- Qui choisit le mode d'une Rehearsal lancée par l'observateur (`autopilot`, `--require-plan-approval`) : un défaut du profil, un libellé sur l'issue, ou les deux (OPP-03) ?
+- Le mode se choisit par boucle (un Workshop `assisted` peut précéder une Rehearsal `autopilot`) : quand l'observateur lance, il le lit sur un libellé de l'issue, un défaut du profil, ou les deux (OPP-03) ?
 - En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas (OPP-54) ?
 - L'observateur : un script lancé à intervalle, ou les automations Orca ? Et pour réveiller le Workshop en autopilot ?
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.
