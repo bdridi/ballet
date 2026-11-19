@@ -126,7 +126,7 @@ When a feature is `ready`, or a bug or a task reaches the top of *Next up*, you 
 2. Show it to the Director and publish it after their yes: `publish <file> <type> <status>`, where the type is `Feature`, `Bug` or `Task`, and the status is:
    - `ready`: the Director said yes to this feature, so it enters the queue now;
    - `proposed`: in a Workshop in autopilot, the feature waits for the Director's yes before it enters the queue (`ready` only when the Director chose full autopilot, PRD §6).
-3. The script prints the issue number: note nothing in the specs (progress lives in the issues), tell the Director the number and which feature is ready. The Workshop is over; they launch what comes next (`/ballet:hybrid-track #<n>`).
+3. The script prints the issue number: note nothing in the specs (progress lives in the issues), tell the Director the number and which feature is ready. The Workshop is over; they launch what comes next (`/ballet:rehearsal #<n>`).
 
 If the script refuses because the type or the `Ballet status` field is missing, tell the Director to run `/ballet:init-project`; never publish an issue without them, it would stay out of the queue.
 

@@ -60,8 +60,9 @@ class BalletStageTest(unittest.TestCase):
         limits = ballet_stage.snapshot([self.home])["projects"][0]["limits"]
         self.assertEqual((limits["max_round_trips"], limits["max_diff_lines"]), (2, 400))
 
-    def _session(self, **session):
-        (self.run / "queue.json").write_text(json.dumps(session), encoding="utf-8")
+    def _session(self, item="FEAT-004", **session):
+        key = item.lstrip("#")
+        (self.run / f"session-{key}.json").write_text(json.dumps({"item": item, "status": "open", **session}), encoding="utf-8")
 
     def _queue(self):
         return ballet_stage.snapshot([self.home])["projects"][0]["queue"]
@@ -77,36 +78,37 @@ class BalletStageTest(unittest.TestCase):
         self.assertEqual(self._queue()["sessions"], [])
 
     def test_une_session_ouverte_donne_son_element_ses_slices_et_sa_rehearsal_courante(self):
-        self._session(plan="review", items=["#35", "#36"], current="FEAT-004.1",
+        self._session(mode="assisted + plan approval", items=["#35", "#36"], current="FEAT-004.1",
                       played=[{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}])
         project = ballet_stage.snapshot([self.home])["projects"][0]
-        self.assertEqual(project["queue"]["sessions"], [{"item": "FEAT-004", "plan": "review", "current": "FEAT-004.1",
+        self.assertEqual(project["queue"]["sessions"], [{"item": "FEAT-004", "mode": "assisted + plan approval", "current": "FEAT-004.1",
                           "items": ["#35", "#36"], "played": [{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}]}])
         self.assertEqual(project["queue_titles"]["#35"], "FEAT-001.2 · Issue 35")
 
     def test_une_session_finie_n_est_plus_ouverte(self):
-        self._session(plan="auto", items=[], current="", played=[{"item": "#12", "rehearsal": "FEAT-001.2"}])
+        self._session(item="#12", status="done", items=[], current="", played=[{"item": "#12", "rehearsal": "FEAT-001.2"}])
         self.assertEqual(self._queue()["sessions"], [])
 
     def test_une_session_en_pause_reste_ouverte(self):
-        self._session(plan="review", items=["#35"], current="", played=[{"item": "#32", "rehearsal": "FEAT-004.1"}])
+        self._session(mode="assisted", items=["#35"], current="", played=[{"item": "#32", "rehearsal": "FEAT-004.1"}])
         self.assertEqual([session["items"] for session in self._queue()["sessions"]], [["#35"]])
 
     def test_les_elements_pris_par_une_session_sortent_du_programme(self):
         self.program = [{"item": "#32", "title": "La feature"}, {"item": "#35", "title": "Une slice"}, {"item": "#50", "title": "Le paiement"}]
-        self._session(plan="auto", items=["#35"], current="FEAT-004.2", played=[{"item": "#32", "rehearsal": "FEAT-004.1"}])
+        self._session(mode="assisted", items=["#35"], current="FEAT-004.2", played=[{"item": "#32", "rehearsal": "FEAT-004.1"}])
         self.assertEqual([item["item"] for item in self._queue()["program"]], ["#50"])
 
     def test_deux_sessions_ouvertes_gardent_chacune_leurs_slices_et_sortent_du_programme(self):
-        sessions = [{"item": "FEAT-004", "plan": "auto", "current": "FEAT-004.2", "items": ["#35"], "played": [{"item": "#32", "rehearsal": "FEAT-004.2"}]},
-                    {"item": "#20", "plan": "review", "current": "FEAT-005.1", "items": ["#44", "#45"], "played": [{"item": "#20", "rehearsal": "FEAT-005.1"}]}]
-        program = {"items": [{"item": "#20", "title": "x"}, {"item": "#35", "title": "y"}, {"item": "#60", "title": "z"}], "error": ""}
-        queue = ballet_stage._queue(program, sessions, [], [])
-        self.assertEqual([session["items"] for session in queue["sessions"]], [["#35"], ["#44", "#45"]])
+        self.program = [{"item": "#20", "title": "x"}, {"item": "#35", "title": "y"}, {"item": "#60", "title": "z"}]
+        self._session(mode="assisted", current="FEAT-004.2", items=["#35"], played=[{"item": "#32", "rehearsal": "FEAT-004.2"}])
+        self._session(item="#20", mode="autopilot", current="FEAT-005.1", items=["#44", "#45"], played=[{"item": "#20", "rehearsal": "FEAT-005.1"}])
+        queue = self._queue()
+        self.assertEqual(sorted(session["item"] for session in queue["sessions"]), ["#20", "FEAT-004"])
+        self.assertEqual(sorted(session["items"] for session in queue["sessions"]), [["#35"], ["#44", "#45"]])
         self.assertEqual([item["item"] for item in queue["program"]], ["#60"])
 
-    def test_un_queue_json_a_moitie_ecrit_vaut_zero_session(self):
-        (self.run / "queue.json").write_text('{"items": ["#3', encoding="utf-8")
+    def test_une_session_a_moitie_ecrite_n_est_pas_une_session(self):
+        (self.run / "session-3.json").write_text('{"item": "#3', encoding="utf-8")
         self.assertEqual(self._queue()["sessions"], [])
 
     def test_l_historique_joue_vient_des_begin_du_journal(self):

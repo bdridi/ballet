@@ -233,6 +233,36 @@ class BalletGitHubTest(unittest.TestCase):
         with self.assertRaisesRegex(ballet_github.GitHubError, r"issue #42 was created.*init-project"):
             ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh)
 
+    def test_pose_le_statut_d_une_issue_existante(self):
+        gh = FakeGh()
+        ballet_github.set_status("#42", "in-rehearsal", run=gh)
+        self.assertIn("option=OPT-in-rehearsal", gh.calls[-1])
+        self.assertIn("number=42", gh.calls[0])
+
+    def test_refuse_de_poser_un_statut_inconnu(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Ballet status 'wip'"):
+            ballet_github.set_status("42", "wip", run=gh)
+        self.assertEqual(gh.calls, [])
+
+    def test_lit_le_type_le_mode_et_le_statut_d_une_issue(self):
+        values = [{"name": "assisted + plan approval", "field": {"name": "Rehearsal mode"}},
+                  {"name": "ready", "field": {"name": "Ballet status"}}, {}]
+        answer = {"data": {"repository": {"issue": {"issueType": {"name": "Bug"}, "issueFieldValues": {"nodes": values}}}}}
+        calls = []
+
+        def gh(arguments):
+            calls.append(arguments)
+            return json.dumps(answer)
+        self.assertEqual(ballet_github.queue_fields("#12", run=gh),
+                         {"type": "Bug", "mode": "assisted + plan approval", "status": "ready"})
+        self.assertIn("number=12", calls[0])
+
+    def test_une_issue_sans_type_ni_champ_se_lit_vide(self):
+        answer = {"data": {"repository": {"issue": {"issueType": None, "issueFieldValues": {"nodes": []}}}}}
+        self.assertEqual(ballet_github.queue_fields("12", run=lambda arguments: json.dumps(answer)),
+                         {"type": "", "mode": "", "status": ""})
+
     def test_un_refus_de_github_sur_le_champ_nomme_l_issue(self):
         gh = FakeGh()
         gh.mutation_reply = json.dumps({"errors": [{"message": "Resource not accessible"}]})

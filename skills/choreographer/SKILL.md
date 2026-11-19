@@ -119,7 +119,7 @@ Show the full plan, iterate until the Director agrees, then write it on the issu
 
 ## Auto mode (under the Conductor)
 
-The Conductor starts you on a ready feature, or on an issue without a plan, and says **auto mode** in your assignment. Nobody answers in this session: the Director reviews the published plan afterwards (`--plan review`, before any code), or not at all (`--plan auto`). Everything above holds, except who says yes:
+The Conductor starts you on a ready feature, or on an issue without a plan, and says **auto mode** in your assignment. Nobody answers in this session: the Director reviews the published plan afterwards (Rehearsal mode `assisted + plan approval`, before any code), or not at all (the other modes). Everything above holds, except who says yes:
 
 - **You settle every choice yourself.** Where step 2 waits for the Director (assumptions, exclusions, competing readings, technical questions), decide, and write each choice in *Decisions* with its one-line why, so the Director and the Critic can read it.
 - **Spikes and tooling probes**: run them without asking, within their time box; decide from the result.

@@ -250,7 +250,7 @@ const cleanTitle = title => (title || '').replace(/^(FEAT|BUG|TASK)-\d{3}(\.\d+)
 function originOf(state, events, queued){
   const trigger = state.trigger || events.find(e => e.event === 'begin')?.detail?.trigger;
   if (trigger) return `label ${trigger.label || trigger}`;
-  return queued.has(state.id) ? 'file' : 'lancée à la main';
+  return queued.has(state.id) ? 'session' : 'lancée à la main';
 }
 
 /* Le journal découpé en scènes : qui a la main, de quand à quand. Un agent garde la main jusqu'à sa réponse ;
@@ -467,7 +467,7 @@ function pageProgramme(project, all){
   const sessionRows = session => sessionEntries(project, session, all).map((e, i) => e.next ? ghostRow(e, i + 1)
     : row(e.r, i + 1, e.item !== '#' + e.r.state.issue ? `<span>← ${esc(e.item)}</span>` : '')).join('');
   return `<h1>Programme</h1>
-    ${sessions.map(session => `<h3>Session <b class="mono">${esc(session.item)}</b> ${session.plan ? `<span class="chip">plan ${esc(session.plan)}</span>` : ''}<small>un Conductor, ses slices dans l'ordre</small></h3>${sessionRows(session)}`).join('')}
+    ${sessions.map(session => `<h3>Session <b class="mono">${esc(session.item)}</b> ${session.mode ? `<span class="chip">${esc(session.mode)}</span>` : ''}<small>un Conductor, ses slices dans l'ordre</small></h3>${sessionRows(session)}`).join('')}
     <h3>À jouer sur GitHub <small>${program.length} prêt(s), par priorité puis ancienneté</small></h3>
     ${stopped}${program.map((p, i) => ghostRow({item:p.item, title:`${typeLetter(p.type)} · ${p.priority || 'sans priorité'} · ${cleanTitle(p.title)}`}, i + 1)).join('')
       || (project.queue_error ? '' : '<p class="empty">Aucun élément prêt.</p>')}

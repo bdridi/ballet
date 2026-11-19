@@ -51,6 +51,7 @@ PLAN_PLACEHOLDER = "_The Choreographer writes the plan here._"
 PUBLISHED_TYPES = ("Feature", "Bug", "Task")
 SLICE_TYPE = "Slice"
 STATUS_FIELD = "Ballet status"
+MODE_FIELD = "Rehearsal mode"
 BALLET_STATUSES = ("proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done")
 NEXT_GLOBAL_ID = "X-Github-Next-Global-ID: 1"  # les ID d'issue et de champ au format actuel
 ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!) {
@@ -59,6 +60,14 @@ ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!
     ... on User { issueFields(first: 50) { nodes { ... on IssueFieldSingleSelect { id name options { id name } } } } }
     ... on Organization { issueFields(first: 50) { nodes { ... on IssueFieldSingleSelect { id name options { id name } } } } }
   }
+}"""
+QUEUE_FIELDS = """query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { issue(number: $number) {
+    issueType { name }
+    issueFieldValues(first: 20) { nodes {
+      ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } }
+    } }
+  } }
 }"""
 SET_STATUS = """mutation($issue: ID!, $field: ID!, $option: ID!) {
   setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option}]}) { issue { id } }
@@ -108,8 +117,30 @@ def publish_issue(draft_path, issue_type, status, run=None):
     _require_among(status, BALLET_STATUSES, "Ballet status")
     title, body = _title_and_body(_read_draft(draft_path))
     number = _create_issue(title, _with_plan_section(body), run, issue_type)
-    _set_status(number, status, run)
+    try:
+        set_status(number, status, run)
+    except GitHubError as error:
+        raise GitHubError(f"issue #{number} was created, but its {STATUS_FIELD} is not '{status}': {error}")
     return number
+
+
+def set_status(number, status, run=None):
+    """Le champ `Ballet status` de l'issue : là où elle en est dans la file."""
+    run = run or _run_gh
+    _require_among(status, BALLET_STATUSES, "Ballet status")
+    issue, field, option = _status_ids(_issue_number(number), status, run)
+    _graphql(["-f", f"query={SET_STATUS}", "-f", f"issue={issue}", "-f", f"field={field}", "-f", f"option={option}"], run)
+
+
+def queue_fields(number, run=None):
+    """Ce que la file lit sur une issue : son type natif, son `Rehearsal mode` et son `Ballet status` (vides s'ils ne sont pas posés)."""
+    answer = _graphql(["-f", f"query={QUEUE_FIELDS}", "-F", "owner={owner}", "-F", "name={repo}",
+                       "-F", f"number={_issue_number(number)}"], run or _run_gh)["data"]
+    issue = answer["repository"]["issue"] or {}
+    values = {(value.get("field") or {}).get("name"): value["name"]
+              for value in (issue.get("issueFieldValues") or {}).get("nodes", []) if value}
+    return {"type": (issue.get("issueType") or {}).get("name", ""), "mode": values.get(MODE_FIELD, ""),
+            "status": values.get(STATUS_FIELD, "")}
 
 
 def write_plan(number, plan_path, run=None):
@@ -411,15 +442,6 @@ def _delete_remote_branch(branch, git):
 def _create_issue(title, body, run, issue_type):
     url = run(["issue", "create", "--title", title, "--body", body, "--type", issue_type]).strip()
     return url.rsplit("/", 1)[-1]
-
-
-def _set_status(number, status, run):
-    """Le champ `Ballet status` de l'issue. Si GitHub refuse, l'issue existe déjà : l'erreur la nomme."""
-    try:
-        issue, field, option = _status_ids(number, status, run)
-        _graphql(["-f", f"query={SET_STATUS}", "-f", f"issue={issue}", "-f", f"field={field}", "-f", f"option={option}"], run)
-    except GitHubError as error:
-        raise GitHubError(f"issue #{number} was created, but its {STATUS_FIELD} is not '{status}': {error}")
 
 
 def _status_ids(number, status, run):

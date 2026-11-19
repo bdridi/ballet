@@ -9,8 +9,8 @@ La page d'origine répond sur `/`, la nouvelle (`stage/v2.html`) sur `/v2` : les
 Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json` et `journal.jsonl`), le profil
 (CLI et modèle par rôle, seuils d'escalade) et le titre des issues des Rehearsals (`gh issue view`, gardé en mémoire).
 Le programme, ce qui attend sa Rehearsal, vient de GitHub (`ballet_program.py`, relu toutes les 30 secondes) ;
-chaque session de Conductor ouverte (aujourd'hui `queue.json`, une seule) fournit l'élément confié, ses slices qui restent
-et sa Rehearsal courante ; l'historique vient du journal : chaque `begin` est une Rehearsal jouée. Si GitHub ne répond pas, la page le dit.
+chaque session de Conductor ouverte (`session-<élément>.json`) fournit l'élément confié, son mode, ses slices qui
+restent et sa Rehearsal courante ; l'historique vient du journal : chaque `begin` est une Rehearsal jouée. Si GitHub ne répond pas, la page le dit.
 Il n'écoute que sur 127.0.0.1. Sans argument, le projet est le dossier courant.
 """
 
@@ -29,7 +29,7 @@ STAGE = Path(__file__).resolve().parent.parent / "stage"
 PAGE = STAGE / "index.html"
 PAGES = {"/": PAGE, "/index.html": PAGE, "/v2": STAGE / "v2.html", "/v2.html": STAGE / "v2.html"}
 RUN_DIR = Path(".ballet") / "run"
-QUEUE_FILE = "queue.json"
+SESSION_PREFIX = "session-"
 PROGRAM_TTL_SECONDS = 30
 LIMITS = ("max_round_trips", "max_diff_lines", "max_diff_strict", "max_exchange_rounds")
 DEFAULT_PORT = 7700
@@ -124,19 +124,20 @@ def _played(journal, states):
 
 
 def _sessions(run):
-    """Les sessions de Conductor ouvertes, chacune avec son élément confié, ses slices à venir et sa Rehearsal courante.
-    Aujourd'hui la file locale (`queue.json`) est la seule : zéro session quand elle est finie ou illisible."""
-    saved = _json(run / QUEUE_FILE) if (run / QUEUE_FILE).is_file() else None
-    if not saved or not (saved.get("items") or saved.get("current")):
-        return []
-    items, played = list(saved.get("items", [])), list(saved.get("played", []))
-    return [{
-        "item": played[0]["item"] if played else items[0],
-        "plan": saved.get("plan", ""),
+    """Les sessions de Conductor ouvertes (`session-<élément>.json`), chacune avec son élément confié, son mode, ses
+    slices à venir et sa Rehearsal courante. Une session finie, ou un fichier à moitié écrit, n'en est pas une."""
+    found = (_json(path) for path in sorted(run.glob(f"{SESSION_PREFIX}*.json")))
+    return [_session(saved) for saved in found if saved and saved.get("item") and saved.get("status", "open") == "open"]
+
+
+def _session(saved):
+    return {
+        "item": saved["item"],
+        "mode": saved.get("mode", ""),
         "current": saved.get("current", ""),
-        "items": items,
-        "played": played,
-    }]
+        "items": list(saved.get("items", [])),
+        "played": list(saved.get("played", [])),
+    }
 
 
 def _session_titles(home, sessions):

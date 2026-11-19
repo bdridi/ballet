@@ -2,6 +2,18 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.28.0 — 2026-11-19 · `v0.28.0`
+
+- `/ballet:rehearsal #12` (ou `FEAT-002`) remplace `/ballet:hybrid-track` : il confie un seul élément, une `Feature`, un `Bug` ou une `Task`, à un Conductor, qui le joue jusqu'à sa dernière Premiere. Le script l'ouvre par `begin <élément>` ; `run`, la liste d'éléments et `--plan` disparaissent.
+- Une session par élément à la place de la file du projet (`.ballet/run/session-12.json`, `session-FEAT-002.json`) : l'élément, son issue, ses slices dans l'ordre du plan, la Rehearsal en cours, ce qui est joué et le mode. Deux sessions tournent côte à côte ; un élément déjà en session est refusé, par sa feature comme par son issue. Une `Slice`, ou une issue sans type, n'ouvre pas de session.
+- Le mode se lit sur le champ `Rehearsal mode` de l'issue (vide : `assisted`) : seul `assisted + plan approval` arrête sur le plan, avec le libellé `ballet:plan-approved` comme avant. `[escalation] plan_approval` disparaît du profil : par défaut, le plan enchaîne.
+- Le script écrit le champ `Ballet status` de l'issue quand il change : `in-rehearsal` tant que la session joue, `plan-review` quand le plan attend le Director, `escalated` à une escalade, `done` à la dernière Premiere. Un refus de GitHub se dit sans rien arrêter. `ballet_github.py` gagne `set_status` et `queue_fields`.
+- Sans `<ID>`, `receive`, `premiere`, `resume` et `status` visent la seule session ouverte, et refusent s'il y en a plusieurs ; `resume` et `status` prennent aussi l'élément d'une session (`resume #12`).
+- La Scène lit toutes les sessions ouvertes, avec leur mode.
+- Correctif : une issue dont le corps commence par `## Plan` ne fait plus tomber le script.
+
+**Opportunités traitées** : OPP-55 ; OPP-08 en partie. Nouvelle : OPP-57 (comment le Director approuve un plan).
+
 ## 0.27.0 — 2026-11-19 · `v0.27.0`
 
 - `ballet_program.py` lit le programme sur GitHub : les issues ouvertes `Feature`, `Bug` et `Task` dont `Ballet status` vaut `ready`, dans l'ordre du champ `Priority` puis de l'ancienneté ; les `Slice` n'y figurent pas. Lecture seule, avec un message clair si GitHub ne répond pas.

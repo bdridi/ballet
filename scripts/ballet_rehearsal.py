@@ -1,31 +1,38 @@
 """Le Conductor déterministe : l'état d'une Rehearsal, ses transitions, et chaque action qu'elles déclenchent.
 
-    python3 ballet_rehearsal.py run      <élément>… [--plan review|auto]           # une file : une Rehearsal après l'autre
-    python3 ballet_rehearsal.py begin    <élément>                                 # une file d'un seul élément
+    python3 ballet_rehearsal.py begin    <élément>                                 # ouvre la session de l'élément
     python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
     python3 ballet_rehearsal.py receive  <ID> --dispatch <ctx-id>                  # le dernier message du worker de ce dispatch
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
     python3 ballet_rehearsal.py receive  <ID> --mutation                           # la fin de la mutation, si son réveil s'est perdu
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI rouge ou trop longue)
-    python3 ballet_rehearsal.py resume   <ID>                                      # applique la décision du Director (libellé de la PR)
-    python3 ballet_rehearsal.py status   <ID> [--json]                             # où en est la Rehearsal
+    python3 ballet_rehearsal.py resume   <ID> | <élément>                          # applique la décision du Director (libellé de la PR)
+    python3 ballet_rehearsal.py status   <ID> | <élément> [--json]                 # où en est la Rehearsal, ou la session
 
 Lancé depuis le home du projet. Le skill `conductor` n'a qu'à appeler ce script et lire sa dernière ligne :
     NEXT: wait               un worker travaille ; Orca réveillera le Conductor
     NEXT: escalate <motif>   le Director décide ; la Rehearsal attend
-    NEXT: done               la Premiere de la dernière Rehearsal de la file est faite
+    NEXT: done               la dernière Premiere de l'élément est faite : la session est finie
 
-Tout est séquentiel : une seule Rehearsal ouverte à la fois. La file (`.ballet/run/queue.json`) garde les éléments
-à jouer, dans l'ordre de la commande ; à la Premiere d'une Rehearsal, le script ouvre lui-même la suivante, depuis
-`main`. Une escalade met la file en pause : `resume` reprend la Rehearsal, puis la file. `<ID>` est facultatif pour
-`receive`, `premiere`, `resume` et `status` : sans lui, c'est la Rehearsal en cours de la file.
+Une session joue un seul élément confié : une issue `Feature`, `Bug` ou `Task` (`#12`), ou une feature prête qui
+n'a pas encore d'issue (`FEAT-002`, aussi `BUG-NNN`, `TASK-NNN`). Elle vit dans `.ballet/run/session-<élément>.json`
+(`session-12.json`, `session-FEAT-002.json`) : l'élément, ses slices dans l'ordre du plan, la Rehearsal en cours, ce qui
+est joué et le mode. Une Rehearsal à la fois dans une session ; à la Premiere d'une slice, le script ouvre lui-même la
+suivante, depuis `main`. Deux sessions peuvent tourner côte à côte, sur deux éléments ; un même élément n'a qu'une
+session ouverte. Combien de sessions à la fois, c'est l'affaire de celui qui les lance. Une escalade met la session en
+pause : `resume` reprend la Rehearsal, puis la session. `<ID>` est facultatif pour `receive`, `premiere`, `resume` et
+`status` quand une seule session est ouverte.
 
-Un élément est une issue (`#12`) ou une feature prête (`FEAT-002`, aussi `BUG-NNN`, `TASK-NNN`). Une feature ouvre
-une Rehearsal de planification : le Choreographer seul, en mode auto, crée l'issue et ses slices. À son rapport, le
-script lit l'issue et ses slices sur GitHub (`Part of #N` en première ligne) et les met en tête de file ; la première
-se joue dans le worktree de la planification (sa branche est renommée), avec les ADR du Choreographer, qui restent
-à son nom pour la politique. Une issue sans plan suit le même chemin. En `--plan review` (`[escalation] plan_approval`),
-la file s'arrête alors : le Director pose `ballet:plan-approved` sur l'issue planifiée, puis `resume` lance le Dancer.
+Le mode est le champ `Rehearsal mode` de l'issue (vide : `assisted`). Le script écrit son champ `Ballet status` à des
+points fixes, seulement quand il change : `in-rehearsal` tant que la session joue, `plan-review` quand le plan attend le
+Director, `escalated` à une escalade, `done` à la dernière Premiere.
+
+Une feature ouvre une Rehearsal de planification : le Choreographer seul, en mode auto, crée l'issue et ses slices. À
+son rapport, le script lit l'issue et ses slices sur GitHub (`Part of #N` en première ligne) et les met en tête de la
+session ; la première se joue dans le worktree de la planification (sa branche est renommée), avec les ADR du
+Choreographer, qui restent à son nom pour la politique. Une issue sans plan suit le même chemin. En mode
+`assisted + plan approval`, la session s'arrête alors : le Director pose `ballet:plan-approved` sur l'issue planifiée,
+puis `resume` lance le Dancer.
 
 Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
@@ -86,10 +93,14 @@ import ballet_size
 from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
 
 RUN_DIR = Path(".ballet") / "run"
-QUEUE_FILE = "queue.json"
+SESSION_PREFIX = "session-"
 ISSUE_ITEM = re.compile(r"^#?(\d+)$")
 FEATURE_ITEM = re.compile(r"^(?:FEAT|BUG|TASK)-\d{3}$")
-PLAN_MODES = ("review", "auto")
+QUEUED_TYPES = ("Feature", "Bug", "Task")   # ce qu'une session joue ; une `Slice` suit sa feature
+SLICE_TYPE = "Slice"
+DEFAULT_MODE = "assisted"
+PLAN_APPROVAL_MODE = "assisted + plan approval"
+REHEARSAL_MODES = (DEFAULT_MODE, PLAN_APPROVAL_MODE, "autopilot")   # le champ Rehearsal mode de l'issue ; vide, `assisted`
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
 ORCA_AGENTS = {"claude": "claude", "codex": "codex", "grok": "grok", "opencode": "opencode"}
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
@@ -142,6 +153,7 @@ class Rehearsal:
     feature: str = ""                                # la feature d'une Rehearsal de planification, sans issue au départ
     plan_issue: str = ""                             # l'issue dont le plan attend `ballet:plan-approved`
     planned_by: str = ""                             # la Rehearsal de planification dont elle a pris le worktree
+    session: str = ""                                # l'élément de sa session : `#12` ou `FEAT-002`
 
     @property
     def branch(self):
@@ -149,12 +161,22 @@ class Rehearsal:
 
 
 @dataclass
-class Queue:
-    """La file d'une Piece : ses éléments, joués un à la fois, dans l'ordre de la commande."""
-    plan: str = "review"
-    items: list = field(default_factory=list)       # à jouer : `#12` (une issue) ou `FEAT-002` (une feature prête)
+class Session:
+    """Une session de Conductor : un élément confié (une Feature, un Bug ou une Task) et ses slices, une Rehearsal
+    à la fois, jusqu'à sa dernière Premiere."""
+    item: str                                       # `#12`, ou `FEAT-002` tant que la feature n'a pas d'issue
+    mode: str = DEFAULT_MODE                        # le champ Rehearsal mode de l'issue
+    issue: str = ""                                 # l'issue de l'élément ; celle d'une feature se connaît à son plan
     current: str = ""                               # la Rehearsal en cours
+    items: list = field(default_factory=list)       # à jouer : l'élément, puis ses slices dans l'ordre du plan
     played: list = field(default_factory=list)      # {item, rehearsal}, dans l'ordre
+    status: str = "open"                            # open | done
+    ballet_status: str = ""                         # le dernier Ballet status connu de l'issue
+
+    @property
+    def plan(self):
+        """`review` : le plan attend `ballet:plan-approved` du Director ; `auto` : le Dancer enchaîne."""
+        return "review" if self.mode == PLAN_APPROVAL_MODE else "auto"
 
 
 @dataclass
@@ -201,30 +223,32 @@ class Tools:
 # --- les entrées du Conductor -------------------------------------------------
 
 
-def run(items, plan, home, tools):
-    """Ouvre la file et joue son premier élément ; les suivants partent de `main`, chacun après la Premiere du précédent."""
-    config = _checked_config(home)
-    _refuse_if_busy(home)
-    _save_queue(Queue(plan=plan or _default_plan(config), items=list(items)), home)
-    return _play_next(Step("wait"), home, tools)
+def begin(item, home, tools):
+    """Ouvre la session d'un élément et joue sa première Rehearsal ; ses slices suivent, chacune depuis `main` après
+    la Premiere de la précédente. La session finit à la dernière Premiere de l'élément."""
+    _checked_config(home)
+    _refuse_if_in_session(item, home)
+    session = _new_session(item, tools)
+    _save_session(session, home)
+    return _follow_on_github(session.item, _play_next(session.item, Step("wait"), home, tools), home, tools)
 
 
-def begin(item, home, tools, plan=None):
-    """Ouvre la Rehearsal d'un élément : une issue (le Dancer si son plan a ses tâches, le Choreographer sinon),
-    ou une feature prête (la planification : le Choreographer seul)."""
+def _begin(item, session, home, tools):
+    """Ouvre la Rehearsal d'un élément de la session : une issue (le Dancer si son plan a ses tâches, le Choreographer
+    sinon), ou une feature prête (la planification : le Choreographer seul)."""
     config = _checked_config(home)
     rehearsal, first_role = _rehearsal_of(item, config, home, tools)
-    rehearsal.plan = plan or _default_plan(config)
+    rehearsal.plan, rehearsal.session = session.plan, session.item
     _refuse_if_already_open(rehearsal, home)
     step = Step("wait")
     rehearsal.worktree = _open_worktree(rehearsal, tools)
     step.done.append(f"worktree {rehearsal.worktree} on {rehearsal.branch}, from origin/main")
-    _log(home, rehearsal, "begin", {"item": _item_of(rehearsal), "plan": rehearsal.plan})
+    _log(home, rehearsal, "begin", {"item": _item_of(rehearsal), "plan": rehearsal.plan, "mode": session.mode, "session": session.item})
     git = tools.git(rehearsal.worktree)
     rehearsal.checkpoint, rehearsal.refs = ballet_policy.head(git), ballet_policy.refs(git)
     _start_worker(rehearsal, first_role, _first_assignment(first_role, rehearsal, config), config, home, tools)
     step.done.append(f"{first_role} started on {_target(rehearsal)}")
-    _join_queue(rehearsal, _item_of(rehearsal), home)
+    _join_session(rehearsal, _item_of(rehearsal), home)
     return _settle(rehearsal, step, home, tools)
 
 
@@ -302,14 +326,14 @@ def resume(rehearsal_id, home, tools):
     return _settle(rehearsal, step, home, tools)
 
 
-def resume_queue(home, tools):
-    """Sans ID : reprend la Rehearsal en cours de la file, ou, si la file s'est arrêtée avant d'ouvrir la suivante, l'ouvre."""
-    queue = _load_queue(home)
-    if queue.current:
-        return resume(queue.current, home, tools)
-    if queue.items:
-        return _play_next(Step("wait"), home, tools)
-    return Step("done", "", ["nothing to resume: the queue is empty"])
+def resume_session(session_item, home, tools):
+    """Reprend la Rehearsal en cours de la session, ou, si la session s'est arrêtée avant d'ouvrir la suivante, l'ouvre."""
+    session = _load_session(session_item, home)
+    if session.current:
+        return resume(session.current, home, tools)
+    if session.items:
+        return _follow_on_github(session.item, _play_next(session.item, Step("wait"), home, tools), home, tools)
+    return Step("done", "", [f"nothing to resume: the session of {session.item} is over"])
 
 
 def status(rehearsal_id, home, tools):
@@ -318,103 +342,160 @@ def status(rehearsal_id, home, tools):
     rehearsal = _load(rehearsal_id, home)
     summary = [_where(rehearsal), _pull_request_line(rehearsal, tools), _size_line(rehearsal), _round_trips_line(rehearsal, config)]
     summary += _mutation_lines(rehearsal)
-    summary += _pending_lines(rehearsal) + _workers_line(rehearsal) + _queue_lines(_load_queue(home), rehearsal.id)
+    summary += _pending_lines(rehearsal) + _workers_line(rehearsal) + _session_lines(_session_of(rehearsal, home), rehearsal.id)
     return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, summary)
 
 
-def status_queue(home, tools):
-    """Sans ID : la Rehearsal en cours de la file et la file, ou, sans Rehearsal en cours, la file seule."""
-    queue = _load_queue(home)
-    if queue.current:
-        return status(queue.current, home, tools)
-    if queue.items:
-        return Step("escalate", f"the queue stopped before {queue.items[0]}: fix it, then resume", _queue_lines(queue, ""))
-    return Step("done", "the queue is empty", _queue_lines(queue, ""))
+def status_session(session_item, home, tools):
+    """La Rehearsal en cours de la session et la session, ou, sans Rehearsal en cours, la session seule."""
+    session = _load_session(session_item, home)
+    if session.current:
+        return status(session.current, home, tools)
+    lines = _session_lines(session, "")
+    if session.items:
+        return Step("escalate", f"the session of {session.item} stopped before {session.items[0]}: fix it, then resume", lines)
+    return Step("done", f"the session of {session.item} is over", lines)
 
 
-# --- la file ------------------------------------------------------------------
+# --- la session ---------------------------------------------------------------
 
 
-def _play_next(step, home, tools):
-    """Ouvre la Rehearsal de l'élément suivant ; si elle ne peut pas s'ouvrir, la file s'arrête avant lui."""
-    queue = _load_queue(home)
-    queue.current = ""
-    if not queue.items:
-        _save_queue(queue, home)
-        return Step(step.next, step.reason, step.done + _queue_done_line(queue))
-    item = queue.items.pop(0)
-    _save_queue(queue, home)
+def _new_session(item, tools):
+    """La session d'un élément : son mode et son statut, lus sur son issue ; une feature sans issue part en `assisted`."""
+    if FEATURE_ITEM.match(item):
+        return Session(item=item, items=[item])
+    fields = ballet_github.queue_fields(item, run=tools.gh)
+    if fields["type"] not in QUEUED_TYPES:
+        raise RehearsalError(_not_a_session_item(item, fields["type"]))
+    mode = fields["mode"] or DEFAULT_MODE
+    if mode not in REHEARSAL_MODES:
+        raise RehearsalError(f"{item}: unknown Rehearsal mode '{mode}'; known: {', '.join(REHEARSAL_MODES)}")
+    return Session(item=item, mode=mode, issue=item[1:], items=[item], ballet_status=fields["status"])
+
+
+def _not_a_session_item(item, issue_type):
+    if issue_type == SLICE_TYPE:
+        return f"{item} is a Slice: begin its Feature, its slices follow"
+    kind = f"a {issue_type}" if issue_type else "an issue without a type"
+    return f"{item} is {kind}: a session plays a Feature, a Bug or a Task; set its type on GitHub"
+
+
+def _play_next(session_item, step, home, tools):
+    """Ouvre la Rehearsal de l'élément suivant de la session ; plus rien à jouer, la session est finie ; si la
+    Rehearsal ne peut pas s'ouvrir, la session s'arrête avant lui."""
+    session = _load_session(session_item, home)
+    session.current = ""
+    if not session.items:
+        session.status = "done"
+        _save_session(session, home)
+        return Step(step.next, step.reason, step.done + [_session_done_line(session)])
+    item = session.items.pop(0)
+    _save_session(session, home)
     try:
-        following = begin(item, home, tools, queue.plan)
+        following = _begin(item, session, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
-        _push_back(item, home)
-        return Step("escalate", f"the queue stopped before {item}: {error}; fix it, then resume", step.done)
-    return Step(following.next, following.reason, step.done + [f"next in the queue: {item}"] + following.done)
+        _push_back(session_item, item, home)
+        return Step("escalate", f"the session of {session.item} stopped before {item}: {error}; fix it, then resume", step.done)
+    announced = [f"next in the session: {item}"] if session.played else []
+    return Step(following.next, following.reason, step.done + announced + following.done)
 
 
 def _after_premiere(rehearsal, step, home, tools):
-    """La Premiere de la Rehearsal en cours de la file ouvre la suivante, depuis `main`."""
-    if _load_queue(home).current != rehearsal.id:
+    """La Premiere de la Rehearsal en cours de sa session ouvre la suivante, depuis `main`."""
+    session = _session_of(rehearsal, home)
+    if not session or session.current != rehearsal.id:
         return step
-    return _play_next(step, home, tools)
+    return _play_next(session.item, step, home, tools)
 
 
-def _queue_first(items, home):
-    """Les slices d'un plan passent avant le reste de la file."""
-    queue = _load_queue(home)
-    queue.items = items + queue.items
-    _save_queue(queue, home)
+def _session_first(rehearsal, items, planned, home):
+    """Les slices d'un plan passent en tête de la session ; une feature y gagne son issue."""
+    session = _load_session(rehearsal.session, home)
+    session.items = items + session.items
+    session.issue = session.issue or planned
+    _save_session(session, home)
 
 
-def _rename_in_queue(previous, rehearsal_id, home):
-    queue = _load_queue(home)
-    queue.current = rehearsal_id if queue.current == previous else queue.current
-    for entry in queue.played:
+def _rename_in_session(rehearsal, previous, home):
+    session = _load_session(rehearsal.session, home)
+    session.current = rehearsal.id if session.current == previous else session.current
+    for entry in session.played:
         if entry["rehearsal"] == previous:
-            entry["rehearsal"] = rehearsal_id
-    _save_queue(queue, home)
+            entry["rehearsal"] = rehearsal.id
+    _save_session(session, home)
 
 
-def _join_queue(rehearsal, item, home):
-    """La Rehearsal qui s'ouvre devient celle en cours de la file (une file d'un élément si `begin` est appelé seul)."""
-    queue = _load_queue(home, plan=rehearsal.plan)
-    queue.current = rehearsal.id
-    queue.played.append({"item": item, "rehearsal": rehearsal.id})
-    _save_queue(queue, home)
+def _join_session(rehearsal, item, home):
+    """La Rehearsal qui s'ouvre devient celle en cours de sa session."""
+    session = _load_session(rehearsal.session, home)
+    session.current = rehearsal.id
+    session.played.append({"item": item, "rehearsal": rehearsal.id})
+    _save_session(session, home)
 
 
-def _push_back(item, home):
-    queue = _load_queue(home)
-    queue.items.insert(0, item)
-    _save_queue(queue, home)
+def _push_back(session_item, item, home):
+    session = _load_session(session_item, home)
+    session.items.insert(0, item)
+    _save_session(session, home)
 
 
-def _refuse_if_busy(home):
-    """Une seule Rehearsal à la fois : une file en cours refuse d'en ouvrir une autre."""
-    queue = _load_queue(home)
-    if queue.current and _state_path(queue.current, home).is_file() and _load(queue.current, home).status != "done":
-        raise RehearsalError(f"Rehearsal {queue.current} is still open: one Rehearsal at a time; resume it, or drop the queue "
-                             f"({_run_dir(home) / QUEUE_FILE}) first")
-    if queue.items:
-        raise RehearsalError(f"the queue still holds {', '.join(queue.items)}: resume it, or drop it ({_run_dir(home) / QUEUE_FILE}) first")
+def _refuse_if_in_session(item, home):
+    """Un élément n'est joué que par une session à la fois, qu'on le nomme par sa feature ou par son issue."""
+    number = item[1:] if item.startswith("#") else ""
+    for session in _open_sessions(home):
+        if session.item == item or (number and session.issue == number):
+            raise RehearsalError(f"{item} is already played by the session of {session.item} "
+                                 f"({_session_path(session.item, home)}): resume it, or delete that file first")
 
 
-def _queue_lines(queue, current):
-    if not queue.played and not queue.items:
+def _follow_on_github(session_item, step, home, tools):
+    """Le Ballet status de l'issue de la session suit chaque pas. Il n'est écrit que s'il change ; un refus de GitHub
+    se dit, sans rien arrêter."""
+    session = _load_session(session_item, home) if session_item and _session_path(session_item, home).is_file() else None
+    if not session or not session.issue:
+        return step
+    status = _ballet_status_of(step, session, home)
+    if status == session.ballet_status:
+        return step
+    try:
+        ballet_github.set_status(session.issue, status, run=tools.gh)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        step.done.append(f"Ballet status of #{session.issue} not set to {status}: {error}")
+        return step
+    session.ballet_status = status
+    _save_session(session, home)
+    step.done.append(f"Ballet status of #{session.issue}: {status}")
+    return step
+
+
+def _ballet_status_of(step, session, home):
+    """`plan-review` quand le plan attend le Director, `escalated` sur une autre escalade, `done` à la dernière
+    Premiere, `in-rehearsal` sinon."""
+    if step.next == "escalate":
+        return "plan-review" if _waits_for_its_plan(session, home) else "escalated"
+    if step.next == "done" and session.status == "done":
+        return "done"
+    return "in-rehearsal"
+
+
+def _waits_for_its_plan(session, home):
+    if not session.current or not _state_path(session.current, home).is_file():
+        return False
+    return _load(session.current, home).blocked_on == "plan"
+
+
+def _session_lines(session, current):
+    if not session:
         return []
     playing = f"playing {current}; " if current else ""
-    lines = [f"queue (plan {queue.plan}): {playing}next: {', '.join(queue.items) or 'nothing'}"]
-    return lines + ["played: " + ", ".join(f"{entry['rehearsal']} ({entry['item']})" for entry in queue.played)]
+    lines = [f"session of {session.item} (mode {session.mode}): {playing}next: {', '.join(session.items) or 'nothing'}"]
+    if session.played:
+        lines.append("played: " + ", ".join(f"{entry['rehearsal']} ({entry['item']})" for entry in session.played))
+    return lines
 
 
-def _queue_done_line(queue):
-    if len(queue.played) < 2:
-        return []
-    return ["queue done: " + ", ".join(entry["rehearsal"] for entry in queue.played)]
-
-
-def _default_plan(config):
-    return "review" if config["escalation"].get("plan_approval", True) else "auto"
+def _session_done_line(session):
+    return f"session of {session.item} done: " + (", ".join(entry["rehearsal"] for entry in session.played) or "nothing played")
 
 
 # --- les transitions ----------------------------------------------------------
@@ -499,8 +580,8 @@ def _after_plan(rehearsal, report, config, home, tools):
     planned, issues = _planned_issues(rehearsal, report, tools)
     step = Step("wait", done=[_plan_line(planned, issues)])
     step.done += _hand_over(rehearsal, planned, issues[0], home, tools)
-    _queue_first([f"#{number}" for number, _, _ in issues[1:]], home)
-    if (rehearsal.plan or _default_plan(config)) == "review":
+    _session_first(rehearsal, [f"#{number}" for number, _, _ in issues[1:]], planned, home)
+    if rehearsal.plan == "review":
         return _await_plan_approval(rehearsal, planned, step, tools)
     return _dancer_on_the_plan(rehearsal, step, config, home, tools)
 
@@ -538,14 +619,14 @@ def _hand_over(rehearsal, planned, first, home, tools):
     git(["branch", "-m", old_branch, f"rehearsal/{rehearsal_id}"])
     rehearsal.id, rehearsal.issue, rehearsal.planned_by = rehearsal_id, number, previous
     rehearsal.refs = ballet_policy.refs(git)
-    _rename_in_queue(previous, rehearsal_id, home)
+    _rename_in_session(rehearsal, previous, home)
     return [f"now playing: Rehearsal {rehearsal_id} (issue #{number}) in the worktree of {previous}, branch {rehearsal.branch}"]
 
 
 def _await_plan_approval(rehearsal, planned, step, tools):
     rehearsal.blocked_on, rehearsal.plan_issue = "plan", planned
     ballet_github.ask_plan_approval(run=tools.gh)
-    return Step("escalate", f"plan to review (--plan review): read #{planned}, label it ballet:plan-approved, then resume",
+    return Step("escalate", f"plan to review ({PLAN_APPROVAL_MODE}): read #{planned}, label it ballet:plan-approved, then resume",
                 step.done)
 
 
@@ -1217,15 +1298,15 @@ def _flag_escalation(rehearsal, step, tools):
 
 def _settle(rehearsal, step, home, tools):
     """Le pas fixe le statut de la Rehearsal (et le libellé d'une escalade) ; l'état est sauvé et le pas journalisé.
-    Une Premiere passe la main à l'élément suivant de la file."""
+    Une Premiere passe la main à l'élément suivant de la session ; le Ballet status de son issue suit."""
     _flag_escalation(rehearsal, step, tools)
     rehearsal.status = STATUS_OF_STEP[step.next]
     rehearsal.reason = step.reason
     _save(rehearsal, home)
     _log(home, rehearsal, step.next, {"reason": step.reason, "done": step.done})
     if step.next == "done":
-        return _after_premiere(rehearsal, step, home, tools)
-    return step
+        step = _after_premiere(rehearsal, step, home, tools)
+    return _follow_on_github(rehearsal.session, step, home, tools)
 
 
 def _save(rehearsal, home):
@@ -1245,15 +1326,32 @@ def _refuse_if_already_open(rehearsal, home):
         raise RehearsalError(f"Rehearsal {rehearsal.id} is already open ({path})")
 
 
-def _load_queue(home, plan="review"):
-    path = _run_dir(home) / QUEUE_FILE
+def _load_session(session_item, home):
+    path = _session_path(session_item, home)
     if not path.is_file():
-        return Queue(plan=plan)
-    return Queue(**json.loads(path.read_text(encoding="utf-8")))
+        raise RehearsalError(f"no session of {session_item} in {path.parent}")
+    return Session(**json.loads(path.read_text(encoding="utf-8")))
 
 
-def _save_queue(queue, home):
-    (_run_dir(home) / QUEUE_FILE).write_text(json.dumps(asdict(queue), indent=2) + "\n", encoding="utf-8")
+def _save_session(session, home):
+    _session_path(session.item, home).write_text(json.dumps(asdict(session), indent=2) + "\n", encoding="utf-8")
+
+
+def _session_of(rehearsal, home):
+    """La session de la Rehearsal ; aucune pour une Rehearsal d'avant les sessions."""
+    if not rehearsal.session or not _session_path(rehearsal.session, home).is_file():
+        return None
+    return _load_session(rehearsal.session, home)
+
+
+def _open_sessions(home):
+    found = [Session(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(_run_dir(home).glob(f"{SESSION_PREFIX}*.json"))]
+    return [session for session in found if session.status == "open"]
+
+
+def _session_path(session_item, home):
+    """`session-12.json` pour `#12`, `session-FEAT-002.json` pour une feature."""
+    return _run_dir(home) / f"{SESSION_PREFIX}{session_item.lstrip('#')}.json"
 
 
 def _log(home, rehearsal, event, detail):
@@ -1340,7 +1438,8 @@ def _rehearsal_id(title):
 
 def _has_tasks(body):
     """Le plan a des tâches : des cases à cocher dans sa section `## Plan`."""
-    plan = body.split("\n## Plan\n", 1)[1] if "\n## Plan\n" in f"\n{body}" else ""
+    text = f"\n{body}"
+    plan = text.split("\n## Plan\n", 1)[1] if "\n## Plan\n" in text else ""
     return bool(re.search(r"^- \[[ x]\] ", plan, re.MULTILINE))
 
 
@@ -1478,25 +1577,30 @@ def main(argv, home=".", tools=None):
     return 0
 
 
-USAGE = ("usage: run <item>... [--plan review|auto] | begin <item> | receive [<ID>] --message <msg-id> "
-         "| receive [<ID>] --dispatch <ctx-id> | receive [<ID>] <message.md> [--question <msg-id>] | receive [<ID>] --mutation "
-         "| premiere [<ID>] "
-         "| resume [<ID>] | status [<ID>] [--json]   (an item: #<issue> or a ready FEAT-NNN; no <ID>: the Rehearsal the queue is playing)")
+USAGE = ("usage: begin <item> | receive [<ID>] --message <msg-id> | receive [<ID>] --dispatch <ctx-id> "
+         "| receive [<ID>] <message.md> [--question <msg-id>] | receive [<ID>] --mutation | premiere [<ID>] "
+         "| resume [<ID> | <item>] | status [<ID> | <item>] | status <ID> --json   (an item: #<issue> (a Feature, a Bug or a Task) "
+         "or a ready FEAT-NNN; no <ID>: the Rehearsal of the only open session)")
 
 
 def _command(command, arguments, home, tools):
-    if command == "run":
-        items, plan = _run_arguments(arguments)
-        return run(items, plan, home, tools).render()
     if command == "begin" and len(arguments) == 1:
-        return run([_item(arguments[0])], None, home, tools).render()
-    if command == "resume" and not arguments:
-        return resume_queue(home, tools).render()
-    if command == "status" and not arguments:
-        return status_queue(home, tools).render()
+        return begin(_item(arguments[0]), home, tools).render()
+    if command in ("resume", "status") and len(arguments) <= 1:
+        session_item = _session_named(arguments[0], home) if arguments else _only_open_session(home)
+        if session_item or not arguments:
+            return _session_command(command, session_item, home, tools).render()
     if command in ("receive", "premiere", "resume", "status") and not _names_a_rehearsal(arguments):
         arguments = [_current_rehearsal(home), *arguments]
     return _rehearsal_command(command, arguments, home, tools)
+
+
+def _session_command(command, session_item, home, tools):
+    if not session_item:
+        return Step("done", "no session is open")
+    if command == "resume":
+        return resume_session(session_item, home, tools)
+    return status_session(session_item, home, tools)
 
 
 def _rehearsal_command(command, arguments, home, tools):
@@ -1520,35 +1624,43 @@ def _rehearsal_command(command, arguments, home, tools):
     raise UsageError(USAGE)
 
 
-def _run_arguments(arguments):
-    plan = None
-    if "--plan" in arguments:
-        at = arguments.index("--plan")
-        plan = arguments[at + 1] if at + 1 < len(arguments) else None
-        if plan not in PLAN_MODES:
-            raise UsageError("--plan takes review or auto\n" + USAGE)
-        arguments = arguments[:at] + arguments[at + 2:]
-    if not arguments:
-        raise UsageError(USAGE)
-    return [_item(argument) for argument in arguments], plan
-
-
 def _item(text):
-    """Un élément de la file : une issue (`#12`, `12`) ou une feature prête (`FEAT-002`)."""
+    """Un élément confié : une issue (`#12`, `12`) ou une feature prête (`FEAT-002`)."""
+    item = _as_item(text)
+    if not item:
+        raise UsageError(f"not an item: {text}\n" + USAGE)
+    return item
+
+
+def _as_item(text):
     if FEATURE_ITEM.match(text):
         return text
     match = ISSUE_ITEM.match(text)
-    if not match:
-        raise UsageError(f"not an item: {text}\n" + USAGE)
-    return f"#{match.group(1)}"
+    return f"#{match.group(1)}" if match else None
 
 
 def _names_a_rehearsal(arguments):
     return bool(arguments) and bool(REHEARSAL_ID.fullmatch(arguments[0]))
 
 
+def _session_named(text, home):
+    """L'élément d'une session qui existe (`#12`, `FEAT-002`) ; une session passe avant la Rehearsal du même nom."""
+    item = _as_item(text)
+    return item if item and _session_path(item, home).is_file() else None
+
+
+def _only_open_session(home):
+    """Sans `<ID>` : la seule session ouverte ; plusieurs, il faut la nommer."""
+    sessions = _open_sessions(home)
+    if len(sessions) > 1:
+        listed = ", ".join(f"{session.item} playing {session.current or 'nothing'}" for session in sessions)
+        raise UsageError(f"{len(sessions)} sessions are open ({listed}): name the Rehearsal <ID> or the session's item\n" + USAGE)
+    return sessions[0].item if sessions else None
+
+
 def _current_rehearsal(home):
-    current = _load_queue(home).current
+    session_item = _only_open_session(home)
+    current = _load_session(session_item, home).current if session_item else ""
     if not current:
         raise UsageError("no Rehearsal is playing: name its <ID>\n" + USAGE)
     return current

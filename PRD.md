@@ -415,7 +415,6 @@ max_diff_lines = 400
 max_diff_strict = true                   # escalade avant le Critic au-delà du seuil (défaut : false)
 ci_wait_seconds = 480                    # la Premiere attend une CI en cours jusque-là (défaut : 480, sous 600)
 proof_timeout_seconds = 420              # la preuve lancée par le script au rapport du Dancer (défaut : 420, sous 600)
-plan_approval = false                    # le plan du Choreographer part sans `ballet:plan-approved` (défaut : true)
 diff_exclude = ["*.lock", "**/generated/**"]
 
 [mutation]
