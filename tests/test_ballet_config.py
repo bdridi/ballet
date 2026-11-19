@@ -209,6 +209,42 @@ class ConfigTest(unittest.TestCase):
         self.assertFalse(escalation["max_diff_strict"])
         self.assertIn("*.lock", escalation["diff_exclude"])
 
+    # --- la mutation
+
+    def test_par_defaut_la_mutation_est_activee_avec_une_heure_de_budget(self):
+        self.write_project_config(VALID_PROJECT)
+        self.assertEqual(ballet_config.effective_config(self.project)["mutation"], {"enabled": True, "timeout_seconds": 3600})
+
+    def test_un_drapeau_ou_un_budget_de_mutation_invalide_est_refuse(self):
+        self.write_project_config(VALID_PROJECT + '\n[mutation]\nenabled = "no"\ntimeout_seconds = 0\n')
+        self.assertProblem("[mutation] enabled must be true or false")
+        self.assertProblem("[mutation] timeout_seconds must be a positive integer")
+
+    def test_une_entree_de_mutation_complete_est_valide(self):
+        self.write_project_config(VALID_PROJECT + MUTATION_TOOL)
+        self.assertEqual(self.problems(), [])
+
+    def test_une_entree_de_mutation_incomplete_est_refusee(self):
+        self.write_project_config(VALID_PROJECT + '\n[[repos.app.mutation]]\nname = "cargo-mutants"\npaths = "crates/*"\n'
+                                  'report = { path = "out.json", format = "mystery" }\n')
+        self.assertProblem("[[repos.app.mutation]] cargo-mutants: command must be a non-empty string")
+        self.assertProblem("[[repos.app.mutation]] cargo-mutants: config must be a non-empty string")
+        self.assertProblem("[[repos.app.mutation]] cargo-mutants: report format must be one of cargo-mutants")
+        self.assertProblem("[[repos.app.mutation]] cargo-mutants: paths must be a list of globs")
+
+    def test_deux_outils_de_mutation_du_meme_nom_sont_refuses(self):
+        self.write_project_config(VALID_PROJECT + MUTATION_TOOL + MUTATION_TOOL)
+        self.assertProblem("each tool needs its own name")
+
+
+MUTATION_TOOL = """
+[[repos.app.mutation]]
+name = "cargo-mutants"
+command = "cargo mutants --in-diff {diff}"
+config = ".cargo/mutants.toml"
+report = { path = "mutants.out/outcomes.json", format = "cargo-mutants" }
+"""
+
 
 if __name__ == "__main__":
     unittest.main()

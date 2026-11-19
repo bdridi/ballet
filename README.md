@@ -106,7 +106,7 @@ What happens:
 - **A feature is planned first.** The Choreographer reads it with the code, settles the technical choices, and publishes the issue, cut into slices when one pull request would be too big. It asks the Dramaturg when the feature has gaps, and you when neither of them can settle something. The slices then play one after the other, before the next item of the queue. Its ADRs ship with the first slice.
 - **An issue that already has its plan** goes straight to the Dancer; one without a plan is planned first, like a feature.
 - **You approve each plan** (`--plan review`, the default): once the Choreographer has published it, the queue stops until you do (see below). With `--plan auto`, it goes on.
-- **Then, for each issue**: the Dancer codes, the Critic reviews (up to 2 round trips), and the pull request is merged when the Critic approves and the CI is green. The issue is closed, and its parent after its last slice.
+- **Then, for each issue**: the Dancer codes, the script runs the proof (and the mutation test, if your project declares one), the Critic reviews (up to 2 round trips), and the pull request is merged when the Critic approves and the CI is green. The issue is closed, and its parent after its last slice.
 
 The Conductor tells you what it does as it goes, and stops when the whole queue is merged or when it needs you.
 
@@ -120,6 +120,7 @@ Any stop pauses the whole queue; the Conductor tells you why and what to decide.
 | a role asks you a question | answer it in the conversation: the Conductor carries your answer back |
 | the Critic escalates, too many round trips, a policy violation… | on the pull request: `ballet:approved` to merge it, or `ballet:rejected` with a comment saying what to fix (sent to the Dancer), then resume |
 | the diff is over the limit (strict mode) | `ballet:size-accepted` to send it to the Critic anyway, or `ballet:rejected` with a comment, then resume |
+| the mutation test stayed red, ran over an hour, or failed | look at its log (`.ballet/run/<ID>/mutation-*.log`); fix the tool or its config, or decide on the pull request as above |
 | the CI failed, or ran too long | fix or rerun it; once green, ask the Conductor to retry the merge |
 | the queue stopped before an item (e.g. an issue title without its `FEAT-NNN` prefix) | fix the cause, then resume |
 
@@ -154,10 +155,22 @@ model = "sonnet"                # the Critic must differ from the Dancer: anothe
 [escalation]
 plan_approval = true            # false: plans go on without your approval (like --plan auto)
 max_round_trips = 2             # Dancer ↔ Critic round trips before it comes to you
-max_diff_lines = 400            # lines changed by a pull request; the Choreographer aims each slice at half
+max_diff_lines = 400            # lines changed by a pull request; the Choreographer keeps each slice under two thirds
 max_diff_strict = false         # true: over the limit, it stops before the Critic
 ci_wait_seconds = 480           # how long the merge waits for a running CI
+proof_timeout_seconds = 420     # how long the proof run on each Dancer report may take
 diff_exclude = ["*.lock"]       # files left out of the count
+
+[mutation]
+enabled = true                  # false: no mutation test, the tools below stay declared
+timeout_seconds = 3600          # the budget of all mutation tools, run in the background
+
+[[repos.app.mutation]]          # a mutation tool, run after the proof on the lines the branch changed
+name = "cargo-mutants"
+command = "mise exec -- cargo mutants --in-diff {diff}"   # {diff} a file, {files}, {ranges} (`file:start-end`)
+config = ".cargo/mutants.toml"  # where equivalent mutants are excluded, each with its reason
+report = { path = "mutants.out/outcomes.json", format = "cargo-mutants" }
+paths = ["crates/*"]            # optional: only the diff under these paths
 
 [policy]
 sensitive_zones = ["api/contract/*"]    # paths the Dancer must not touch (API contract, security…)
@@ -175,6 +188,9 @@ Code is always in English. Specs are in English by default (`[project] specs_lan
 - Sequential only: one Rehearsal at a time (parallel runs come later).
 - One repo per project for the Conductor (multi-repo projects come later).
 - The roles run as Orca workers with Claude Code, Codex, Grok or OpenCode; other CLIs (Mistral Vibe…) can be used by hand, not yet by the Conductor.
+- Mutation reports are read for cargo-mutants only (StrykerJS and PIT come later). Another tool still works: its exit code decides, and the Dancer gets the end of its output.
+
+To run the mutation test by hand, as a Rehearsal would on your branch: `python3 <path-to-ballet>/scripts/ballet_mutation.py run` from the project's home folder (`--force` when `[mutation] enabled = false`).
 
 ## Update
 

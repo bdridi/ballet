@@ -54,13 +54,16 @@ Then settle the technical choices, 2 to 4 questions per round, each with your re
 
 ## 3. One plan, or slices
 
-A plan fits **one Dancer session and one Critic review**: roughly 8 tasks at most, and an expected diff **under half of `[escalation] max_diff_lines`** of the profile (200 lines for the default 400). If it fits, write one plan.
+A plan fits **one Dancer session and one Critic review**: roughly 8 tasks at most, and an expected diff **under two thirds of `[escalation] max_diff_lines`** of the profile (266 lines for the default 400). If it fits, write one plan.
 
-**Estimate the diff, do not guess it.** Per task: the files it touches and the lines in each, **tests included** (they are often half of the diff), plus wiring, fixtures and config; lockfiles and `diff_exclude` aside. Estimates run low: on FEAT-001, 3 slices out of 4 went over `max_diff_lines`. So a slice **aims at half the threshold**; one whose estimate passes two thirds of it is cut again. Over the threshold, the pull request is marked `ballet:oversized`, and in strict mode it stops before the Critic.
+**Estimate the diff, do not guess it.** Per task: the files it touches and the lines in each, **tests included** (they are often half of the diff), plus wiring, fixtures and config; lockfiles and `diff_exclude` aside. Estimates run low (by about half on FEAT-002), so count every file a criterion crosses, layer by layer. Over the threshold, the pull request is marked `ballet:oversized`, and in strict mode it stops before the Critic.
 
-Only if it does not fit, propose **slices**: an ordered list, each one a full Rehearsal (code, review, proof green, merge on `main`).
+Only if it does not fit, propose **slices**: an ordered list, each one a full Rehearsal (code, review, proof green, merge on `main`). **As few slices as possible, each one vertical.**
 
-- A slice covers whole criteria, or is a technical prerequisite of the next one (e.g. the walking skeleton of an empty repo). Never half a criterion.
+- **A slice delivers at least one whole criterion, end to end**: through every layer the criterion crosses (domain, API, client, screen…), its scenario passing at the end. Never half a criterion.
+- **Never cut by layer** (the API, then the client, then the screen): a slice that delivers no criterion is the exception. It is allowed only for the walking skeleton of an empty repo, or when the smallest criterion alone cannot fit under the threshold; the list then says why for that slice.
+- When a feature has many criteria, group them by the code they share; when one criterion is large, put it first, alone, so the next slices reuse its layers.
+- **Fewest slices**: before showing the list, try merging each slice with its neighbour; if the estimate of the merge stays under two thirds of the threshold, merge them.
 - Each slice leaves `main` green and the product working.
 - Show the list first (slice, criteria covered, depends on, expected size in lines against the threshold), and write the plans only after the Director's yes (in auto mode, write them straight away).
 

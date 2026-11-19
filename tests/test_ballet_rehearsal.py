@@ -2,6 +2,7 @@ import io
 import json
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -62,6 +63,9 @@ class FakeWorld:
         self.changed = []
         self.new_commits = []
         self.issues = {}            # numéro → {title, body, state, labels} ; les autres issues sont #3
+        self.proof = ballet_rehearsal.Proof(True, "all green\n")
+        self.proofs = []            # (commande, dossier, délai) de chaque preuve lancée
+        self.branch_diff = ""       # le diff de la branche face à son ancêtre commun avec origin/main
         self.threads = [{"id": "T1", "isResolved": False, "comments": {"nodes": [
             {"body": "**Blocking 1** — x", "path": "a.rs", "line": 1, "startLine": None, "pullRequestReview": {"databaseId": 11}}]}}]
 
@@ -84,10 +88,16 @@ class FakeWorld:
             return self.policy_git(arguments[2:])
         if arguments[:2] == ["orchestration", "inbox"]:
             return json.dumps({"ok": True, "result": {"messages": self.inbox}})
+        if arguments[:2] == ["orchestration", "worker-show"]:
+            return json.dumps({"ok": True, "result": {"dispatchId": arguments[3], "runId": "run_conductor"}})
         if arguments[:2] == ["orchestration", "worker-start"]:
             self.dispatches += 1
             return json.dumps({"ok": True, "result": {"worker": {"dispatchId": f"ctx_{self.dispatches}"}}})
         return ""
+
+    def prove(self, command, cwd, timeout):
+        self.proofs.append((command, cwd, timeout))
+        return self.proof
 
     def worktrees(self):
         """Un worktree par branche de Rehearsal créée par Orca, plus le home."""
@@ -106,6 +116,7 @@ class FakeWorld:
             ("status", "--porcelain"): self.dirty,
             ("merge-base", "origin/main"): "base\n",
             ("diff", "--name-only"): "\n".join(self.changed),
+            ("diff", "--no-color"): self.branch_diff,
         }
         if arguments[0] == "rev-list" and arguments[1] != "--count":
             return "\n".join(self.new_commits)
@@ -173,6 +184,16 @@ class FakeWorld:
         return [command[command.index("--task-title") + 1] for command in self.ran("orca", "orchestration", "worker-start")]
 
 
+MUTATED_DIFF = """diff --git a/src/inventory.rs b/src/inventory.rs
+--- a/src/inventory.rs
++++ b/src/inventory.rs
+@@ -1,2 +1,3 @@
+ fn a() {}
++fn b() {}
+ fn c() {}
+"""
+CARGO_REPORT = (Path(__file__).resolve().parent / "fixtures" / "cargo-mutants-27.1.0-outcomes.json").read_text(encoding="utf-8")
+
 STRICT_PROFILE = PROFILE + "\n[escalation]\nmax_diff_lines = 100\nmax_diff_strict = true\n"
 OVERSIZED_NUMSTAT = "150\t30\tsrc/inventory.rs\n900\t0\tCargo.lock\n-\t-\tlogo.png\n"
 
@@ -189,7 +210,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.world = FakeWorld(home=str(self.home))
         self.sleeps = []
-        self.tools = ballet_rehearsal.Tools(run=self.world, sleep=self.sleeps.append)
+        self.tools = ballet_rehearsal.Tools(run=self.world, sleep=self.sleeps.append, prove=self.world.prove)
 
     def begin(self):
         return ballet_rehearsal.begin("#3", self.home, self.tools)
@@ -304,6 +325,262 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertIn("- Tasks: all done.", comment[comment.index("--body") + 1])
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
         self.assertEqual(self.state()["pull_request"], "8")
+
+    # --- la preuve, lancée par le script ---
+
+    def red_report(self):
+        self.world.proof = ballet_rehearsal.Proof(False, "\n".join(f"line {n}" for n in range(100)) + "\nFAIL inventory\n")
+        return self.receive(message("dancer", "conductor", "report", "- Tasks: all done, proof green."))
+
+    def test_au_rapport_du_dancer_le_script_lance_la_preuve_du_profil_journalisee_a_son_debut_et_a_sa_fin(self):
+        self.to_the_critic()
+        self.assertEqual(self.world.proofs, [("pnpm proof", "/wt/FEAT-001.2", 420)])
+        start, end = self.journal("proof-start")[0], self.journal("proof-end")[0]
+        self.assertEqual((start["command"], start["head"]), ("pnpm proof", "c0ffee1"))
+        self.assertEqual((end["passed"], end["timed_out"], end["head"], end["seconds"]), (True, False, "c0ffee1", 0))
+
+    def test_une_preuve_rouge_n_est_pas_poussee_et_renvoie_au_dancer_sans_mobiliser_le_critic(self):
+        self.begin()
+        step = self.red_report()
+        self.assertEqual((step.next, step.done), ("wait", ["proof red, nothing pushed: dancer asked to fix it (1/2)"]))
+        self.assertFalse(self.world.ran("git", "-C", str(self.home.resolve()), "push", "--set-upstream", "origin", "rehearsal/FEAT-001.2"))
+        self.assertFalse(self.world.ran("gh", "pr", "create"))
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        body = send[send.index("--body") + 1]
+        self.assertIn("Ballet ran the proof (`pnpm proof`) on your branch: it is red.", body)
+        self.assertIn("FAIL inventory", body)
+        self.assertNotIn("line 40\n", body)
+
+    def test_une_preuve_redevenue_verte_part_au_critic(self):
+        self.begin()
+        self.red_report()
+        self.world.proof = ballet_rehearsal.Proof(True)
+        self.receive(message("dancer", "conductor", "report", "- Fixed."))
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+
+    def test_une_preuve_rouge_au_dela_de_max_round_trips_escalade(self):
+        self.begin()
+        self.red_report()
+        self.red_report()
+        step = self.red_report()
+        self.assertEqual((step.next, step.reason), ("escalate", "proof: `pnpm proof` red 3 times, over max_round_trips"))
+
+    def test_une_preuve_trop_longue_escalade(self):
+        self.begin()
+        self.world.proof = ballet_rehearsal.Proof(False, "", timed_out=True)
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual((step.next, step.reason),
+                         ("escalate", "proof: `pnpm proof` still running after 420s (proof_timeout_seconds)"))
+
+    def test_une_preuve_qui_salit_le_worktree_est_rouge(self):
+        self.begin()
+        world = self.world
+
+        def proof_leaving_files(command, cwd, timeout):
+            world.dirty = " M coverage/report.json\n"
+            return ballet_rehearsal.Proof(True)
+        self.tools.prove = proof_leaving_files
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertEqual(step.done, ["proof red, nothing pushed: dancer asked to fix it (1/2)"])
+        send = world.ran("orca", "orchestration", "send")[-1]
+        self.assertIn("The proof left the worktree dirty:\ncoverage/report.json", send[send.index("--body") + 1])
+
+    # --- la mutation, lancée en arrière-plan par le script ---
+
+    def mutation_profile(self, extra="", paths=""):
+        self.native_report = self.home / "outcomes.json"
+        (self.home / ".ballet" / "config.toml").write_text(PROFILE + extra + f"""
+[[repos.antimurphy.mutation]]
+name = "cargo-mutants"
+command = "cargo mutants --in-diff {{diff}} --files {{files}}"
+config = ".cargo/mutants.toml"
+report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
+{paths}
+""", encoding="utf-8")
+        self.world.branch_diff = MUTATED_DIFF
+        self.launches, self.mutations = [], []
+        self.mutation_result = (0, False, None)   # (code de sortie, trop long, rapport natif écrit par l'outil)
+        self.tools.launch = self.launch_in_place
+        self.tools.mutate = self.fake_mutation
+
+    def launch_in_place(self, argv, cwd):
+        """Le processus détaché, joué sur place : il journalise, écrit ses résultats et réveille le Conductor."""
+        self.launches.append((argv, cwd))
+        ballet_rehearsal.mutate(argv[-1], self.home, self.tools)
+
+    def fake_mutation(self, command, cwd, timeout, log_path):
+        self.mutations.append((command, cwd, timeout))
+        exit_code, timed_out, report = self.mutation_result
+        Path(log_path).write_text("\n".join(f"out {n}" for n in range(80)) + "\n", encoding="utf-8")
+        if report is not None:
+            self.native_report.write_text(report, encoding="utf-8")
+        return exit_code, timed_out
+
+    def wake(self, round_=1, message_id="msg_mutation"):
+        """Le réveil envoyé par la mutation, reçu comme tout message Orca."""
+        payload = json.dumps({"ballet": "mutation", "rehearsal": "FEAT-001.2", "round": round_})
+        self.world.inbox.append({"id": message_id, "type": "status", "subject": "FEAT-001.2 · mutation done", "payload": payload})
+        return ballet_rehearsal.receive_from_orca("FEAT-001.2", message_id, self.home, self.tools)
+
+    def mutated_report(self, body="- Tasks: all done."):
+        self.begin()
+        return self.receive(message("dancer", "conductor", "report", body))
+
+    def test_sans_entree_de_mutation_le_noeud_est_saute_et_journalise(self):
+        self.to_the_critic()
+        self.assertEqual(self.journal("mutation-skipped"), [{"reason": "no mutation tool in the profile"}])
+
+    def test_la_mutation_coupee_dans_le_profil_est_sautee_sans_retirer_ses_entrees(self):
+        self.mutation_profile(extra="\n[mutation]\nenabled = false\n")
+        step = self.mutated_report()
+        self.assertEqual(self.launches, [])
+        self.assertIn("mutation skipped: disabled in the profile", step.done)
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+
+    def test_un_diff_qui_ne_touche_aucun_outil_saute_la_mutation(self):
+        self.mutation_profile(paths='paths = ["apps/*"]')
+        step = self.mutated_report()
+        self.assertIn("mutation skipped: the diff touches no mutation tool", step.done)
+        self.assertEqual(self.journal("mutation-skipped"), [{"reason": "the diff touches no mutation tool"}])
+
+    def test_la_preuve_verte_lance_la_mutation_en_arriere_plan_sans_pousser_ni_lancer_le_critic(self):
+        self.mutation_profile()
+        step = self.mutated_report()
+        self.assertEqual((step.next, step.done), ("wait", ["proof green", "mutation started in the background "
+                                                           "(cargo-mutants, round 1): it wakes the Conductor when it is done"]))
+        argv, cwd = self.launches[0]
+        self.assertEqual((argv[-2:], cwd), (["mutate", "FEAT-001.2"], str(self.home.resolve())))
+        self.assertFalse(self.world.ran("git", "-C", str(self.home.resolve()), "push", "--set-upstream", "origin", "rehearsal/FEAT-001.2"))
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+
+    def test_la_mutation_recoit_son_perimetre_dans_le_worktree_avec_le_budget_du_profil(self):
+        self.mutation_profile()
+        self.mutated_report()
+        command, cwd, timeout = self.mutations[0]
+        diff = self.home.resolve() / ".ballet" / "run" / "FEAT-001.2" / "mutation-1-cargo-mutants.diff"
+        self.assertEqual((command, cwd), (f"cargo mutants --in-diff {diff} --files src/inventory.rs", "/wt/FEAT-001.2"))
+        self.assertGreater(timeout, 3590)
+        self.assertEqual(diff.read_text(), MUTATED_DIFF)
+
+    def test_la_mutation_est_journalisee_a_son_debut_et_a_sa_fin_avec_le_rapport_normalise(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.mutated_report()
+        start, end = self.journal("mutation-start")[0], self.journal("mutation-end")[0]
+        self.assertEqual((start["tool"], start["head"], start["files"], start["ranges"]), ("cargo-mutants", "c0ffee1", 1, 1))
+        self.assertEqual((end["tool"], end["passed"], end["timed_out"], end["head"], end["exit_code"]),
+                         ("cargo-mutants", False, False, "c0ffee1", 2))
+        self.assertEqual((end["report"]["killed"], end["report"]["survived"], end["report"]["score"]), (6, 7, 0.462))
+
+    def test_a_sa_fin_la_mutation_reveille_le_conductor_par_le_run_de_ses_workers(self):
+        self.mutation_profile()
+        self.mutated_report()
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "run:run_conductor")
+        self.assertEqual(json.loads(send[send.index("--payload") + 1]), {"ballet": "mutation", "rehearsal": "FEAT-001.2", "round": 1})
+        self.assertEqual(self.journal("mutation-wake"), [{"round": 1, "sent": True}])
+
+    def test_une_mutation_verte_pousse_publie_le_rapport_du_dancer_et_lance_le_critic(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, CARGO_REPORT.replace('"missed": 7', '"missed": 0'))
+        self.mutated_report("- Tasks: all done, mutation pending.")
+        step = self.wake()
+        self.assertEqual(step.next, "wait")
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0)")
+        comment = self.world.ran("gh", "pr", "comment")[0]
+        self.assertIn("- Tasks: all done, mutation pending.", comment[comment.index("--body") + 1])
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        self.assertEqual(self.state()["mutation"], {})
+
+    def test_une_mutation_rouge_n_est_pas_poussee_et_renvoie_les_survivants_au_dancer(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.mutated_report()
+        step = self.wake()
+        self.assertEqual((step.next, step.done), ("wait", ["mutation red (cargo-mutants), nothing pushed: dancer asked to kill "
+                                                           "the survivors (1/2)"]))
+        self.assertFalse(self.world.ran("gh", "pr", "create"))
+        body = self.world.ran("orca", "orchestration", "send")[-1]
+        body = body[body.index("--body") + 1]
+        self.assertIn("src/lib.rs:2:5: replace rank -> u8 with 1", body)
+        self.assertIn("mutation-1-cargo-mutants.log", body)
+        self.assertIn("Equivalents go in `.cargo/mutants.toml`", body)
+        self.assertIn("never an end-to-end test", body)
+
+    def test_sans_rapport_lisible_le_dancer_recoit_la_fin_de_la_sortie(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, "{broken")
+        self.mutated_report()
+        self.assertTrue(self.journal("mutation-end")[0]["report"].startswith("unreadable: JSONDecodeError"))
+        self.wake()
+        body = self.world.ran("orca", "orchestration", "send")[-1]
+        body = body[body.index("--body") + 1]
+        self.assertIn("No survivor list (report: unreadable: JSONDecodeError", body)
+        self.assertIn("out 79", body)
+        self.assertNotIn("out 19\n", body)
+
+    def test_une_mutation_rouge_au_dela_de_max_round_trips_escalade(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.begin()
+        for round_ in (1, 2, 3):
+            self.receive(message("dancer", "conductor", "report", "- Done."))
+            step = self.wake(round_, f"msg_{round_}")
+        self.assertEqual((step.next, step.reason), ("escalate", "mutation: red 3 times, over max_round_trips (cargo-mutants)"))
+
+    def test_une_mutation_trop_longue_escalade(self):
+        self.mutation_profile()
+        self.mutation_result = (None, True, None)
+        self.mutated_report()
+        step = self.wake()
+        self.assertEqual((step.next, step.reason),
+                         ("escalate", "mutation: cargo-mutants still running after 3600s ([mutation] timeout_seconds)"))
+
+    def test_un_worktree_qui_a_bouge_pendant_la_mutation_escalade(self):
+        self.mutation_profile()
+        self.mutated_report()
+        self.world.head = "beef002"
+        step = self.wake()
+        self.assertEqual((step.next, step.reason), ("escalate", "mutation: the worktree moved during the mutation (c0ffee1 → beef002)"))
+
+    def test_une_panne_en_arriere_plan_reveille_quand_meme_le_conductor_et_escalade(self):
+        self.mutation_profile()
+        self.tools.mutate = mock.Mock(side_effect=OSError("disk full"))
+        self.mutated_report()
+        self.assertTrue(self.world.ran("orca", "orchestration", "send"))
+        step = self.wake()
+        self.assertEqual((step.next, step.reason), ("escalate", "mutation: the background run failed: OSError: disk full"))
+
+    def test_un_reveil_d_un_autre_tour_est_ignore(self):
+        self.mutation_profile()
+        self.mutated_report()
+        step = self.wake(round_=7)
+        self.assertEqual((step.next, step.done), ("wait", ["mutation wake for round 7 ignored: no such mutation is running"]))
+        self.assertEqual(self.state()["mutation"]["round"], 1)
+
+    def test_un_reveil_perdu_se_rattrape_par_receive_mutation(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, None)
+        self.mutated_report()
+        step = ballet_rehearsal.receive_mutation("FEAT-001.2", self.home, self.tools)
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (report missing)")
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+
+    def test_receive_mutation_pendant_la_mutation_attend_sans_escalader(self):
+        self.mutation_profile()
+        self.tools.launch = lambda argv, cwd: None
+        self.mutated_report()
+        step = ballet_rehearsal.receive_mutation("FEAT-001.2", self.home, self.tools)
+        self.assertEqual(step.next, "wait")
+        self.assertIn("mutation of round 1 still running", step.done[0])
+        self.assertEqual(self.state()["mutation"]["round"], 1)
+
+    def test_status_montre_la_mutation_en_cours(self):
+        self.mutation_profile()
+        self.mutated_report()
+        lines = ballet_rehearsal.status("FEAT-001.2", self.home, self.tools).done
+        self.assertTrue(any(line.startswith("mutation running in the background since ") and "(round 1)" in line for line in lines))
 
     # --- la politique ---
 
@@ -1063,12 +1340,13 @@ class PlanningTest(unittest.TestCase):
         self.assertIn("ready feature FEAT-002", start["text"])
         self.assertIn("- Issue: #<n>", start["text"])
 
-    def test_le_choreographer_planifie_en_mode_auto_sous_la_moitie_du_seuil(self):
+    def test_le_choreographer_planifie_en_mode_auto_en_slices_verticales_sous_les_deux_tiers_du_seuil(self):
         self.run_main("run", "FEAT-002")
         text = self.journal("handoff")[0]["text"]
         self.assertIn("Auto mode", text)
         self.assertIn("nobody says yes in this session; the Director reviews the published plan before any code", text)
-        self.assertIn("aim each slice at 200 lines or less", text)
+        self.assertIn("each one estimated under 266 lines", text)
+        self.assertIn("at least one whole criterion end to end", text)
         self.assertIn("goes to the Director", text)
 
     def test_en_plan_auto_le_choreographer_sait_que_le_dancer_suit(self):
@@ -1168,3 +1446,35 @@ class PlanningTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaunchDetachedTest(unittest.TestCase):
+    """Le lancement en arrière-plan, pour de vrai : le processus survit à l'appel, dans le home du projet."""
+
+    def test_le_processus_lance_tourne_apres_l_appel_dans_le_home(self):
+        with tempfile.TemporaryDirectory() as home:
+            (Path(home) / ".ballet" / "run").mkdir(parents=True)
+            ballet_rehearsal._launch_detached([sys.executable, "-c", "import time, pathlib; time.sleep(0.3); "
+                                               "pathlib.Path('done').write_text('yes')"], home)
+            self.assertFalse((Path(home) / "done").exists())
+            for _ in range(50):
+                if (Path(home) / "done").exists():
+                    break
+                time.sleep(0.1)
+            self.assertEqual((Path(home) / "done").read_text(), "yes")
+
+
+class RunProofTest(unittest.TestCase):
+    """La preuve du profil, lancée pour de vrai dans un shell."""
+
+    def test_une_preuve_qui_reussit_est_verte_avec_sa_sortie(self):
+        proof = ballet_rehearsal._run_proof("echo ok", tempfile.gettempdir(), 10)
+        self.assertEqual((proof.passed, proof.output, proof.timed_out), (True, "ok\n", False))
+
+    def test_une_preuve_qui_echoue_est_rouge_avec_sa_sortie_d_erreur(self):
+        proof = ballet_rehearsal._run_proof("echo boom >&2; exit 3", tempfile.gettempdir(), 10)
+        self.assertEqual((proof.passed, proof.output), (False, "boom\n"))
+
+    def test_une_preuve_trop_longue_est_arretee(self):
+        proof = ballet_rehearsal._run_proof("echo start; sleep 30", tempfile.gettempdir(), 1)
+        self.assertEqual((proof.passed, proof.timed_out, proof.output), (False, True, "start\n"))

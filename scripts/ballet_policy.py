@@ -110,6 +110,11 @@ def refs(git):
     return sorted(git(["for-each-ref", "--format=%(refname)", "refs/heads", "refs/tags"]).split())
 
 
+def dirty_files(git):
+    """Les fichiers modifiés ou non suivis du worktree."""
+    return [line[3:] for line in git(["status", "--porcelain"]).splitlines()]
+
+
 def commits_since(checkpoint, git):
     return git(["rev-list", f"{checkpoint}..HEAD"]).split() if checkpoint else []
 
@@ -152,8 +157,8 @@ def _kept_refs(passage, policy, git):
 
 
 def _clean_tree(git):
-    dirty = git(["status", "--porcelain"]).splitlines()
-    return [f"uncommitted changes left in the worktree: {', '.join(line[3:] for line in dirty[:5])}"] if dirty else []
+    dirty = dirty_files(git)
+    return [f"uncommitted changes left in the worktree: {', '.join(dirty[:5])}"] if dirty else []
 
 
 # --- par rôle -----------------------------------------------------------------

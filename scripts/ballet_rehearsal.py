@@ -5,6 +5,7 @@
     python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
     python3 ballet_rehearsal.py receive  <ID> --dispatch <ctx-id>                  # le dernier message du worker de ce dispatch
     python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
+    python3 ballet_rehearsal.py receive  <ID> --mutation                           # la fin de la mutation, si son réveil s'est perdu
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI rouge ou trop longue)
     python3 ballet_rehearsal.py resume   <ID>                                      # applique la décision du Director (libellé de la PR)
     python3 ballet_rehearsal.py status   <ID> [--json]                             # où en est la Rehearsal
@@ -28,6 +29,19 @@ la file s'arrête alors : le Director pose `ballet:plan-approved` sur l'issue pl
 
 Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant `ballet:approved` (Premiere)
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
+
+À chaque rapport du Dancer, après la politique, le script lance lui-même la preuve du repo (`proof` du profil) dans
+le worktree, sans croire le rapport sur parole (`proof-start` et `proof-end` au journal). Rouge, ou un worktree sali par la preuve : rien
+n'est poussé, le Critic n'est pas mobilisé, le Dancer reprend avec la fin de la sortie ; au-delà de `max_round_trips`
+preuves rouges, ou une preuve encore en cours après `proof_timeout_seconds`, la Rehearsal escalade.
+
+La preuve verte, le test de mutation (`ballet_mutation.py`, les entrées `[[repos.<repo>.mutation]]` du profil) :
+trop long pour un appel du Conductor, il part en arrière-plan (`mutate <ID>`, interne) et le script répond `NEXT: wait`.
+À sa fin, il réveille le Conductor par un message Orca au Run de ses workers ; le Conductor le reçoit comme les autres
+(`receive --message`). Le code de sortie de chaque outil décide : rouge, rien n'est poussé, le Critic n'est pas
+mobilisé, le Dancer reprend avec les survivants ; au-delà de `max_round_trips` mutations rouges, ou après
+`[mutation] timeout_seconds`, la Rehearsal escalade. `[mutation] enabled = false`, aucune entrée, ou un diff qui ne
+touche aucun outil : le nœud est sauté (`mutation-skipped` au journal).
 
 À chaque rapport du Dancer, le script compte la taille du diff (`ballet_size.py`) et la journalise (`diff-size`).
 Au-delà de `max_diff_lines`, la PR porte `ballet:oversized` ; en mode strict (`max_diff_strict`), la Rehearsal
@@ -56,6 +70,7 @@ L'état vit dans `.ballet/run/<ID>.json`, le journal dans `.ballet/run/journal.j
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -65,6 +80,7 @@ from pathlib import Path
 
 import ballet_config
 import ballet_github
+import ballet_mutation
 import ballet_policy
 import ballet_size
 from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
@@ -83,6 +99,7 @@ STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 CI_POLL_SECONDS = 15
 MAX_NUDGES = 1
 MAX_POLICY_RESENDS = 1
+PROOF_OUTPUT_LINES = 60   # la fin de la sortie d'une preuve rouge, remise au Dancer
 ANSWERING_ROLES = ("choreographer", "dramaturg")   # vérifiés à chaque réponse, sur la branche de Rehearsal
 REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
 
@@ -117,6 +134,10 @@ class Rehearsal:
     refs: list = field(default_factory=list)         # branches et tags au dernier passage en règle
     owned: list = field(default_factory=list)        # les commits du Choreographer et du Dramaturg sur la branche
     violations: dict = field(default_factory=dict)   # rôle → passages refusés par la politique
+    red_proofs: int = 0                              # rapports du Dancer dont la preuve, lancée par le script, était rouge
+    mutations: int = 0                               # mutations lancées : le tour de la dernière
+    red_mutations: int = 0                           # mutations rouges
+    mutation: dict = field(default_factory=dict)     # la mutation en cours : {round, head, run, report, started}
     plan: str = ""                                   # review (le Director approuve le plan) | auto
     feature: str = ""                                # la feature d'une Rehearsal de planification, sans issue au départ
     plan_issue: str = ""                             # l'issue dont le plan attend `ballet:plan-approved`
@@ -148,12 +169,24 @@ class Step:
         return "\n".join(lines + [f"NEXT: {self.next} {self.reason}".rstrip()])
 
 
-class Tools:
-    """Les commandes externes (git, gh, orca) et l'attente, remplaçables dans les tests."""
+@dataclass
+class Proof:
+    """Ce qu'a donné la preuve du repo : verte ou non, sa sortie, et si elle a dépassé son temps."""
+    passed: bool
+    output: str = ""
+    timed_out: bool = False
 
-    def __init__(self, run=None, sleep=None):
+
+class Tools:
+    """Les commandes externes (git, gh, orca, la preuve, la mutation et son lancement en arrière-plan) et l'attente,
+    remplaçables dans les tests."""
+
+    def __init__(self, run=None, sleep=None, prove=None, launch=None, mutate=None):
         self.run = run or _run
         self.sleep = sleep or time.sleep
+        self.prove = prove or _run_proof
+        self.launch = launch or _launch_detached
+        self.mutate = mutate or ballet_mutation.run_command_with_timeout
 
     def gh(self, arguments):
         return self.run(["gh", *arguments])
@@ -214,7 +247,9 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
     rehearsal = _load(rehearsal_id, home)
     try:
         message = _orca_message(wanted, by, tools)
-        if message.get("type") == "escalation":
+        if _is_mutation_wake(message):
+            step = _after_mutation(rehearsal, _payload(message).get("round"), config, home, tools)
+        elif message.get("type") == "escalation":
             step = _worker_stopped(rehearsal, message, home, tools)
         else:
             header, text = _parsed(message.get("body", ""))
@@ -223,6 +258,29 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
     return _settle(rehearsal, step, home, tools)
+
+
+def receive_mutation(rehearsal_id, home, tools):
+    """La fin de la mutation en cours, sans son réveil Orca (perdu) : ses résultats sont lus dans `.ballet/run/<ID>/`."""
+    config = _checked_config(home)
+    rehearsal = _load(rehearsal_id, home)
+    try:
+        step = _after_mutation(rehearsal, rehearsal.mutation.get("round"), config, home, tools)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        step = Step("escalate", str(error))
+    return _settle(rehearsal, step, home, tools)
+
+
+def mutate(rehearsal_id, home, tools):
+    """La moitié en arrière-plan du nœud de mutation : les outils, leurs résultats dans `.ballet/run/<ID>/`, puis le
+    réveil du Conductor. Quoi qu'il arrive, le Conductor est réveillé : une panne devient un résultat."""
+    rehearsal = _load(rehearsal_id, home)
+    try:
+        results = {"outcomes": [asdict(outcome) for outcome in _mutate_each_tool(rehearsal, _checked_config(home), home, tools)]}
+    except Exception as error:  # le Conductor attend ce réveil : rien ne doit l'empêcher de partir
+        results = {"error": f"{type(error).__name__}: {error}"}
+    _mutation_results_path(rehearsal, home).write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _wake_the_conductor(rehearsal, home, tools)
 
 
 def premiere(rehearsal_id, home, tools):
@@ -259,6 +317,7 @@ def status(rehearsal_id, home, tools):
     config = _checked_config(home)
     rehearsal = _load(rehearsal_id, home)
     summary = [_where(rehearsal), _pull_request_line(rehearsal, tools), _size_line(rehearsal), _round_trips_line(rehearsal, config)]
+    summary += _mutation_lines(rehearsal)
     summary += _pending_lines(rehearsal) + _workers_line(rehearsal) + _queue_lines(_load_queue(home), rehearsal.id)
     return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, summary)
 
@@ -514,12 +573,23 @@ def _plan_line(planned, issues):
 
 
 def _after_code(rehearsal, report, config, home, tools):
-    """La politique d'abord : rien n'est poussé en violation. Puis pousse la branche, ouvre la PR au premier rapport,
-    y publie le rapport, et passe la main au Critic."""
+    """La politique d'abord, puis la preuve, puis la mutation : rien n'est poussé en violation, rouge, ni avant la fin
+    de la mutation, qui part en arrière-plan. Sans mutation à lancer, la branche part tout de suite."""
     found = _policy(rehearsal, "dancer", config, home, tools)
     if found:
         return _refused_by_policy(rehearsal, "dancer", found, config, home, tools)
-    step = Step("wait")
+    proof = _prove(rehearsal, config, home, tools)
+    if not proof.passed:
+        return _refused_by_proof(rehearsal, proof, config, home, tools)
+    scoped = _mutated_tools(rehearsal, config, tools)
+    if scoped:
+        return _launch_mutation(rehearsal, report, scoped, home, tools)
+    return _publish_code(rehearsal, report, Step("wait", done=["proof green", _skip_mutation(rehearsal, config, home)]),
+                         config, home, tools)
+
+
+def _publish_code(rehearsal, report, step, config, home, tools):
+    """Pousse la branche, ouvre la PR au premier rapport, y publie le rapport, mesure le diff et passe la main au Critic."""
     ballet_github.push_branch(rehearsal.branch, git=tools.git(rehearsal.repo))
     step.done.append(f"{rehearsal.branch} pushed")
     if rehearsal.pull_request:
@@ -655,6 +725,173 @@ def _refused_by_policy(rehearsal, role, found, config, home, tools):
     return Step("wait", done=[f"policy refused the {role}'s work, sent back once: {listed}"])
 
 
+def _prove(rehearsal, config, home, tools):
+    """Lance la preuve du repo dans le worktree, journalisée à son début (`proof-start`) et à sa fin (`proof-end`,
+    avec son statut et sa durée) ; une preuve qui salit le worktree n'est pas verte."""
+    command, head = _proof_command(config), ballet_policy.head(tools.git(rehearsal.worktree))
+    _log(home, rehearsal, "proof-start", {"command": command, "head": head})
+    started = time.monotonic()
+    proof = tools.prove(command, rehearsal.worktree, config["escalation"]["proof_timeout_seconds"])
+    seconds = round(time.monotonic() - started)
+    dirty = ballet_policy.dirty_files(tools.git(rehearsal.worktree)) if proof.passed else []
+    if dirty:
+        proof = Proof(False, "The proof left the worktree dirty:\n" + "\n".join(dirty))
+    _log(home, rehearsal, "proof-end", {"passed": proof.passed, "timed_out": proof.timed_out, "head": head,
+                                        "seconds": seconds})
+    return proof
+
+
+def _refused_by_proof(rehearsal, proof, config, home, tools):
+    """Rouge : le Dancer reprend avec la fin de la sortie, le Critic n'est pas mobilisé ; trop long ou trop souvent, escalade."""
+    command = _proof_command(config)
+    if proof.timed_out:
+        return Step("escalate", f"proof: `{command}` still running after {config['escalation']['proof_timeout_seconds']}s "
+                    "(proof_timeout_seconds)")
+    rehearsal.red_proofs += 1
+    if rehearsal.red_proofs > config["escalation"]["max_round_trips"]:
+        return Step("escalate", f"proof: `{command}` red {rehearsal.red_proofs} times, over max_round_trips")
+    _ask_role(rehearsal, "dancer", _proof_fix_assignment(command, proof), config, home, tools)
+    return Step("wait", done=[f"proof red, nothing pushed: dancer asked to fix it ({rehearsal.red_proofs}/"
+                              f"{config['escalation']['max_round_trips']})"])
+
+
+def _proof_command(config):
+    return next(iter(config["repos"].values()))["proof"]
+
+
+# --- la mutation --------------------------------------------------------------
+
+
+def _mutated_tools(rehearsal, config, tools):
+    """Les outils de mutation que la branche touche, chacun avec son périmètre ; aucun si le profil la coupe."""
+    declared = _mutation_tools(config)
+    if not config["mutation"]["enabled"] or not declared:
+        return []
+    return ballet_mutation.scopes_of(declared, tools.git(rehearsal.worktree))
+
+
+def _skip_mutation(rehearsal, config, home):
+    """Le nœud sauté se dit au journal (`mutation-skipped`), avec sa raison."""
+    if not config["mutation"]["enabled"]:
+        reason = "disabled in the profile"
+    elif not _mutation_tools(config):
+        reason = "no mutation tool in the profile"
+    else:
+        reason = "the diff touches no mutation tool"
+    _log(home, rehearsal, "mutation-skipped", {"reason": reason})
+    return f"mutation skipped: {reason}"
+
+
+def _launch_mutation(rehearsal, report, scoped, home, tools):
+    """Trop long pour un appel du Conductor : la mutation part en arrière-plan, et le réveille par Orca à sa fin.
+    Le rapport du Dancer attend avec elle, pour être publié avec la branche."""
+    rehearsal.mutations += 1
+    rehearsal.mutation = {"round": rehearsal.mutations, "head": ballet_policy.head(tools.git(rehearsal.worktree)),
+                          "run": _conductor_run(rehearsal, tools), "report": report, "started": _now()}
+    _save(rehearsal, home)
+    tools.launch([sys.executable, str(Path(__file__).resolve()), "mutate", rehearsal.id], str(Path(home).resolve()))
+    names = ", ".join(tool.name for tool, _ in scoped)
+    return Step("wait", done=["proof green", f"mutation started in the background ({names}, round {rehearsal.mutations}): "
+                              "it wakes the Conductor when it is done"])
+
+
+def _mutate_each_tool(rehearsal, config, home, tools):
+    """Le même chemin que `ballet_mutation.py run`, journalisé dans la Rehearsal (`mutation-start`, `mutation-end`)."""
+    git = tools.git(rehearsal.worktree)
+    scoped = ballet_mutation.scopes_of(_mutation_tools(config), git)
+    folder, prefix = _run_dir(home) / rehearsal.id, f"mutation-{rehearsal.mutation['round']}"
+
+    def journal(event, detail):
+        _log(home, rehearsal, event, detail)
+    return ballet_mutation.run_tools(scoped, rehearsal.worktree, folder, prefix, config["mutation"]["timeout_seconds"], git,
+                                     journal, tools.mutate)
+
+
+def _wake_the_conductor(rehearsal, home, tools):
+    """Un message Orca au Run des workers : son coordinateur, le Conductor, est réveillé comme par un worker."""
+    pending = rehearsal.mutation
+    payload = {"ballet": "mutation", "rehearsal": rehearsal.id, "round": pending["round"]}
+    try:
+        tools.orca(["orchestration", "send", "--to", f"run:{pending['run']}", "--type", "status",
+                    "--subject", f"{rehearsal.id} · mutation done", "--payload", json.dumps(payload),
+                    "--body", f"The mutation of Rehearsal {rehearsal.id} (round {pending['round']}) is done: "
+                              "run `ballet_rehearsal.py receive --message <this message id>`.", "--json"])
+        _log(home, rehearsal, "mutation-wake", {"round": pending["round"], "sent": True})
+    except RehearsalError as error:
+        _log(home, rehearsal, "mutation-wake", {"round": pending["round"], "sent": False, "error": str(error)})
+
+
+def _after_mutation(rehearsal, round_, config, home, tools):
+    """La fin de la mutation : le code de sortie de chaque outil décide. Verte, la branche part ; rouge, le Dancer
+    reprend avec les survivants ; trop longue, en panne, ou sur un worktree qui a bougé, escalade."""
+    pending = rehearsal.mutation
+    if not pending or round_ != pending["round"]:
+        return Step("wait", done=[f"mutation wake for round {round_} ignored: no such mutation is running"])
+    path = _mutation_results_path(rehearsal, home)
+    if not path.is_file():
+        return Step("wait", done=[f"mutation of round {round_} still running: no results yet in {path}"])
+    results = json.loads(path.read_text(encoding="utf-8"))
+    rehearsal.mutation = {}
+    if "error" in results:
+        return Step("escalate", f"mutation: the background run failed: {results['error']}")
+    moved = ballet_policy.head(tools.git(rehearsal.worktree))
+    if moved != pending["head"]:
+        return Step("escalate", f"mutation: the worktree moved during the mutation ({pending['head']} → {moved})")
+    outcomes = [ballet_mutation.Outcome(**outcome) for outcome in results["outcomes"]]
+    late = [outcome.tool for outcome in outcomes if outcome.timed_out]
+    if late:
+        return Step("escalate", f"mutation: {', '.join(late)} still running after {config['mutation']['timeout_seconds']}s "
+                    "([mutation] timeout_seconds)")
+    red = [outcome for outcome in outcomes if not outcome.passed]
+    if red:
+        return _refused_by_mutation(rehearsal, red, config, home, tools)
+    return _publish_code(rehearsal, pending["report"], Step("wait", done=[_mutation_green_line(outcomes)]), config, home, tools)
+
+
+def _refused_by_mutation(rehearsal, red, config, home, tools):
+    """Rouge : le Dancer reprend avec les survivants, le Critic n'est pas mobilisé ; trop souvent, escalade."""
+    names = ", ".join(outcome.tool for outcome in red)
+    rehearsal.red_mutations += 1
+    if rehearsal.red_mutations > config["escalation"]["max_round_trips"]:
+        return Step("escalate", f"mutation: red {rehearsal.red_mutations} times, over max_round_trips ({names})")
+    _ask_role(rehearsal, "dancer", _mutation_fix_assignment(red, config), config, home, tools)
+    return Step("wait", done=[f"mutation red ({names}), nothing pushed: dancer asked to kill the survivors "
+                              f"({rehearsal.red_mutations}/{config['escalation']['max_round_trips']})"])
+
+
+def _mutation_green_line(outcomes):
+    return "mutation green: " + ", ".join(f"{outcome.tool} ({_score_text(outcome.report)})" for outcome in outcomes)
+
+
+def _score_text(report):
+    if not isinstance(report, dict):
+        return f"report {report}"
+    return f"{report['killed']} killed, {report['survived']} survived" + (f", score {report['score']}" if report["score"] is not None else "")
+
+
+def _mutation_tools(config):
+    return ballet_mutation.tools_of(next(iter(config["repos"].values())))
+
+
+def _conductor_run(rehearsal, tools):
+    """Le Run Orca des workers de la Rehearsal, lu sur le dispatch du Dancer : c'est celui du Conductor."""
+    shown = json.loads(tools.orca(["orchestration", "worker-show", "--dispatch", rehearsal.dispatches["dancer"], "--json"]))
+    run_id = _find_key(shown, "runId")
+    if not run_id:
+        raise RehearsalError(f"the Dancer's dispatch {rehearsal.dispatches['dancer']} names no Orca Run: the mutation could not wake the Conductor")
+    return run_id
+
+
+def _mutation_results_path(rehearsal, home):
+    folder = _run_dir(home) / rehearsal.id
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"mutation-{rehearsal.mutation['round']}.json"
+
+
+def _is_mutation_wake(message):
+    return message.get("type") == "status" and _payload(message).get("ballet") == "mutation"
+
+
 def _own_commits(rehearsal, tools):
     """Les commits d'un passage vérifié du Choreographer ou du Dramaturg ne comptent pas contre le Dancer."""
     git = tools.git(rehearsal.worktree)
@@ -736,6 +973,13 @@ def _round_trips_line(rehearsal, config):
     return f"Dancer ↔ Critic round trips: {rehearsal.round_trips} of {config['escalation']['max_round_trips']}"
 
 
+def _mutation_lines(rehearsal):
+    if not rehearsal.mutation:
+        return []
+    return [f"mutation running in the background since {rehearsal.mutation['started']} (round {rehearsal.mutation['round']}): "
+            "it wakes the Conductor when it is done"]
+
+
 def _pending_lines(rehearsal):
     return [f"the {question['from']} waits for the {question['to']}'s answer (Orca message {question['id']})"
             for question in rehearsal.pending]
@@ -810,14 +1054,15 @@ def _first_assignment(role, rehearsal, config):
 
 
 def _auto_mode(rehearsal, config):
-    """La consigne du Choreographer en mode auto : il tranche seul, découpe sous le seuil et publie sans attendre de oui."""
+    """La consigne du Choreographer en mode auto : il tranche seul, découpe en slices verticales sous le seuil et publie sans attendre de oui."""
     limit = config["escalation"]["max_diff_lines"]
     review = ("the Director reviews the published plan before any code" if rehearsal.plan == "review"
               else "the Dancer starts on it as soon as you report")
     return (f"Auto mode (section *Auto mode* of your skill): nobody says yes in this session; {review}. Settle every "
             "choice yourself and write it in *Decisions*. Product gaps go to the Dramaturg; what neither of you can settle "
-            f"goes to the Director (a question `to: director`). Slices: `max_diff_lines` is {limit}; aim each slice at "
-            f"{limit // 2} lines or less, tests included, and cut again any slice estimated over {limit * 2 // 3}. "
+            f"goes to the Director (a question `to: director`). Slices: `max_diff_lines` is {limit}; as few slices as "
+            f"possible, each one estimated under {limit * 2 // 3} lines, tests included, and each one vertical: it delivers "
+            "at least one whole criterion end to end, never one layer (API, then client, then screen). "
             "Commit your ADRs and `AGENTS.md` rules on this branch: they ship with the first slice. "
             "Then report, with `- Issue: #<n>` (the parent, when sliced).")
 
@@ -854,6 +1099,29 @@ def _policy_fix_assignment(found):
     return (f"Ballet's policy refused your work: nothing was pushed.\n\n{listed}\n\nFix it with new commits "
             "(a revert is fine), never by rewriting history, and leave the worktree clean. If the plan really needs "
             "one of these changes, ask instead. Then report again. A second violation goes to the Director.")
+
+
+def _proof_fix_assignment(command, proof):
+    tail = "\n".join(proof.output.rstrip().splitlines()[-PROOF_OUTPUT_LINES:])
+    return (f"Ballet ran the proof (`{command}`) on your branch: it is red. Nothing was pushed, and the Critic was not "
+            f"asked. The end of its output:\n\n```\n{tail}\n```\n\nMake it green with new commits, never by touching "
+            "an existing test, and leave the worktree clean. Then report again.")
+
+
+def _mutation_fix_assignment(red, config):
+    sections = "\n\n".join(_mutation_section(outcome, config) for outcome in red)
+    return ("Ballet ran the mutation test on your branch: it is red. Nothing was pushed, and the Critic was not asked.\n\n"
+            f"{sections}\n\nKill each survivor with a unit test, never an end-to-end test (skill `ballet:tdd`). A survivor "
+            "that is truly equivalent (no test can tell it apart) is excluded in the tool's config file, with its reason "
+            "written next to it: the Critic judges each exclusion. New commits only, the worktree clean. Then report again.")
+
+
+def _mutation_section(outcome, config):
+    """Un outil rouge : ses survivants (sinon la fin de sa sortie), son log entier et le fichier de ses équivalents."""
+    tool = next(tool for tool in _mutation_tools(config) if tool.name == outcome.tool)
+    listed = "Survivors" if outcome.lists_survivors() else f"No survivor list (report: {outcome.report_status()}); the end of its output"
+    return (f"### {outcome.tool} (exit {outcome.exit_code})\n\n{listed}:\n\n```\n{outcome.survivors_text()}\n```\n\n"
+            f"Whole log: `{outcome.log}`. Equivalents go in `{tool.config}`.")
 
 
 def _quote(text):
@@ -988,9 +1256,13 @@ def _save_queue(queue, home):
 
 
 def _log(home, rehearsal, event, detail):
-    entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "rehearsal": rehearsal.id, "event": event, "detail": detail}
+    entry = {"at": _now(), "rehearsal": rehearsal.id, "event": event, "detail": detail}
     with (_run_dir(home) / "journal.jsonl").open("a", encoding="utf-8") as journal:
         journal.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _state_path(rehearsal_id, home):
@@ -1162,6 +1434,25 @@ def _find_key(value, key):
     return None
 
 
+def _run_proof(command, cwd, timeout):
+    """La preuve du profil, une ligne de shell ; trop longue, son groupe de processus est tué."""
+    process = subprocess.Popen(command, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, errors="replace", start_new_session=True)
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output, _ = process.communicate()
+        return Proof(False, output, timed_out=True)
+    return Proof(process.returncode == 0, output)
+
+
+def _launch_detached(argv, cwd):
+    """Un processus qui survit à l'appel du Conductor, son environnement compris (Orca y reconnaît le Conductor)."""
+    with open(Path(cwd) / RUN_DIR / "mutation-launch.log", "a", encoding="utf-8") as log:
+        subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+
 def _run(arguments):
     completed = subprocess.run(arguments, capture_output=True, text=True)
     if completed.returncode != 0:
@@ -1187,7 +1478,8 @@ def main(argv, home=".", tools=None):
 
 
 USAGE = ("usage: run <item>... [--plan review|auto] | begin <item> | receive [<ID>] --message <msg-id> "
-         "| receive [<ID>] --dispatch <ctx-id> | receive [<ID>] <message.md> [--question <msg-id>] | premiere [<ID>] "
+         "| receive [<ID>] --dispatch <ctx-id> | receive [<ID>] <message.md> [--question <msg-id>] | receive [<ID>] --mutation "
+         "| premiere [<ID>] "
          "| resume [<ID>] | status [<ID>] [--json]   (an item: #<issue> or a ready FEAT-NNN; no <ID>: the Rehearsal the queue is playing)")
 
 
@@ -1207,6 +1499,11 @@ def _command(command, arguments, home, tools):
 
 
 def _rehearsal_command(command, arguments, home, tools):
+    if command == "receive" and arguments[1:] == ["--mutation"]:
+        return receive_mutation(arguments[0], home, tools).render()
+    if command == "mutate" and len(arguments) == 1:
+        mutate(arguments[0], home, tools)
+        return f"mutation of {arguments[0]} done"
     if command == "receive" and len(arguments) == 3 and arguments[1] in ("--message", "--dispatch"):
         return receive_from_orca(arguments[0], arguments[2], home, tools, by=arguments[1][2:]).render()
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):

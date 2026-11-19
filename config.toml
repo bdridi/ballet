@@ -86,5 +86,19 @@ max_exchange_rounds = 3          # tours de questions entre deux rôles sur un m
 max_diff_lines = 400             # lignes changées (ajoutées + supprimées) de la branche, comptées par le script
 max_diff_strict = false          # false : au-delà, la PR porte ballet:oversized et rien ne bloque ; true : escalade avant le Critic
 ci_wait_seconds = 480             # la Premiere attend une CI en cours jusque-là, puis escalade ; sous 600 (limite d'un appel du Conductor)
+proof_timeout_seconds = 420       # au rapport du Dancer, le script lance la preuve du repo ; encore en cours après, escalade ; sous 600
 plan_approval = true             # true : le plan du Choreographer attend `ballet:plan-approved` du Director (`--plan review`) ; false : `--plan auto`
 diff_exclude = ["*.lock", "pnpm-lock.yaml", "package-lock.json"]   # hors du compte (fnmatch, `*` traverse les `/`)
+
+# Le test de mutation, nœud après la preuve : Ballet porte la méthode, le projet l'outil. Chaque outil est une entrée
+# du profil, éditée à la main par le Director :
+#   [[repos.<repo>.mutation]]
+#   name = "cargo-mutants"
+#   command = "mise exec -- cargo mutants --in-diff {diff}"   # {diff} un fichier, {files}, {ranges} (`fichier:début-fin`)
+#   config = ".cargo/mutants.toml"                            # où s'excluent les équivalents, chacun avec sa raison
+#   report = { path = "mutants.out/outcomes.json", format = "cargo-mutants" }
+#   paths = ["crates/*"]                                      # facultatif : le diff filtré (fnmatch, `*` traverse les `/`)
+# Sans entrée, le nœud est sauté.
+[mutation]
+enabled = true                   # false : le nœud ne lance rien (`mutation-skipped`), les entrées du profil restent
+timeout_seconds = 3600           # le budget de tous les outils, lancés en arrière-plan ; encore en cours après, escalade

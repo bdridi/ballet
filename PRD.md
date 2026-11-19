@@ -61,7 +61,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 - **Capability** (`CAP-NNN`) : le chapeau métier de plusieurs features ; le pourquoi, le signal de réussite, les règles métier transverses et les limites, sans critères.
 - **Feature** (`FEAT-NNN`) : un comportement visible, quatre critères Gherkin au plus, une issue.
 - **Issue** : l'issue GitHub, créée par le Choreographer à partir d'une feature prête (ou d'un bug, d'une tâche du backlog), avec son plan. Elle ne vit que sur GitHub, jamais dans l'espace specs.
-- **Slice** (`FEAT-NNN.K`) : une part d'une feature trop grosse pour une seule session du Dancer, proposée par le Choreographer seulement si besoin. Chaque slice est une Rehearsal complète (sa branche, code, validation, preuve verte, merge de sa PR sur `main`) et couvre des critères entiers, ou un prérequis technique de la suivante.
+- **Slice** (`FEAT-NNN.K`) : une part d'une feature trop grosse pour une seule session du Dancer, proposée par le Choreographer seulement si besoin. Chaque slice est une Rehearsal complète (sa branche, code, validation, preuve verte, merge de sa PR sur `main`) et livre au moins un critère entier de bout en bout (slice verticale, jamais une couche : API, puis client, puis écran) ; une slice sans critère n'est admise que pour le walking skeleton d'un repo vide, ou quand le plus petit critère seul dépasse le seuil. Le moins de slices possible, chacune estimée sous les deux tiers de `max_diff_lines`.
 - **Branche de Rehearsal** (`rehearsal/<ID>`) : la branche courte d'une Rehearsal, dans son propre worktree, créée par le Conductor depuis `main` et supprimée après la Premiere. Le Choreographer et le Dancer y commitent, à tour de rôle ; la PR qui l'intègre porte la validation. Avec des slices, chacune a sa branche, partie de `main` après le merge de la précédente ; les ADR et les règles du plan voyagent avec la première.
 - **Glossary** (`glossary.md`) : la langue du projet ; chaque terme avec son nom de code et son texte affiché.
 
@@ -211,6 +211,8 @@ Toute phase en auto peut escalader vers le Director. Les déclencheurs par défa
 - il modifie ou supprime un test existant au lieu d'en ajouter.
 
 **Côté exécution**
+- la preuve du repo, lancée par le script à chaque rapport du Dancer, reste rouge au-delà du plafond d'allers-retours, ou dépasse `proof_timeout_seconds` ;
+- le test de mutation, lancé par le script après la preuve, reste rouge au-delà du plafond d'allers-retours, ou dépasse `[mutation] timeout_seconds` ;
 - un build instable (vert puis rouge sans changement) ;
 - en parallèle, un conflit de merge que le Dancer n'a pas résolu proprement.
 
@@ -241,6 +243,8 @@ Attendre le tampon du Director n'est jamais un échec : le Conductor prévient l
 - Les deux skills font jouer **les mêmes rôles**.
 - Le Conductor ne code pas et n'écrit pas de plan : il lance, répond, juge les preuves et intègre.
 - Un plafond d'allers-retours Dancer ↔ Critic (2 par défaut) existe dès le séquentiel.
+- **La preuve ne se croit pas sur parole** : à chaque rapport du Dancer, après la politique et avant le push, le script lance lui-même la preuve du repo dans le worktree. Rouge (ou un worktree sali par la preuve), rien n'est poussé, le Critic n'est pas mobilisé : le Dancer reprend avec la fin de la sortie. Au-delà de `max_round_trips` preuves rouges, ou trop longue, escalade (0.24.0).
+- **Le test de mutation, après la preuve** : Ballet porte la méthode, le projet l'outil. Le projet fige l'outil, sa config (où s'excluent les équivalents, chacun avec sa raison) et déclare une entrée par outil dans son profil (`[[repos.<repo>.mutation]]`) ; Ballet calcule le diff de la branche contre son ancêtre commun avec `origin/main`, le passe à chaque outil (`{diff}`, `{files}`, `{ranges}`), et le code de sortie décide. Trop long pour un appel du Conductor, il part en arrière-plan et le réveille par Orca à sa fin. Rouge : rien n'est poussé, le Critic n'est pas mobilisé, le Dancer reprend avec les survivants ; au-delà de `max_round_trips`, ou d'une heure, escalade. Un survivant se tue par un test unitaire ; le Critic juge chaque exclusion (`ballet:tdd`). `[mutation] enabled = false` coupe le nœud sans retirer les entrées (0.25.0).
 - Rien de destructeur ni de sortant hors du repo sans l'accord du Director.
 
 ### 7.1 Le répertoire
@@ -399,6 +403,12 @@ path = "../web"
 proof = "npm test"
 needs = ["gateway"]
 
+[[repos.billing.mutation]]              # le test de mutation de ce repo, après la preuve (un outil par entrée)
+name = "cargo-mutants"
+command = "mise exec -- cargo mutants --in-diff {diff}"   # {diff} un fichier, {files}, {ranges} (`fichier:début-fin`)
+config = ".cargo/mutants.toml"           # où s'excluent les équivalents, avec leur raison
+report = { path = "mutants.out/outcomes.json", format = "cargo-mutants" }
+
 [policy]
 sensitive_zones = ["*/contract/*"]     # globs, valables dans tous les repos (`*` traverse les `/`)
 
@@ -413,8 +423,13 @@ pattern = 'func (Test\w+)'
 max_diff_lines = 400
 max_diff_strict = true                   # escalade avant le Critic au-delà du seuil (défaut : false)
 ci_wait_seconds = 480                    # la Premiere attend une CI en cours jusque-là (défaut : 480, sous 600)
+proof_timeout_seconds = 420              # la preuve lancée par le script au rapport du Dancer (défaut : 420, sous 600)
 plan_approval = false                    # le plan du Choreographer part sans `ballet:plan-approved` (défaut : true)
 diff_exclude = ["*.lock", "**/generated/**"]
+
+[mutation]
+enabled = true                           # false : le nœud de mutation est sauté, les entrées restent (défaut : true)
+timeout_seconds = 3600                   # le budget de tous les outils, en arrière-plan (défaut : 3600)
 
 [roles.dancer]                            # surcharge : le reste hérite des défauts
 cli = "mistral-vibe"

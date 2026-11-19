@@ -32,6 +32,7 @@ Run the repo's proof yourself; never trust the report. Then check, task by task:
 - **The criteria**: every covered criterion has its `.feature` scenarios tagged `@FEAT-NNN-Cn`, and they pass; each test proves its one behaviour (it would fail without the code).
 - **The red**: each task of the report quotes its red test and the failure line; the failure is the expected one (an assertion on the task's behaviour, not a typo or a missing import). A task without it is a blocking point: TDD cannot be checked.
 - **The tests**: no existing test modified or deleted (`git diff --diff-filter=MD main...HEAD`), unless a task says so.
+- **The mutation exclusions**: when the profile declares a mutation tool (`[[repos.<repo>.mutation]]`), every exclusion the branch adds to its `config` file has a reason, and the mutant is truly equivalent: no test could kill it (`ballet:tdd`, *Mutation*). Otherwise it is a blocking point. The mutation itself is not yours to run: the Conductor's script ran it before asking you, and every tool came back green.
 - **The domain**: names come from the glossary; behaviour lives in the model, use cases only orchestrate (rule `ballet:ddd` if the project applies it).
 - **The code**: the common rules and the project's `AGENTS.md`, including rules added on this branch.
 - **The scope**: nothing from the issue's out of scope; nothing in the specs space, the CI files, the harness or a sensitive zone.

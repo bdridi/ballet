@@ -4,6 +4,8 @@
     python3 ballet_stage.py --scan <dossier>        # tous les sous-dossiers qui ont un `.ballet/run/`
     python3 ballet_stage.py --port 7700             # le port d'écoute (7700 par défaut)
 
+La page d'origine répond sur `/`, la nouvelle (`stage/v2.html`) sur `/v2` : les deux lisent les mêmes données.
+
 Lecture seule : le script lit `.ballet/run/` de chaque projet (états `<ID>.json`, la file `queue.json` et
 `journal.jsonl`), le profil (CLI et modèle par rôle, seuils d'escalade) et le titre des issues, celles des Rehearsals
 comme celles qui attendent dans la file (`gh issue view`, gardé en mémoire).
@@ -19,7 +21,9 @@ from urllib.parse import parse_qs, urlparse
 
 import ballet_config
 
-PAGE = Path(__file__).resolve().parent.parent / "stage" / "index.html"
+STAGE = Path(__file__).resolve().parent.parent / "stage"
+PAGE = STAGE / "index.html"
+PAGES = {"/": PAGE, "/index.html": PAGE, "/v2": STAGE / "v2.html", "/v2.html": STAGE / "v2.html"}
 RUN_DIR = Path(".ballet") / "run"
 QUEUE_FILE = "queue.json"
 LIMITS = ("max_round_trips", "max_diff_lines", "max_diff_strict", "max_exchange_rounds")
@@ -198,7 +202,7 @@ def _checked(homes):
 
 
 def _announce(homes, port):
-    print(f"The curtain rises on http://127.0.0.1:{port}  ({len(homes)} project(s): {', '.join(h.resolve().name for h in homes)})")
+    print(f"The curtain rises on http://127.0.0.1:{port}  (new stage: /v2)  ({len(homes)} project(s): {', '.join(h.resolve().name for h in homes)})")
 
 
 # --- serveur ------------------------------------------------------------------
@@ -218,8 +222,8 @@ def _handler_for(homes):
             if not _is_local(self.headers.get("Host", "")):
                 return self._reply(403, "text/plain", b"forbidden")
             url = urlparse(self.path)
-            if url.path in ("/", "/index.html"):
-                return self._reply(200, "text/html; charset=utf-8", PAGE.read_bytes())
+            if url.path in PAGES:
+                return self._reply(200, "text/html; charset=utf-8", PAGES[url.path].read_bytes())
             if url.path == "/api/stage":
                 since = parse_qs(url.query).get("since", [""])[0]
                 return self._reply(200, "application/json", json.dumps(snapshot(homes, since)).encode())

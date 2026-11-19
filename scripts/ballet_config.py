@@ -16,6 +16,7 @@ PERIMETER_KEYS = ("writes", "except", "extra_writes", "extra_except", "branches"
 
 ROLES = ("dramaturg", "choreographer", "dancer", "critic")
 CLIS = ("claude", "grok", "mistral-vibe", "codex", "opencode", "gemini-cli", "kimi")
+MUTATION_REPORT_FORMATS = ("cargo-mutants",)
 
 
 class ConfigError(Exception):
@@ -36,6 +37,7 @@ def find_problems(config, plugin_root=PLUGIN_ROOT):
         + _role_problems(config)
         + _critic_dancer_problems(config)
         + _threshold_problems(config)
+        + _mutation_problems(config)
         + _policy_problems(config)
     )
 
@@ -116,6 +118,33 @@ def _single_repo_problems(name, repo, known):
     for needed in repo.get("needs", []):
         if needed not in known:
             problems.append(f"[repos.{name}] needs: unknown repo '{needed}'")
+    return problems + _mutation_tool_problems(name, repo.get("mutation", []))
+
+
+def _mutation_tool_problems(repo_name, tools):
+    """Une entrée `[[repos.<repo>.mutation]]` par outil : de quoi le lancer et lire son rapport."""
+    where = f"[[repos.{repo_name}.mutation]]"
+    if not isinstance(tools, list) or not all(isinstance(tool, dict) for tool in tools):
+        return [f"{where} must be an array of tables"]
+    problems = []
+    for tool in tools:
+        problems += _single_mutation_tool_problems(f"{where} {tool.get('name', '?')}", tool)
+    names = [tool.get("name") for tool in tools]
+    if len(set(names)) != len(names):
+        problems.append(f"{where}: each tool needs its own name")
+    return problems
+
+
+def _single_mutation_tool_problems(where, tool):
+    problems = [f"{where}: {key} must be a non-empty string" for key in ("name", "command", "config")
+                if not isinstance(tool.get(key), str) or not tool.get(key)]
+    report = tool.get("report")
+    if not isinstance(report, dict) or not isinstance(report.get("path"), str) or not report.get("path"):
+        problems.append(f"{where}: report must be {{ path = \"...\", format = \"...\" }}")
+    elif report.get("format") not in MUTATION_REPORT_FORMATS:
+        problems.append(f"{where}: report format must be one of {', '.join(MUTATION_REPORT_FORMATS)}")
+    if not _is_glob_list(tool.get("paths", [])):
+        problems.append(f"{where}: paths must be a list of globs")
     return problems
 
 
@@ -161,7 +190,8 @@ def _critic_dancer_problems(config):
 def _threshold_problems(config):
     escalation = _table(config, "escalation")
     problems = []
-    for key in ("max_round_trips", "max_exchange_rounds", "max_diff_lines", "ci_wait_seconds"):
+    for key in ("max_round_trips", "max_exchange_rounds", "max_diff_lines", "ci_wait_seconds",
+                "proof_timeout_seconds"):
         value = escalation.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             problems.append(f"[escalation] {key} must be a positive integer")
@@ -170,6 +200,15 @@ def _threshold_problems(config):
             problems.append(f"[escalation] {key} must be true or false")
     if not _is_glob_list(escalation.get("diff_exclude")):
         problems.append("[escalation] diff_exclude must be a list of globs")
+    return problems
+
+
+def _mutation_problems(config):
+    mutation = _table(config, "mutation")
+    problems = [] if isinstance(mutation.get("enabled"), bool) else ["[mutation] enabled must be true or false"]
+    timeout = mutation.get("timeout_seconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1:
+        problems.append("[mutation] timeout_seconds must be a positive integer")
     return problems
 
 
