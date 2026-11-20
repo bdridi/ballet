@@ -2,6 +2,16 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.32.1 — 2026-11-20 · `v0.32.1`
+
+Le Dancer lançait la preuve complète à chaque tâche (FEAT-006 sur antimurphy : une douzaine de preuves, e2e compris, puis une de plus par le script, l'essentiel des 45 minutes).
+
+- Après chaque tâche, le Dancer ne lance que les tests liés : le test qu'il a écrit et ceux du même niveau autour de ce qu'il a changé (crate ou paquet, fichier de test, scénarios `@FEAT-NNN-Cn` du critère), plus les vérifications rapides de la preuve sur les fichiers touchés (format, lint, types). Il commite sur ce vert.
+- La preuve du repo tourne une seule fois, verte, avant le rapport (et avant chaque nouveau rapport après le Critic, s'il a commité). Plus de preuve au démarrage : la branche part de `main`, déjà prouvé ; une panne dans du code que ses tâches n'ont pas touché se vérifie sur le commit de départ et se signale.
+- Skill Dancer mis à jour (description, étape 4, section « Prove, check, then report », tours du Critic).
+
+**Opportunités traitées** : OPP-72.
+
 ## 0.32.0 — 2026-11-20 · `v0.32.0`
 
 Le Workshop autopilot, fin d'OPP-06 hors Scène : l'avis du Choreographer, la marque des décisions prises seul, et le choix dans le backlog.
