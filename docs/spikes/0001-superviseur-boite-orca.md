@@ -29,7 +29,7 @@ Deux inconnues :
 1. **Le superviseur peut avoir une boîte.** Il suffit d'un terminal Orca qui n'appartient qu'à lui (un shell
    vide, jamais un autre agent), d'une Run créée `--from` ce terminal, et de lire avec `--terminal <boîte>`.
    Ce n'est pas le détournement contre lequel Orca prévient : la boîte n'est le terminal de personne d'autre.
-2. **Le réveil marche.** Un `orchestration check … --wait` en arrière-plan (un `Monitor` dans Claude Code) se
+2. **Le réveil marche.** Un `orchestration check … --wait` en arrière-plan (l'outil `Monitor` de Claude Code, à ne pas confondre avec le Monitor de Ballet) se
    termine à l'arrivée d'un message, ce qui réveille la session du superviseur. En lecture qui consomme (sans
    `--peek`), chaque tour rend le lot suivant ; `--peek` rend toujours le plus ancien non lu, donc ne convient
    pas à une boucle.
@@ -90,6 +90,19 @@ Supervisor, depuis l'application Claude (téléphone ou Mac) ; il peut aussi ouv
 Le nom `ballet_stage.py` est déjà pris (la Scène, tableau de bord en lecture seule) : le Supervisor garde
 son nom du vocabulaire, son nom de scène reste à trouver.
 
+### Deux rôles, deux métiers
+
+| | **Monitor** | **Supervisor** |
+|---|---|---|
+| Ce que c'est | un script, `ballet_monitor.py` (l'observateur d'OPP-01, étendu à plusieurs projets) | une session Claude, `/ballet:supervisor`, en Remote Control |
+| Son métier | **surveiller** : GitHub (un élément passé `ready`) et les sessions des projets (un Conductor mort ou figé) ; **lancer** un Conductor quand la règle du projet le permet | **parler au Director** : lui rapporter, lui poser la question, porter sa réponse au bon Conductor ; lancer ce qu'il demande |
+| Ce qu'il ne fait jamais | parler au Director ; décider pour lui | surveiller (il n'interroge ni GitHub ni les projets en boucle : il attend la boîte) |
+| Coût | aucun token, tourne en continu | des tokens seulement quand un message arrive ou que le Director parle |
+| S'il s'arrête | rien de nouveau n'est vu ni lancé : il doit tourner sous un superviseur de processus (son terminal Orca, relancé) | rien ne se perd : les messages attendent dans la boîte, il reprend au redémarrage |
+| Il écrit | dans la boîte du Supervisor | dans le terminal d'un Conductor (`tell`) |
+
+Le Monitor est les yeux, le Supervisor la voix. Le Director ne voit jamais le Monitor.
+
 ```mermaid
 flowchart TB
     director(["Director<br/>application Claude"])
@@ -100,7 +113,7 @@ flowchart TB
         subgraph orca["terminaux Orca"]
             supervisor["Supervisor<br/>claude --remote-control<br/>/ballet:supervisor"]
             mailbox[["boîte du Supervisor<br/>Run run:&lt;id&gt;"]]
-            daemon["démon ballet_supervisor.py<br/>sans LLM"]
+            daemon["Monitor<br/>ballet_monitor.py, sans LLM"]
             conductor["Conductor projet#élément<br/>claude --remote-control<br/>/ballet:rehearsal"]
             workers["workers Orca<br/>Choreographer · Dancer · Critic"]
         end
@@ -113,7 +126,7 @@ flowchart TB
     daemon -->|"status : ready, Conductor mort"| mailbox
     daemon -->|"lance (auto) ou sur le oui du Director"| conductor
     daemon --- state
-    supervisor -->|"check --wait (Monitor)"| mailbox
+    supervisor -->|"check --wait, en arrière-plan"| mailbox
     supervisor -->|"launch"| conductor
     supervisor -->|"tell : orca terminal send"| conductor
     supervisor --- state
@@ -128,7 +141,7 @@ flowchart TB
 | De → vers | Par | Quand |
 |---|---|---|
 | Conductor → Supervisor | `orchestration send --to run:<id> --type status` (le script, pas le Conductor) | à chaque `NEXT: escalate` (question comprise) et `NEXT: done` |
-| démon → Supervisor | la même boîte, depuis son propre terminal Orca | un élément passé `ready` ; un Conductor mort ou figé |
+| Monitor → Supervisor | la même boîte, depuis son propre terminal Orca | un élément passé `ready` ; un Conductor mort ou figé |
 | Supervisor → Conductor | `orca terminal send --terminal <handle> --enter` | une réponse, une revue de plan, `approve`, `resume` ; le Conductor écrit le message Ballet et lance `receive` |
 | Director ↔ Conductor | Remote Control du Conductor | au besoin ; le Supervisor relit la session avant de porter une réponse |
 
@@ -141,7 +154,7 @@ boîte de la Run du Conductor.
 sequenceDiagram
     actor D as Director
     participant GH as GitHub
-    participant DM as démon
+    participant DM as Monitor
     participant B as boîte du Supervisor
     participant S as Supervisor
     participant C as Conductor
@@ -185,10 +198,10 @@ sequenceDiagram
 ### Quand la session du Supervisor meurt ou est nettoyée
 
 Elle ne porte rien que la boîte, l'état des projets et `~/.ballet/` ne gardent pas. Pendant son absence, les
-Conductors et le démon continuent, les messages s'accumulent. Au redémarrage (ou après `/clear`),
+Conductors et le Monitor continuent, les messages s'accumulent. Au redémarrage (ou après `/clear`),
 `/ballet:supervisor` relit le non-lu **et** les derniers messages de l'historique (`orchestration inbox
 --full` : un message lu juste avant la mort de la session n'est plus non lu), dit « pendant ton absence : … »,
-puis réarme son `Monitor`. Si le processus meurt, le démon le voit (son handle ne répond plus) et relance le
+puis réarme son attente de la boîte. Si le processus meurt, le Monitor le voit (son handle ne répond plus) et relance le
 terminal du Supervisor ; seule l'URL Remote Control change, la session garde son nom dans l'application.
 
 ## Première installation (cible)
@@ -207,8 +220,8 @@ Ce qui existe aujourd'hui est marqué ✅ ; le reste est à construire avec OPP-
 5. **Chaque projet** : le cloner, l'ajouter à Orca (`orca repo add --path <projet>`), puis une fois
    `/ballet:init-project` dans le projet (profil, AGENTS.md, types et champs GitHub). ✅
 6. **Le Supervisor** : `~/.ballet/supervisor.toml` (les projets connus, leur alias et leur chemin, les
-   types en `auto_launch`, les plafonds), puis `python3 <ballet>/scripts/ballet_supervisor.py setup` :
-   crée le terminal de la boîte et sa Run, lance le démon dans son terminal Orca, puis la session du
+   types en `auto_launch`, les plafonds), puis `python3 <ballet>/scripts/ballet_monitor.py setup` :
+   crée le terminal de la boîte et sa Run, lance le Monitor dans son terminal Orca, puis la session du
    Supervisor (`claude --remote-control "ballet supervisor" "/ballet:supervisor"`). *À construire.*
 7. **Une fois sur la machine** : ouvrir chaque CLI une première fois (connexion, confiance dans les
    dossiers), et accepter l'avertissement « Bypass Permissions » si les Conductors sont lancés ainsi
