@@ -375,8 +375,13 @@ class BalletGitHubTest(unittest.TestCase):
         ballet_github.push_branch("workshop/BUG-004", git=git)
         self.assertEqual(git.calls, [["push", "--set-upstream", "origin", "workshop/BUG-004"]])
 
-    def test_refuse_de_pousser_une_branche_de_workshop_qui_n_est_pas_une_ligne_du_backlog(self):
-        for branch in ("workshop/oops", "workshop/CAP-001", "workshop/BUG-004;rm", "workshop/"):
+    def test_pousse_la_branche_d_un_workshop_sur_une_demande_nommee_par_son_slug(self):
+        git = FakeGit()
+        ballet_github.push_branch("workshop/le-stock-passe-en-negatif", git=git)
+        self.assertEqual(git.calls, [["push", "--set-upstream", "origin", "workshop/le-stock-passe-en-negatif"]])
+
+    def test_refuse_de_pousser_une_branche_de_workshop_qui_n_est_ni_une_ligne_ni_un_slug(self):
+        for branch in ("workshop/Oops", "workshop/CAP-001", "workshop/BUG-004;rm", "workshop/", "workshop/-x", "workshop/a--b", "workshop/a b"):
             with self.subTest(branch=branch), self.assertRaises(ballet_github.GitHubError):
                 ballet_github.push_branch(branch, git=FakeGit())
 
@@ -481,6 +486,16 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertEqual(len([call for call in gh.calls if call[:2] == ["label", "create"]]), 3)
         self.assertEqual(gh.calls[-1], ["pr", "edit", "43", "--add-label", "ballet:approved",
                                         "--remove-label", "ballet:rejected", "--remove-label", "ballet:escalated"])
+
+    def test_decided_alone_cree_le_libelle_puis_le_pose_sur_l_issue(self):
+        calls = []
+        ballet_github.mark_decided_alone("#21", run=lambda arguments: calls.append(arguments) or "")
+        self.assertEqual([call[:3] for call in calls], [["label", "create", "ballet:decided-alone"], ["issue", "edit", "21"]])
+        self.assertEqual(calls[-1][3:], ["--add-label", "ballet:decided-alone"])
+
+    def test_decided_alone_refuse_un_numero_d_issue_invalide(self):
+        with self.assertRaises(ballet_github.GitHubError):
+            ballet_github.mark_decided_alone("twenty", run=lambda arguments: "")
 
     def test_un_libelle_deja_pose_est_retire_puis_repose_pour_dater_le_nouveau_verdict(self):
         gh = FakeGh(timeline=[labeled("ballet:approved", "2026-11-16T10:00:00Z")])

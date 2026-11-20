@@ -23,8 +23,8 @@ proof = "pnpm proof"
 DRAFT = "# BUG-004 · Stock never goes negative\n\nSource: `@FEAT-001-C2`.\n\n## Context\n\nA gap.\n"
 
 
-def message(kind, body, sender="dramaturg", to="conductor"):
-    header = {"ballet": "message", "from": sender, "to": to, "type": kind, "subject": "BUG-004", "round": 1}
+def message(kind, body, sender="dramaturg", to="conductor", round=1):
+    header = {"ballet": "message", "from": sender, "to": to, "type": kind, "subject": "BUG-004", "round": round}
     return f"{json.dumps(header)}\n\n{body}\n"
 
 
@@ -47,6 +47,9 @@ class FakeWorld:
         self.merge_failures = 0                 # `gh pr merge` échoue ces fois-ci
         self.issue_failures = 0                 # `gh issue create` échoue ces fois-ci
         self.statuses = []                      # le `Ballet status` écrit sur l'issue publiée, dans l'ordre
+        self.label_failures = 0                 # `gh issue edit` (le libellé) échoue ces fois-ci
+        self.comment_failures = 0               # `gh issue comment` échoue ces fois-ci…
+        self.comment_after = 0                  # …après ce nombre de commentaires réussis
 
     def __call__(self, argv):
         self.commands.append(argv)
@@ -72,6 +75,15 @@ class FakeWorld:
                 self.issue_failures -= 1
                 raise ballet_rehearsal.RehearsalError("gh failed")
             return "https://github.com/o/r/issues/21\n"
+        if arguments[:2] == ["issue", "comment"]:
+            if self.comment_failures and self.comment_after == 0:
+                self.comment_failures -= 1
+                raise ballet_rehearsal.RehearsalError("gh failed")
+            self.comment_after -= 1
+            return ""
+        if arguments[:2] == ["issue", "edit"] and self.label_failures:
+            self.label_failures -= 1
+            raise ballet_rehearsal.RehearsalError("gh failed")
         if arguments[:2] == ["api", "graphql"] and any("setIssueFieldValue" in argument for argument in arguments):
             option = next(argument for argument in arguments if argument.startswith("option="))
             self.statuses.append(option[len("option=OPT-"):])
@@ -121,8 +133,8 @@ class FakeWorld:
     def sent_to_dramaturg(self):
         return [command[command.index("--body") + 1] for command in self.ran("orca", "orchestration", "send")]
 
-    def said(self, kind, body, message_id="msg_1", sequence=1):
-        self.inbox.append({"id": message_id, "type": kind, "body": body, "payload": {"dispatchId": "ctx_1"}, "sequence": sequence})
+    def said(self, kind, body, message_id="msg_1", sequence=1, dispatch="ctx_1"):
+        self.inbox.append({"id": message_id, "type": kind, "body": body, "payload": {"dispatchId": dispatch}, "sequence": sequence})
         return message_id
 
 
@@ -146,8 +158,8 @@ class BalletWorkshopTest(unittest.TestCase):
     def begin(self, item="BUG-004"):
         return ballet_workshop.begin(item, self.home, self.tools)
 
-    def receive(self, kind, body, item="BUG-004"):
-        message_id = self.world.said(kind, body, f"msg_{len(self.world.inbox) + 1}", len(self.world.inbox) + 1)
+    def receive(self, kind, body, item="BUG-004", dispatch="ctx_1"):
+        message_id = self.world.said(kind, body, f"msg_{len(self.world.inbox) + 1}", len(self.world.inbox) + 1, dispatch)
         return ballet_workshop.receive_from_orca(item, message_id, self.home, self.tools)
 
     def reports(self, text=None):
@@ -248,7 +260,7 @@ class BalletWorkshopTest(unittest.TestCase):
         issue = self.world.ran("gh", "issue", "create")[0]
         self.assertEqual(issue[issue.index("--title") + 1], "BUG-004 · Stock never goes negative")
         self.assertIn("A gap.", issue[issue.index("--body") + 1])
-        self.assertNotIn("Decided alone", issue[issue.index("--body") + 1])
+        self.assertNotIn("Issue draft", issue[issue.index("--body") + 1])
 
     def test_un_type_dispense_de_l_acceptation_sort_pret_d_emblee(self):
         self.profile(PROFILE + '\n[workshop]\nqueue_approval_skipped = ["Bug"]\n')
@@ -262,6 +274,13 @@ class BalletWorkshopTest(unittest.TestCase):
         self.begin()
         self.reports()
         self.assertEqual(self.world.statuses, ["proposed"])
+
+    def test_un_type_feature_dispense_de_l_acceptation_sort_pret_d_emblee(self):
+        self.profile(PROFILE + '\n[workshop]\nqueue_approval_skipped = ["Feature"]\n')
+        self.begin()
+        self.reports(report("Feature", "# FEAT-007 · Sign in\n\n## Context\n\nWhy.\n"))
+        self.assertEqual(self.world.statuses, ["ready"])
+        self.assertEqual(self.state()["ballet_status"], "ready")
 
     def test_le_type_du_rapport_donne_le_type_de_l_issue(self):
         self.begin()
@@ -277,6 +296,46 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertFalse([command for command in self.world.commands if "push" in command])
         self.assertTrue(self.world.ran("gh", "issue", "create"))
         self.assertIn("no specs written", "\n".join(step.render().splitlines()))
+
+    # --- ce que le Dramaturg décide seul ---
+
+    def body_of_issue(self):
+        issue = self.world.ran("gh", "issue", "create")[0]
+        return issue[issue.index("--body") + 1]
+
+    def test_les_decisions_prises_seul_sont_dans_l_issue_avant_son_plan(self):
+        self.begin()
+        self.reports()
+        body = self.body_of_issue()
+        self.assertIn("## Decided alone\n\n- The negative stock is a bug, not a feature.", body)
+        self.assertLess(body.index("## Decided alone"), body.index("## Plan"))
+
+    def test_l_issue_ou_le_dramaturg_a_decide_seul_porte_le_libelle_decided_alone(self):
+        self.begin()
+        step = self.reports()
+        label = self.world.ran("gh", "label", "create", "ballet:decided-alone")
+        self.assertEqual(len(label), 1)
+        self.assertEqual(self.world.ran("gh", "issue", "edit", "21", "--add-label", "ballet:decided-alone")[0][-1], "ballet:decided-alone")
+        self.assertTrue(self.state()["marked"])
+        self.assertIn("marked ballet:decided-alone (1 decision(s))", step.render())
+
+    def test_sans_decision_prise_seul_l_issue_n_a_ni_section_ni_libelle(self):
+        self.begin()
+        self.reports(message("report", f"- Type: Bug\n\n## Issue draft\n\n{DRAFT}"))
+        self.assertNotIn("Decided alone", self.body_of_issue())
+        self.assertFalse(self.world.ran("gh", "label"))
+        self.assertFalse(self.world.ran("gh", "issue", "edit"))
+
+    def test_un_libelle_qui_echoue_se_reprend_sans_republier_l_issue(self):
+        self.world.label_failures = 1
+        self.begin()
+        step = self.reports()
+        self.assertEqual(step.next, "escalate")
+        self.assertEqual(self.state()["issue"], "21")
+        self.assertEqual(self.resume().next, "done")
+        self.assertEqual(len(self.world.ran("gh", "issue", "create")), 1)
+        self.assertTrue(self.state()["marked"])
+        self.assertEqual(self.world.statuses, ["proposed"])
 
     def test_la_decision_prise_seul_reste_dans_le_journal_avec_le_rapport_entier(self):
         self.begin()
@@ -344,7 +403,7 @@ class BalletWorkshopTest(unittest.TestCase):
 
     def test_une_question_du_dramaturg_escalade_car_personne_n_y_repond(self):
         self.begin()
-        message_id = self.world.said("question", message("question", "1. Which name?", to="choreographer"))
+        message_id = self.world.said("question", message("question", "1. Which name?", to="director"))
         step = ballet_workshop.receive_from_orca("BUG-004", message_id, self.home, self.tools)
         self.assertEqual(step.next, "escalate")
         self.assertIn("nobody answers", step.reason)
@@ -353,7 +412,7 @@ class BalletWorkshopTest(unittest.TestCase):
         self.begin()
         step = self.receive("worker_done", message("report", "- Type: Bug", sender="dancer"))
         self.assertEqual(step.next, "escalate")
-        self.assertIn("only the dramaturg plays", step.reason)
+        self.assertIn("only the dramaturg and the choreographer it consults play", step.reason)
 
     def test_un_message_qui_n_est_pas_au_format_ballet_est_refuse(self):
         self.begin()
@@ -437,6 +496,341 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertEqual(self.receive("worker_done", report()).next, "done")
         self.assertEqual(len(self.world.commands), commands_before)    # rien n'est relu chez Orca, rien n'est refait
         self.assertEqual(self.state()["issue"], "21")
+
+    # --- l'avis du Choreographer ---
+
+    QUESTION = "1. Is it one Dancer session? Recommendation: yes."
+    ANSWER = "1. One session. Recommendation: keep it as one."
+
+    def asks(self, text=None, round=1):
+        return self.receive("worker_done", message("question", text or self.QUESTION, to="choreographer", round=round))
+
+    def advises(self, text=None, to="dramaturg", kind="answer"):
+        return self.receive("worker_done", message(kind, text or self.ANSWER, sender="choreographer", to=to), dispatch="ctx_2")
+
+    def test_une_question_au_choreographer_lance_son_worker_dans_le_worktree_du_workshop(self):
+        self.begin()
+        step = self.asks()
+        self.assertEqual(step.next, "wait")
+        start = self.world.ran("orca", "orchestration", "worker-start")[1]
+        self.assertEqual(start[start.index("--worktree") + 1], "path:/wt/BUG-004")
+        self.assertEqual(start[start.index("--task-title") + 1], "Choreographer · BUG-004")
+        spec = Path(start[start.index("--spec-file") + 1]).read_text()
+        for expected in ("/ballet:choreographer", "When consulted during a Workshop", self.QUESTION, "Write nothing", "type: answer"):
+            self.assertIn(expected, spec)
+        state = self.state()
+        self.assertEqual((state["advisor_dispatch"], state["rounds"]), ("ctx_2", 1))
+        self.assertIn(self.QUESTION, state["question"])
+
+    def test_la_reponse_du_choreographer_va_au_dramaturg_qui_reprend_son_cadrage(self):
+        self.begin()
+        self.asks()
+        step = self.advises()
+        self.assertEqual(step.next, "wait")
+        self.assertEqual(len(self.world.sent_to_dramaturg()), 1)
+        self.assertIn(self.ANSWER, self.world.sent_to_dramaturg()[0])
+        send = self.world.ran("orca", "orchestration", "send")[0]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_1")
+        self.assertIn(self.ANSWER, self.state()["advice"])
+        self.assertEqual(self.state()["question"], "")
+        self.assertEqual(self.reports().next, "done")
+
+    def consult(self, rounds):
+        """`rounds` tours complets : une question du Dramaturg, une réponse du Choreographer."""
+        for round in range(1, rounds + 1):
+            self.asks(round=round)
+            self.advises()
+
+    def test_une_nouvelle_question_va_au_choreographer_deja_lance_dans_sa_session(self):
+        self.begin()
+        self.consult(1)
+        step = self.asks("1. And the migration? Recommendation: none.", round=2)
+        self.assertEqual(step.next, "wait")
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "worker-start")), 2)
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_2")
+        self.assertIn("And the migration?", send[send.index("--body") + 1])
+        self.assertEqual(self.state()["rounds"], 2)
+        self.assertEqual(self.advises().next, "wait")
+        self.assertEqual(self.reports().next, "done")
+
+    def test_les_tours_sont_bornes_par_max_exchange_rounds_du_plugin(self):
+        self.begin()
+        self.consult(3)
+        step = self.asks(round=4)
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("over max_exchange_rounds (3)", step.reason)
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 5)    # 3 réponses, les questions 2 et 3, pas la 4e
+
+    def test_le_profil_du_projet_l_emporte_sur_la_borne_du_plugin(self):
+        self.profile(PROFILE + "\n[escalation]\nmax_exchange_rounds = 5\n")
+        self.begin()
+        self.consult(5)
+        self.assertIn("over max_exchange_rounds (5)", self.asks(round=6).reason)
+        self.profile(PROFILE + "\n[escalation]\nmax_exchange_rounds = 1\n")
+        self.begin("FEAT-007")
+        message_id = self.world.said("worker_done", message("question", self.QUESTION, to="choreographer"), "msg_f1", 99, "ctx_8")
+        self.assertEqual(ballet_workshop.receive_from_orca("FEAT-007", message_id, self.home, self.tools).next, "wait")
+
+    def test_le_script_compte_les_tours_sans_se_fier_a_l_en_tete(self):
+        self.profile(PROFILE + "\n[escalation]\nmax_exchange_rounds = 1\n")
+        self.begin()
+        self.consult(1)
+        step = self.asks(round=1)
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("round 2", step.reason)
+
+    def test_la_mission_du_dramaturg_dit_la_borne_des_tours(self):
+        self.profile(PROFILE + "\n[escalation]\nmax_exchange_rounds = 2\n")
+        self.begin()
+        start = self.world.ran("orca", "orchestration", "worker-start")[0]
+        self.assertIn("up to 2 round(s)", Path(start[start.index("--spec-file") + 1]).read_text())
+
+    def comments(self):
+        return [command for command in self.world.ran("gh", "issue", "comment")]
+
+    def test_les_echanges_sont_publies_sur_l_issue_dans_l_ordre_une_fois_creee(self):
+        self.begin()
+        self.consult(2)
+        self.assertEqual(self.comments(), [])
+        step = self.reports()
+        comments = self.comments()
+        self.assertEqual([comment[3] for comment in comments], ["21"] * 4)
+        bodies = [comment[comment.index("--body") + 1] for comment in comments]
+        self.assertIn(self.QUESTION, bodies[0])
+        self.assertIn(self.ANSWER, bodies[1])
+        self.assertLess(self.world.commands.index(self.world.ran("gh", "issue", "create")[0]), self.world.commands.index(comments[0]))
+        self.assertIn("4 exchange(s) with the choreographer published on #21", step.render())
+
+    def test_une_publication_d_echange_qui_echoue_se_reprend_sans_doublon(self):
+        self.begin()
+        self.consult(1)
+        self.world.comment_failures = 1
+        self.world.comment_after = 1
+        self.assertEqual(self.reports().next, "escalate")
+        self.assertEqual(self.state()["exchanges_published"], 1)
+        self.assertEqual(self.resume().next, "done")
+        self.assertEqual(len(self.comments()), 3)    # le premier, l'échec, puis le second seulement
+        self.assertEqual(self.state()["exchanges_published"], 2)
+
+    def test_sans_consultation_aucun_commentaire(self):
+        self.begin()
+        self.reports()
+        self.assertEqual(self.comments(), [])
+
+    def test_la_publication_lie_l_element_a_son_issue_dans_le_journal_sans_le_renommer(self):
+        self.begin()
+        self.consult(1)
+        self.reports()
+        published = self.journal("published")
+        self.assertEqual(len(published), 1)
+        self.assertEqual(published[0]["workshop"], "BUG-004")
+        self.assertEqual(published[0]["detail"], {"item": "BUG-004", "issue": "21", "type": "Bug", "status": "proposed",
+                                                  "picked": False, "decided_alone": 1, "exchanges": 2})
+        self.assertEqual({entry["workshop"] for entry in self.journal()}, {"BUG-004"})
+
+    def test_une_publication_reprise_ne_lie_qu_une_fois(self):
+        self.world.label_failures = 1
+        self.begin()
+        self.reports()
+        self.resume()
+        self.assertEqual(len(self.journal("published")), 1)
+
+    def test_chaque_echange_est_au_journal(self):
+        self.begin()
+        self.consult(1)
+        messages = [entry["detail"] for entry in self.journal("message")]
+        self.assertEqual([(m["from"], m["type"]) for m in messages], [("dramaturg", "question"), ("choreographer", "answer")])
+        handoffs = [(entry["detail"]["role"], entry["detail"]["how"]) for entry in self.journal("handoff")]
+        self.assertEqual(handoffs, [("dramaturg", "start"), ("choreographer", "start"), ("dramaturg", "send")])
+
+    def test_le_choreographer_est_juge_depuis_la_derniere_question(self):
+        self.begin()
+        self.consult(1)
+        self.world.dirty = " M specs/features/FEAT-007.md\n"
+        self.asks(round=2)
+        step = self.advises()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("policy: the choreographer broke the rules", step.reason)
+
+    def test_un_choreographer_qui_ecrit_dans_le_worktree_escalade_sans_rien_dire_au_dramaturg(self):
+        self.begin()
+        self.asks()
+        self.world.dirty = " M specs/features/FEAT-007.md\n"
+        step = self.advises()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("policy: the choreographer broke the rules", step.reason)
+        self.assertEqual(self.world.sent_to_dramaturg(), [])
+
+    def test_un_choreographer_qui_pose_une_question_au_lieu_de_repondre_escalade(self):
+        self.begin()
+        self.asks()
+        step = self.advises(kind="question", to="director")
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("it only answers the dramaturg's question", step.reason)
+
+    def test_une_reponse_que_personne_n_a_demandee_est_refusee(self):
+        self.begin()
+        step = self.advises()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("it only answers", step.reason)
+
+    def test_un_choreographer_qui_ne_peut_pas_demarrer_escalade_et_la_reprise_le_relance(self):
+        self.profile(PROFILE + '\n[roles.choreographer]\ncli = "gemini-cli"\n')
+        self.begin()
+        step = self.asks()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("the choreographer could not start", step.reason)
+        self.profile(PROFILE)
+        self.assertEqual(self.resume().next, "wait")
+        self.assertEqual(self.state()["advisor_dispatch"], "ctx_2")
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "worker-start")), 2)
+
+    def test_un_choreographer_qui_s_arrete_sans_reponse_est_relance_lui_et_pas_le_dramaturg(self):
+        self.begin()
+        self.asks()
+        self.world.inbox.append({"id": "msg_stop", "type": "escalation", "subject": "worker stopped", "body": "done",
+                                 "payload": {"dispatchId": "ctx_2", "stopReason": "finished"}, "sequence": 9})
+        step = ballet_workshop.receive_from_orca("BUG-004", "msg_stop", self.home, self.tools)
+        self.assertEqual(step.next, "wait")
+        send = self.world.ran("orca", "orchestration", "send")[0]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_2")
+
+    def test_le_statut_dit_que_le_choreographer_attend_ou_a_repondu(self):
+        self.begin()
+        self.asks()
+        self.assertIn("choreographer: dispatch ctx_2, round 1, waiting for its answer", ballet_workshop.status("BUG-004", self.home, self.tools).render())
+        self.advises()
+        self.assertIn("choreographer: dispatch ctx_2, round 1, answered", ballet_workshop.status("BUG-004", self.home, self.tools).render())
+
+    # --- le Workshop qui choisit dans le backlog ---
+
+    BACKLOG = """# Backlog
+
+## Next up
+
+1. **CAP-002** · a capability is cut first.
+2. `BUG-004` · stock goes negative.
+3. FEAT-007 · sign in.
+
+## Opportunities
+
+| OPP-12 | someone | a problem | proof |
+"""
+
+    def backlog(self, text=None):
+        (self.home / "specs").mkdir(exist_ok=True)
+        (self.home / "specs" / "backlog.md").write_text(text or self.BACKLOG, encoding="utf-8")
+
+    def test_sans_element_le_workshop_prend_la_premiere_ligne_de_next_up_qui_se_cadre(self):
+        self.backlog()
+        step = ballet_workshop.begin(None, self.home, self.tools)
+        self.assertEqual(step.next, "wait")
+        create = self.world.ran("orca", "worktree", "create")[0]
+        self.assertEqual(create[create.index("--branch") + 1], "workshop/BUG-004")
+        self.assertTrue(self.state()["picked"])
+        self.assertEqual(self.journal("begin")[0]["detail"], {"item": "BUG-004", "picked": True, "request": ""})
+
+    def test_le_choix_saute_ce_qui_a_deja_sa_session_et_ne_lit_que_next_up(self):
+        self.backlog()
+        self.begin()
+        self.assertEqual(ballet_workshop.begin(None, self.home, self.tools).next, "wait")
+        self.assertTrue(self.state("FEAT-007")["picked"])
+        with self.assertRaisesRegex(ballet_workshop.WorkshopError, "no OPP, FEAT, BUG or TASK line left"):
+            ballet_workshop.begin(None, self.home, self.tools)
+
+    def test_sans_backlog_rien_n_est_choisi(self):
+        with self.assertRaisesRegex(ballet_workshop.WorkshopError, "nothing to pick from"):
+            ballet_workshop.begin(None, self.home, self.tools)
+        self.assertFalse(self.world.ran("orca"))
+
+    def test_ce_que_le_workshop_choisit_seul_sort_toujours_propose(self):
+        self.profile(PROFILE + '\n[workshop]\nqueue_approval_skipped = ["Bug", "Feature", "Task"]\n')
+        self.backlog()
+        ballet_workshop.begin(None, self.home, self.tools)
+        self.reports()
+        self.assertEqual(self.world.statuses, ["proposed"])
+        self.assertEqual(self.state()["ballet_status"], "proposed")
+
+    def test_la_ligne_de_commande_sans_element_choisit_dans_le_backlog(self):
+        self.backlog()
+        code, out, _ = self.run_main("begin")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.endswith("NEXT: wait\n"))
+        self.assertTrue((self.home / ".ballet" / "run" / "workshop-BUG-004.json").is_file())
+
+    def test_le_statut_dit_que_l_element_a_ete_choisi(self):
+        self.backlog()
+        ballet_workshop.begin(None, self.home, self.tools)
+        self.assertIn("picked in the backlog", ballet_workshop.status("BUG-004", self.home, self.tools).render())
+
+    # --- une demande hors backlog, nommée par son slug ---
+
+    REQUEST = "Le stock passe en négatif quand on annule deux fois !"
+    SLUG = "le-stock-passe-en-negatif-quand"
+
+    def begin_request(self, request=None):
+        self.world.branch = f"workshop/{self.SLUG}"
+        return ballet_workshop.begin(None, self.home, self.tools, request=request or self.REQUEST)
+
+    def captured(self, item="BUG-012"):
+        return message("report", f"- Item: {item}\n- Type: Bug\n\n## Decided alone\n\n- A new bug line.\n\n## Issue draft\n\n{DRAFT}")
+
+    def test_une_demande_nomme_sa_session_d_un_slug_sans_accents(self):
+        self.assertEqual(self.begin_request().next, "wait")
+        create = self.world.ran("orca", "worktree", "create")[0]
+        self.assertEqual(create[create.index("--branch") + 1], f"workshop/{self.SLUG}")
+        state = self.state(self.SLUG)
+        self.assertEqual((state["item"], state["request"], state["picked"]), (self.SLUG, self.REQUEST, False))
+        self.assertEqual(self.journal("begin")[0]["detail"], {"item": self.SLUG, "picked": False, "request": self.REQUEST})
+        self.assertEqual({entry["workshop"] for entry in self.journal()}, {self.SLUG})
+
+    def test_la_mission_demande_de_capturer_puis_de_nommer_la_ligne(self):
+        self.begin_request()
+        start = self.world.ran("orca", "orchestration", "worker-start")[0]
+        spec = Path(start[start.index("--spec-file") + 1]).read_text()
+        for expected in (self.REQUEST, "Capture it first", "- Item: <its ID>", "Frame the line you captured", f"subject `{self.SLUG}`"):
+            self.assertIn(expected, spec)
+
+    def test_la_meme_demande_deux_fois_prend_un_autre_slug(self):
+        self.begin_request()
+        self.begin_request()
+        self.assertTrue((self.home / ".ballet" / "run" / f"workshop-{self.SLUG}-2.json").is_file())
+
+    def test_une_demande_sans_mot_est_refusee(self):
+        with self.assertRaisesRegex(ballet_workshop.WorkshopError, "no word"):
+            self.begin_request("!!! ???")
+
+    def test_un_rapport_sans_la_ligne_capturee_est_renvoye(self):
+        self.begin_request()
+        step = self.receive("worker_done", report(), self.SLUG)
+        self.assertEqual(step.next, "wait")
+        self.assertIn("`- Item:`", self.world.sent_to_dramaturg()[0])
+
+    def test_la_publication_lie_le_slug_a_la_ligne_capturee_puis_a_l_issue(self):
+        self.begin_request()
+        step = self.receive("worker_done", self.captured(), self.SLUG)
+        self.assertEqual(step.next, "done")
+        published = self.journal("published")[0]
+        self.assertEqual(published["workshop"], self.SLUG)
+        self.assertEqual((published["detail"]["item"], published["detail"]["issue"]), ("BUG-012", "21"))
+        self.assertEqual(self.state(self.SLUG)["framed"], "BUG-012")
+        self.assertIn(f"request: {self.REQUEST}, captured as BUG-012", ballet_workshop.status(self.SLUG, self.home, self.tools).render())
+
+    def test_une_demande_suit_la_regle_du_profil_comme_un_element_nomme(self):
+        self.profile(PROFILE + '\n[workshop]\nqueue_approval_skipped = ["Bug"]\n')
+        self.begin_request()
+        self.receive("worker_done", self.captured(), self.SLUG)
+        self.assertEqual(self.world.statuses, ["ready"])
+
+    def test_la_ligne_de_commande_ouvre_une_demande_et_la_retrouve_par_son_slug(self):
+        code, out, _ = self.run_main("begin", "--request", self.REQUEST)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.endswith("NEXT: wait\n"))
+        self.begin("FEAT-007")
+        code, out, _ = self.run_main("status", self.SLUG)
+        self.assertEqual(code, 0)
+        self.assertIn(f"Workshop {self.SLUG}: open", out)
 
     # --- status et ligne de commande ---
 

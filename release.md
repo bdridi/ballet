@@ -2,6 +2,21 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.32.0 — 2026-11-20 · `v0.32.0`
+
+Le Workshop autopilot, fin d'OPP-06 hors Scène : l'avis du Choreographer, la marque des décisions prises seul, et le choix dans le backlog.
+
+- Le Dramaturg consulte le Choreographer avant d'écrire, quand la feature touche un choix technique, par le Conductor comme en Rehearsal : chaque question (`type: question`, `to: choreographer`) et chaque réponse réveille le Conductor, qui lance `receive`. Le script lance le Choreographer en worker dans le même worktree à la première question, lui envoie les suivantes dans sa session, le juge comme le Critic à chaque réponse (rien n'a bougé : sinon `policy: the choreographer broke the rules`) et rend la réponse au Dramaturg. Les tours n'ont qu'une borne, `[escalation] max_exchange_rounds` (le profil du projet l'emporte sur celui du plugin), comptée par le script et non lue dans l'en-tête. Le Choreographer n'écrit ni plan ni ADR. Une reprise (`resume`) relance un Choreographer qui n'avait pas pu démarrer.
+- La trace : chaque question et réponse est au journal au fil de l'eau (`message`, `handoff`, `policy`, clé `workshop` : l'élément, jamais renommé), puis commentée sur l'issue, dans l'ordre, dès que le script la crée (la Rehearsal les publie au fil de l'eau ; ici, l'issue naît à la fin). Un commentaire qui échoue se reprend sans doublon. À la publication, l'événement `published` (`{"item": "BUG-004", "issue": "21", "type", "status", "picked", "decided_alone", "exchanges"}`) lie l'élément à son issue, comme `handover` lie une planification à sa slice : la Scène suit `BUG-004` → `#21` → sa Rehearsal sans rien relire sur GitHub.
+- Ce que le Dramaturg a décidé seul (`## Decided alone`) est recopié dans l'issue, avant son plan, et l'issue porte le libellé `ballet:decided-alone` ; sans décision, ni section ni libellé. Nouvelle opération `decided-alone <issue>` de `ballet_github.py` ; un libellé qui échoue se reprend sans republier l'issue.
+- `[workshop] queue_approval_skipped` s'ouvre à `Feature` dans la doc (le profil l'acceptait déjà) : README, PRD et `config.toml` disent le risque (une feature fait deviner du métier) et ce qui permet de le relire, la marque.
+- `ballet_workshop.py begin` sans élément : le Workshop choisit la première ligne de *Next up* (OPP, FEAT, BUG ou TASK, jamais `CAP-`) qui n'a encore aucune session, et la prend pour nom de session. Ce qu'il choisit seul sort toujours `proposed`, quoi que dise `queue_approval_skipped`. `/ballet:workshop --autopilot` sans élément le lance ; le Dramaturg sort la ligne de *Next up* une fois cadrée.
+- Skills Dramaturg (consultation, `Decided alone`, ligne rangée), Choreographer (consulté en autopilot), Conductor (section Workshop) et Workshop mis à jour ; PRD (§6) et README.
+
+- Une demande hors backlog : `ballet_workshop.py begin --request "<demande>"` (`/ballet:workshop --autopilot "<demande>"`) nomme la session d'un slug (ses six premiers mots, sans accents, suffixé `-2` s'il a déjà servi) : `workshop-<slug>.json`, branche `workshop/<slug>` (acceptée par `push` et `merge-specs`). Le Dramaturg la capture d'abord, puis cadre la ligne où elle tombe, qu'il nomme dans son rapport (`- Item:`, exigé, renvoyé une fois sinon) ; `published` lie le slug à cette ligne et à l'issue. Le profil s'applique comme pour un élément nommé.
+
+**Opportunités traitées** : OPP-70 (troisième partie d'OPP-06) ; la capture d'une demande hors backlog laissée par OPP-68.
+
 ## 0.31.0 — 2026-11-20 · `v0.31.0`
 
 Le Workshop : `/ballet:workshop` (assisted par défaut, avec l'avis du Choreographer) et `--autopilot`, première partie : une session de Conductor cadre une ligne du backlog sans le Director et publie son issue.

@@ -2,6 +2,7 @@
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
     python3 ballet_github.py publish <brouillon.md> <type> <statut>   # crée l'issue (Feature, Bug ou Task) à son statut, affiche son numéro
+    python3 ballet_github.py decided-alone <issue>               # marque l'issue `ballet:decided-alone` : le Dramaturg a tranché sans le Director
     python3 ballet_github.py plan    <issue> <plan.md>           # écrit la section ## Plan de l'issue
     python3 ballet_github.py slice   <parente> <brouillon.md>    # crée l'issue d'une slice (type Slice), liée à sa parente
     python3 ballet_github.py read-pr <pr>                        # affiche la PR, ses reviews et ses commentaires, dans l'ordre
@@ -33,8 +34,11 @@ Le verdict qui fait foi est le libellé de la PR : `ballet:approved`, `ballet:re
 Le Conductor pose celui du Critic ; le Director tranche une escalade en posant le sien. S'il en reste plusieurs,
 le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts » restent, pour la lecture.
 `merge` refuse sans libellé `ballet:approved` posé après le dernier commit, et sans CI entièrement verte.
+`decided-alone` pose `ballet:decided-alone` sur l'issue d'un Workshop autopilot dont le Dramaturg a décidé des choses seul (ses
+lignes sont dans la section `## Decided alone` de l'issue) : c'est la marque que le rapport du matin retrouvera.
 La taille a ses deux libellés : `ballet:oversized` (posé et retiré par le Conductor) et `ballet:size-accepted` (le Director).
-`merge-specs` ne vaut que pour une branche `workshop/<ID>` (une ligne du backlog : `OPP-`, `FEAT-`, `BUG-` ou `TASK-`) : le Workshop
+`merge-specs` ne vaut que pour une branche `workshop/<ID>` (une ligne du backlog : `OPP-`, `FEAT-`, `BUG-` ou `TASK-` ; ou le slug
+en minuscules d'une demande hors backlog) : le Workshop
 n'a pas de Critic, la politique a jugé la branche (l'espace specs seul) avant son push ; la CI n'est pas attendue (pas de code, et
 le projet peut ne pas la lancer). Sa PR ne ferme
 aucune issue : l'issue de la feature n'est publiée qu'après le merge de ses specs.
@@ -81,7 +85,7 @@ SET_STATUS = """mutation($issue: ID!, $field: ID!, $option: ID!) {
 PARENT_LINE = re.compile(r"^Part of #(\d+)\s*$", re.MULTILINE)
 BASE_BRANCH = "main"
 REHEARSAL_BRANCH = re.compile(r"rehearsal/(FEAT|BUG|TASK)-\d{3}(\.\d+)?")
-WORKSHOP_BRANCH = re.compile(r"workshop/(OPP|FEAT|BUG|TASK)-\d+")
+WORKSHOP_BRANCH = re.compile(r"workshop/((OPP|FEAT|BUG|TASK)-\d+|[a-z0-9]+(-[a-z0-9]+)*)")   # une ligne du backlog, ou le slug d'une demande
 VERDICTS_MARKER = "<!-- ballet:verdicts -->"
 FIXED_POINT = re.compile(r"^- (Blocking (\d+)|Note `([^`:]+):(\d+)(?:-\d+)?`)\s*(?::|—|–|-)\s*`?([0-9a-f]{7,40})`?", re.MULTILINE)
 REVIEW_THREADS = """query($owner: String!, $name: String!, $number: Int!) {
@@ -102,6 +106,7 @@ VERDICT_LABELS = {
 }
 OVERSIZED = ("ballet:oversized", "e99695", "Ballet: the diff is over max_diff_lines")
 SIZE_ACCEPTED = ("ballet:size-accepted", "c5def5", "Ballet: the Director accepts the size of the diff")
+DECIDED_ALONE = ("ballet:decided-alone", "bfd4f2", "Ballet: the Dramaturg decided without the Director, its decisions are in the issue")
 
 
 class GitHubError(Exception):
@@ -128,6 +133,14 @@ def publish_issue(draft_path, issue_type, status, run=None):
     except GitHubError as error:
         raise GitHubError(f"issue #{number} was created, but its {STATUS_FIELD} is not '{status}': {error}")
     return number
+
+
+def mark_decided_alone(number, run=None):
+    """Marque l'issue `ballet:decided-alone` : le Dramaturg a tranché sans le Director, le rapport du matin la retrouvera."""
+    run = run or _run_gh
+    number = _issue_number(number)
+    _ensure_labels([DECIDED_ALONE], run)
+    run(["issue", "edit", number, "--add-label", DECIDED_ALONE[0]])
 
 
 def set_status(number, status, run=None):
@@ -348,6 +361,7 @@ def _dispatch(operation, arguments):
     operations = {
         "read": (read_issue, 1),
         "publish": (publish_issue, 3),
+        "decided-alone": (mark_decided_alone, 1),
         "plan": (write_plan, 2),
         "slice": (publish_slice, 2),
         "read-pr": (read_pull_request, 1),
@@ -911,7 +925,7 @@ def _rehearsal_branch(branch):
 
 def _workshop_branch(branch):
     if not WORKSHOP_BRANCH.fullmatch(branch):
-        raise GitHubError(f"not a Workshop branch: {branch} (expected workshop/OPP-N, workshop/FEAT-N, workshop/BUG-N or workshop/TASK-N)")
+        raise GitHubError(f"not a Workshop branch: {branch} (expected workshop/OPP-N, workshop/FEAT-N, workshop/BUG-N, workshop/TASK-N or workshop/<slug>)")
     return branch
 
 

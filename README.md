@@ -105,8 +105,14 @@ A line of your backlog (`BUG-004`, `FEAT-007`, `OPP-12`, `TASK-009`) can also be
 
 A Conductor session (`.ballet/run/workshop-BUG-004.json`) starts the Dramaturg in its own worktree, on the branch `workshop/BUG-004`. The Dramaturg decides within its perimeter and writes down what it decided. When it reports, Ballet's policy checks that only the specs space changed, its specs reach `main` by a pull request merged straight away (no Critic and no CI: specs are not code), and its issue is published:
 
-- **`proposed`** (the default): the issue waits for you. Read it and the Dramaturg's *Decided alone* lines, then set its `Ballet status` to `ready` on GitHub: it enters the queue.
-- **`ready`** straight away, for the work types your profile skips: `[workshop] queue_approval_skipped = ["Bug"]` (`Feature`, `Bug` or `Task`; empty by default). Start with `Bug` or `Task`.
+- **`proposed`** (the default): the issue waits for you. Read it and its *Decided alone* section (the Dramaturg's business decisions, with its reasons; the issue then carries the label `ballet:decided-alone`), then set its `Ballet status` to `ready` on GitHub: it enters the queue.
+- **`ready`** straight away, for the work types your profile skips: `[workshop] queue_approval_skipped = ["Bug"]` (`Feature`, `Bug` or `Task`; empty by default). Start with `Bug` or `Task`: a bug has the spec for referee, while a feature makes the Dramaturg guess some business, which then reaches the Rehearsal without your review. `Feature` is allowed once you accept that; the label still tells you what was decided alone.
+
+When a feature touches a technical choice (a dependency, a data model, a contract, several repos, its size), the Dramaturg asks the Choreographer's advice before writing, through the Conductor: the Choreographer reads, answers, and writes nothing. The rounds are bounded only by `[escalation] max_exchange_rounds` (3 by default, your profile overrides it); each question and answer is in the journal and is published as a comment on the issue.
+
+With no item, `/ballet:workshop --autopilot` picks the first line of the backlog's *Next up* that has no Workshop yet. What it picks alone is always `proposed`, whatever your profile skips.
+
+A request that is not in your backlog yet works too: `/ballet:workshop --autopilot "stock goes negative after a double cancel"`. The session is named by its slug (`workshop/stock-goes-negative-after-a-double`); the Dramaturg captures the request in the backlog first, then frames that line. The journal keeps one key per session, never renamed: its `published` event links the slug to the backlog line and to the issue.
 
 If the Dramaturg cannot frame the item (a missing backlog line, a word whose UI wording only you can name), or the merge or the publication fails, the Conductor stops and tells you why; once fixed, tell it to resume. Without `--autopilot`, `/ballet:workshop` is the assisted Workshop, which needs no session: a live conversation between you and the Dramaturg (the same as `/ballet:dramaturg`), which asks the Choreographer's advice when a feature touches a technical choice.
 

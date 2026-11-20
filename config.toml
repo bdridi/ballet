@@ -85,7 +85,9 @@ plan_approval = true             # en assisted, le plan attend le Director ; le 
 
 [workshop]
 # Le Workshop en autopilot publie ce qu'il cadre en `proposed` : le Director l'accepte (champ `Ballet status` à `ready`) avant
-# que ça entre dans la file. Les types listés ici (`Feature`, `Bug`, `Task`) sautent cette étape : ils sortent `ready` d'emblée.
+# que ça entre dans la file. Les types listés ici (`Feature`, `Bug`, `Task`) sautent cette étape : ils sortent `ready` d'emblée,
+# sauf l'élément que le Workshop a choisi seul dans le backlog (toujours `proposed`). Commencer par `Bug` ou `Task` : une feature fait
+# deviner du métier au Dramaturg ; ce qu'il décide seul est dans l'issue, qui porte `ballet:decided-alone`.
 queue_approval_skipped = []
 
 [escalation]
