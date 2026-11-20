@@ -52,6 +52,19 @@ Deux inconnues :
 - La boîte du superviseur survit-elle à un redémarrage d'`orca serve` (Run et handle) ? Les handles sont liés
   au runtime : après un redémarrage, recréer le terminal et la Run, et le noter dans le registre.
 
+## Piste : chaque Conductor en Remote Control
+
+Le Director parle au Conductor par le Supervisor (`orca terminal send` vers son terminal ; le Conductor répond
+par la boîte) ; il doit aussi pouvoir lui parler en direct, depuis son téléphone, quand il le veut. Le Claude
+d'un terminal Orca ne s'est pas ouvert en Remote Control jusqu'ici. À essayer, en local puis sur le VPS :
+
+- `claude --remote-control "<projet>#<élément>"` (l'option existe dans la CLI) : par `orca agent launch`, s'il
+  transmet des options à `claude`, sinon par `orca terminal create --command "claude --remote-control … '/ballet:rehearsal #N'"`.
+  Le terminal reste un terminal Orca : `ORCA_TERMINAL_HANDLE` y est posé, la boîte et les réveils marchent ?
+- La session apparaît-elle dans l'application Claude, nommée par son élément ?
+- Deux voix, une seule main : le Director qui répond en direct au Conductor, le Supervisor doit le savoir (il
+  relit la session ou le journal avant de porter une réponse), pour ne pas répondre deux fois.
+
 ## Conséquence pour la suite
 
 Le démon (sans LLM) et la session du superviseur peuvent se parler par la même boîte : le démon y dépose aussi
