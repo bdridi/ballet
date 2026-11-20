@@ -5,7 +5,7 @@ Ballet is a plugin: install it once, and all your projects benefit.
 
 You frame the work with an agent; then Ballet plans it, codes it, reviews it and merges it, one pull request at a time, and stops to ask you whenever something needs your decision.
 
-> Status: under construction (v0.26.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), what is shipped in [`release.md`](release.md), what comes next in [`opportunities.md`](opportunities.md) (all in French for now).
+> Status: under construction (v0.31.0), used on real projects in sequential mode, with a single repo per project. The full method is described in [`PRD.md`](PRD.md), what is shipped in [`release.md`](release.md), what comes next in [`opportunities.md`](opportunities.md) (all in French for now).
 
 ## How it works
 
@@ -94,6 +94,21 @@ python3 <path-to-ballet>/scripts/ballet_config.py check <project-folder>
 ```
 
 Talk it through with the Dramaturg: a need, a bug, feedback, or "what's next?". It keeps the backlog and writes each feature in the specs space until it is **ready** (`features/FEAT-NNN-*.md`). Nothing starts on its own at the end: launching the Rehearsal is your go.
+
+### Frame it without you: the autopilot Workshop
+
+A line of your backlog (`BUG-004`, `FEAT-007`, `OPP-12`, `TASK-009`) can also be framed with nobody in the loop: from the project's home folder, in Orca,
+
+```
+/ballet:workshop --autopilot BUG-004
+```
+
+A Conductor session (`.ballet/run/workshop-BUG-004.json`) starts the Dramaturg in its own worktree, on the branch `workshop/BUG-004`. The Dramaturg decides within its perimeter and writes down what it decided. When it reports, Ballet's policy checks that only the specs space changed, its specs reach `main` by a pull request merged straight away (no Critic and no CI: specs are not code), and its issue is published:
+
+- **`proposed`** (the default): the issue waits for you. Read it and the Dramaturg's *Decided alone* lines, then set its `Ballet status` to `ready` on GitHub: it enters the queue.
+- **`ready`** straight away, for the work types your profile skips: `[workshop] queue_approval_skipped = ["Bug"]` (`Feature`, `Bug` or `Task`; empty by default). Start with `Bug` or `Task`.
+
+If the Dramaturg cannot frame the item (a missing backlog line, a word whose UI wording only you can name), or the merge or the publication fails, the Conductor stops and tells you why; once fixed, tell it to resume. Without `--autopilot`, `/ballet:workshop` is the assisted Workshop, which needs no session: a live conversation between you and the Dramaturg (the same as `/ballet:dramaturg`), which asks the Choreographer's advice when a feature touches a technical choice.
 
 ## 3. Run a Rehearsal
 

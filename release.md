@@ -2,6 +2,20 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.31.0 — 2026-11-20 · `v0.31.0`
+
+Le Workshop : `/ballet:workshop` (assisted par défaut, avec l'avis du Choreographer) et `--autopilot`, première partie : une session de Conductor cadre une ligne du backlog sans le Director et publie son issue.
+
+- `/ballet:workshop` est le Workshop, assisted par défaut : une session live avec le Dramaturg (son skill), et l'avis du Choreographer si besoin, sans Conductor ni état. `/ballet:workshop --autopilot <élément>` confie une ligne du backlog (`OPP-12`, `FEAT-007`, `BUG-004`, `TASK-009`) à un Conductor, par un script à part, `ballet_workshop.py` (`begin`, `receive`, `resume`, `status`, la même dernière ligne `NEXT:`). Son état est `.ballet/run/workshop-<élément>.json` et son journal porte la clé `workshop` : ni `session-…` (la Rehearsal), ni clé `id` (la Scène en ferait une Rehearsal). Le Workshop assisted n'a pas de session : c'est `/ballet:dramaturg`.
+- Le Dramaturg travaille seul dans un worktree sur `workshop/<élément>` (section « In an autopilot Workshop » de son skill) : il décide dans son périmètre, ne pose pas de question, écrit ses décisions (`## Decided alone`) ou se dit bloqué (`- Blocked:`). À son rapport, le script juge son passage par la politique (seul l'espace specs a bougé ; renvoyé une fois, puis escalade), pousse la branche, ouvre la PR des specs et la merge aussitôt (ni Critic ni CI : des specs ne sont pas du code), puis publie l'issue et range le worktree. Un rapport sans type valide ou sans brouillon est renvoyé une fois. Une reprise (`resume`) repart de l'étape qui a échoué, jamais de celles qui sont faites.
+- L'issue sort `proposed` : le Director l'accepte en passant son `Ballet status` à `ready`. Le réglage `[workshop] queue_approval_skipped` du profil (types `Feature`, `Bug`, `Task` ; vide par défaut) la fait sortir `ready` d'emblée pour les types listés (`Queue approval: skipped`).
+- Le script GitHub gagne `open-specs-pr` (la PR des specs, liée à aucune issue : celle de la feature naît après son merge) et `merge-specs` (réservée aux branches `workshop/<ID>`, sans verdict de Critic ni CI : des specs ne sont pas du code, et le projet peut ne pas la lancer) ; `push` accepte les branches de Workshop.
+- `ballet_orca.py` : les aides Orca des deux Conductors (ouvrir un worktree, lancer un worker, lire la boîte d'Orca) sont sorties de `ballet_rehearsal.py`, sans changer son comportement.
+- Le Workshop assisted peut consulter le Choreographer, sans session : le Dramaturg l'appelle une fois, en sous-agent, quand la feature touche un choix technique (dépendance, modèle de données, contrat, plusieurs repos, taille), avec 4 points au plus ; le Choreographer répond ligne par ligne et n'écrit rien (ni plan, ni ADR). Section « Consult the Choreographer » du Dramaturg, section « When consulted during a Workshop » du Choreographer.
+- Le Conductor gagne la section « A Workshop session (autopilot) » ; le PRD (§3, §5.4, §6, §11) et le README décrivent le Workshop autopilot et `Queue approval`.
+
+**Opportunités traitées** : OPP-68 (première partie d'OPP-06) ; OPP-05.
+
 ## 0.30.1 — 2026-11-19 · `v0.30.1`
 
 Un Dancer refusé pour des fichiers qu'il n'a pas touchés (FEAT-005 sur antimurphy : `AGENTS.md` et l'ADR 0009, commités par le Choreographer).

@@ -201,6 +201,21 @@ class ConfigTest(unittest.TestCase):
         self.write_project_config(VALID_PROJECT + '\n[rehearsal]\nplan_approval = "no"\n')
         self.assertProblem("[rehearsal] plan_approval must be true or false")
 
+    def test_par_defaut_le_workshop_autopilot_passe_tout_par_le_director(self):
+        self.write_project_config(VALID_PROJECT)
+        config = ballet_config.effective_config(self.project)
+        self.assertEqual(config["workshop"]["queue_approval_skipped"], [])
+
+    def test_un_type_de_travail_peut_sauter_l_acceptation_du_director(self):
+        self.write_project_config(VALID_PROJECT + '\n[workshop]\nqueue_approval_skipped = ["Bug", "Task"]\n')
+        self.assertEqual(ballet_config.find_problems(ballet_config.effective_config(self.project)), [])
+
+    def test_un_type_inconnu_ou_une_liste_mal_formee_sont_refuses_pour_l_acceptation(self):
+        for value in ('["Epic"]', '"Bug"'):
+            with self.subTest(value=value):
+                self.write_project_config(VALID_PROJECT + f"\n[workshop]\nqueue_approval_skipped = {value}\n")
+                self.assertProblem("[workshop] queue_approval_skipped must be a list of issue types among Feature, Bug, Task")
+
     def test_exclusions_qui_ne_sont_pas_une_liste_sont_refusees(self):
         self.write_project_config(VALID_PROJECT + '\n[escalation]\ndiff_exclude = "*.lock"\n')
         self.assertProblem("diff_exclude must be a list of globs")

@@ -7,6 +7,7 @@
     python3 ballet_github.py read-pr <pr>                        # affiche la PR, ses reviews et ses commentaires, dans l'ordre
     python3 ballet_github.py push    <rehearsal/ID>              # pousse la branche de Rehearsal
     python3 ballet_github.py open-pr <issue> <rehearsal/ID>      # ouvre la PR sur main, liée à l'issue, affiche son numéro
+    python3 ballet_github.py open-specs-pr <workshop/ID>         # ouvre la PR des specs d'un Workshop autopilot, liée à aucune issue
     python3 ballet_github.py review  <pr> <verdict.md>           # publie le verdict du Critic : une review, un commentaire par point situé
     python3 ballet_github.py comment-issue <issue> <message.md>  # publie un message entre rôles sur l'issue
     python3 ballet_github.py comment-pr    <pr> <message.md>     # publie un message (rapport du Dancer) sur la PR
@@ -14,6 +15,7 @@
     python3 ballet_github.py resolve  <pr> <rapport.md>          # résout les fils des points que le Dancer dit corrigés
     python3 ballet_github.py label   <pr> <VERDICT>              # pose le libellé du verdict (ballet:approved…), retire les autres
     python3 ballet_github.py merge   <pr>                        # la Premiere : merge par rebase, puis supprime la branche
+    python3 ballet_github.py merge-specs <pr>                    # merge la PR des specs d'un Workshop autopilot, sans verdict ni CI, puis supprime la branche
     python3 ballet_github.py close   <issue> <pr>                # ferme l'issue livrée, puis sa parente si plus aucune slice n'est ouverte
 
 Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
@@ -32,6 +34,10 @@ Le Conductor pose celui du Critic ; le Director tranche une escalade en posant l
 le dernier posé l'emporte. La review du Critic et le commentaire « Verdicts » restent, pour la lecture.
 `merge` refuse sans libellé `ballet:approved` posé après le dernier commit, et sans CI entièrement verte.
 La taille a ses deux libellés : `ballet:oversized` (posé et retiré par le Conductor) et `ballet:size-accepted` (le Director).
+`merge-specs` ne vaut que pour une branche `workshop/<ID>` (une ligne du backlog : `OPP-`, `FEAT-`, `BUG-` ou `TASK-`) : le Workshop
+n'a pas de Critic, la politique a jugé la branche (l'espace specs seul) avant son push ; la CI n'est pas attendue (pas de code, et
+le projet peut ne pas la lancer). Sa PR ne ferme
+aucune issue : l'issue de la feature n'est publiée qu'après le merge de ses specs.
 `close` ne se fie pas au `Closes #N` de la PR (implicite, et absent d'une PR ouverte à la main) : il ferme lui-même.
 Une slice se reconnaît à sa première ligne, `Part of #<parente>` (posée par `slice`).
 """
@@ -75,6 +81,7 @@ SET_STATUS = """mutation($issue: ID!, $field: ID!, $option: ID!) {
 PARENT_LINE = re.compile(r"^Part of #(\d+)\s*$", re.MULTILINE)
 BASE_BRANCH = "main"
 REHEARSAL_BRANCH = re.compile(r"rehearsal/(FEAT|BUG|TASK)-\d{3}(\.\d+)?")
+WORKSHOP_BRANCH = re.compile(r"workshop/(OPP|FEAT|BUG|TASK)-\d+")
 VERDICTS_MARKER = "<!-- ballet:verdicts -->"
 FIXED_POINT = re.compile(r"^- (Blocking (\d+)|Note `([^`:]+):(\d+)(?:-\d+)?`)\s*(?::|—|–|-)\s*`?([0-9a-f]{7,40})`?", re.MULTILINE)
 REVIEW_THREADS = """query($owner: String!, $name: String!, $number: Int!) {
@@ -162,7 +169,7 @@ def read_pull_request(number, run=None):
 
 
 def push_branch(branch, git=None):
-    _push(_rehearsal_branch(branch), git or _run_git)
+    _push(_pushable_branch(branch), git or _run_git)
 
 
 def open_pull_request(issue_number, branch, run=None):
@@ -170,6 +177,13 @@ def open_pull_request(issue_number, branch, run=None):
     number = _issue_number(issue_number)
     title = _issue_title(number, run)
     return _create_pull_request(title, f"Closes #{number}\n", _rehearsal_branch(branch), run)
+
+
+def open_specs_pull_request(branch, run=None):
+    """La PR des specs d'un Workshop autopilot, sur `main`. Elle ne ferme aucune issue : celle de la feature naît après son merge."""
+    item = _workshop_branch(branch).split("/", 1)[1]
+    body = f"Specs of {item}, written by the Dramaturg in an autopilot Workshop.\n"
+    return _create_pull_request(f"docs(specs): {item}", body, branch, run or _run_gh)
 
 
 def publish_review(pr_number, verdict_path, run=None):
@@ -231,6 +245,17 @@ def merge_pull_request(pr_number, run=None, git=None):
     pull_request = _merge_state(number, run)
     _require_fresh_approval(pull_request, _verdict_labels_in_force(number, run))
     _require_green_ci(pull_request)
+    run(["pr", "merge", number, "--rebase"])
+    _delete_remote_branch(pull_request["headRefName"], git or _run_git)
+
+
+def merge_specs_pull_request(pr_number, run=None, git=None):
+    """Merge par rebase la PR des specs d'un Workshop autopilot, puis supprime sa branche. Ni verdict (le Workshop n'a pas de
+    Critic) ni CI (des specs ne sont pas du code) : seule une branche `workshop/<ID>` est acceptée."""
+    run = run or _run_gh
+    number = _issue_number(pr_number)
+    pull_request = _merge_state(number, run)
+    _workshop_branch(pull_request["headRefName"])
     run(["pr", "merge", number, "--rebase"])
     _delete_remote_branch(pull_request["headRefName"], git or _run_git)
 
@@ -328,6 +353,7 @@ def _dispatch(operation, arguments):
         "read-pr": (read_pull_request, 1),
         "push": (push_branch, 1),
         "open-pr": (open_pull_request, 2),
+        "open-specs-pr": (open_specs_pull_request, 1),
         "review": (publish_review, 2),
         "comment-issue": (comment_issue, 2),
         "comment-pr": (comment_pull_request, 2),
@@ -335,6 +361,7 @@ def _dispatch(operation, arguments):
         "resolve": (_resolve_and_say, 2),
         "label": (label_pull_request, 2),
         "merge": (merge_pull_request, 1),
+        "merge-specs": (merge_specs_pull_request, 1),
         "close": (_close_and_say, 2),
     }
     if operation not in operations:
@@ -426,7 +453,7 @@ def _push(branch, git):
 
 
 def _delete_remote_branch(branch, git):
-    git(["push", "origin", "--delete", _rehearsal_branch(branch)])
+    git(["push", "origin", "--delete", _pushable_branch(branch)])
 
 
 def _create_issue(title, body, run, issue_type):
@@ -880,6 +907,19 @@ def _rehearsal_branch(branch):
     if not REHEARSAL_BRANCH.fullmatch(branch):
         raise GitHubError(f"not a Rehearsal branch: {branch} (expected rehearsal/FEAT-NNN, rehearsal/FEAT-NNN.K, BUG-NNN or TASK-NNN)")
     return branch
+
+
+def _workshop_branch(branch):
+    if not WORKSHOP_BRANCH.fullmatch(branch):
+        raise GitHubError(f"not a Workshop branch: {branch} (expected workshop/OPP-N, workshop/FEAT-N, workshop/BUG-N or workshop/TASK-N)")
+    return branch
+
+
+def _pushable_branch(branch):
+    """Une branche de Rehearsal ou de Workshop : le script ne pousse aucune autre."""
+    if WORKSHOP_BRANCH.fullmatch(branch):
+        return branch
+    return _rehearsal_branch(branch)
 
 
 def _run_git(arguments):

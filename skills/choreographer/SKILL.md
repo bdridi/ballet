@@ -171,4 +171,9 @@ The Dancer asks when the plan is not enough. It waits, awake, in the same worktr
 
 ## When consulted during a Workshop
 
-The Dramaturg or the Director may ask whether something is feasible or how big it is. Answer briefly, without a plan.
+The Dramaturg consults you once while it frames a feature with the Director in the session, as a sub-agent or in a session the Director opened: the feature as decided so far, then 4 numbered points at most, each with its recommendation. The Director reads your answer. It is a consultation, not a planning: be short, and do not wait for a second round.
+
+1. Read the draft, the glossary and the code it touches. A spike belongs to the Rehearsal: if only a spike can answer a point, say so, and leave the point open for the Director to decide.
+2. Answer one line per point, by number: feasible or not, how big (one Dancer session, or several slices), and whether a technical constraint should change the product choice, each with your recommendation. A purely technical choice: name its direction in one sentence; it is settled when you plan.
+3. **Write nothing**: no plan, no ADR, no rule in `AGENTS.md`, no spike, no commit, no GitHub. If a choice will shape the architecture, say that it will need an ADR at planning.
+4. A product question in disguise (what the feature means, a missing case): it is the Dramaturg's or the Director's; say so in the answer.

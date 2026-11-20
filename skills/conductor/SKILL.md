@@ -1,6 +1,6 @@
 ---
 name: conductor
-description: Conductor (coordinator), one session per item. Plays the item it is handed (a Feature, a Bug or a Task issue, or a ready feature) on Orca, one Rehearsal at a time, its slices in order, up to its last Premiere: launches the Choreographer, the Dancer and the Critic as Orca workers in the Rehearsal's worktree, carries their questions and answers, publishes every exchange on GitHub and merges the pull request. Every move goes through a deterministic script; the Conductor only relays and reports. Use through `/ballet:rehearsal`, from the project's home folder.
+description: Conductor (coordinator), one session per item. Plays the item it is handed (a Feature, a Bug or a Task issue, or a ready feature) on Orca, one Rehearsal at a time, its slices in order, up to its last Premiere: launches the Choreographer, the Dancer and the Critic as Orca workers in the Rehearsal's worktree, carries their questions and answers, publishes every exchange on GitHub and merges the pull request. Every move goes through a deterministic script; the Conductor only relays and reports. Also plays an autopilot Workshop session: one backlog line, framed by the Dramaturg alone and published as an issue. Use through `/ballet:rehearsal` or `/ballet:workshop`, from the project's home folder.
 ---
 
 # Conductor
@@ -74,6 +74,17 @@ An escalation pauses the session: its next slices wait. Tell the Director, in th
 - Anything else (change the plan, drop the Rehearsal): the Director does it; you only report. Never merge by hand in their place, never set a label yourself.
 
 `python3 <path>/scripts/ballet_rehearsal.py status` shows the state at any time, in plain lines (pull request, last verdict, CI, round trips, pending questions, workers, the session: its mode, what plays, what is next, what was played), its last line repeating the last `NEXT`. `status <ID> --json` prints the raw state of one Rehearsal.
+
+## A Workshop session (autopilot)
+
+`/ballet:workshop --autopilot <item>` hands you a line of the backlog (`OPP-12`, `FEAT-007`, `BUG-004`, `TASK-009`), not an issue. It is the same job with another script, `../../scripts/ballet_workshop.py` (relative to this skill's folder), and the same last line (`NEXT: wait`, `escalate <reason>`, `done`). Only the Dramaturg plays, alone: nobody answers a question in this loop.
+
+- `begin <item>` opens the session (`.ballet/run/workshop-<item>.json`, not a `session-…` file) and the Dramaturg's worktree on `workshop/<item>`, and starts the Dramaturg.
+- On every wake, as for a Rehearsal: `receive --message <msg_…>` (or `--dispatch <ctx_…>`). Without the item, the script takes the only open Workshop; with several, name the item first (`receive BUG-004 --message …`).
+- The Dramaturg's report is all the script needs. It judges the Dramaturg's passage (only the specs space may change), pushes the branch, opens the specs pull request, merges it straight away (no Critic and no CI here: specs are not code), then publishes the issue: `proposed` (the Director accepts it before it enters the queue) or `ready` for the types the profile skips (`[workshop] queue_approval_skipped`). It then removes the worktree: `NEXT: done`.
+- Relay what the script did (the specs on `main`, the issue number and its status) and the Dramaturg's **Decided alone** lines, which are in the journal: the Director reads them to accept the proposal. Accepting is theirs: they set the issue's `Ballet status` to `ready`.
+- An escalation (the Dramaturg is blocked, a question, a policy violation twice, a merge or a publication that failed) pauses the session. Tell the Director in their language. When they have fixed the cause, `resume [<item>]` retries what stopped (the Dramaturg that did not start, or the end that failed), never what is already done.
+- `status [<item>]` shows where the session is. Never run `gh`, `git push`, `git merge` or an `orca` command yourself here either.
 
 ## Never
 

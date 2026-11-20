@@ -103,6 +103,7 @@ from pathlib import Path
 import ballet_config
 import ballet_github
 import ballet_mutation
+import ballet_orca
 import ballet_policy
 import ballet_size
 from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
@@ -121,7 +122,6 @@ PLAN_REVIEW_MESSAGES = ("question", "revise", "approve")  # ce que le Director �
 REHEARSAL_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d{3}(?:\.\d+)?)\b")
 ORCA_AGENTS = {"claude": "claude", "codex": "codex", "grok": "grok", "opencode": "opencode"}
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
-WORKER_MESSAGES = ("worker_done", "question", "escalation")
 STATUS_OF_STEP = {"wait": "open", "escalate": "escalated", "done": "done"}
 STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 CI_POLL_SECONDS = 15
@@ -305,7 +305,7 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
     try:
         message = _orca_message(wanted, by, tools)
         if _is_mutation_wake(message):
-            step = _after_mutation(rehearsal, _payload(message).get("round"), config, home, tools)
+            step = _after_mutation(rehearsal, ballet_orca.payload(message).get("round"), config, home, tools)
         elif message.get("type") == "escalation":
             step = _worker_stopped(rehearsal, message, home, tools)
         else:
@@ -595,7 +595,7 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
 def _worker_stopped(rehearsal, message, home, tools):
     """Un worker a fini son tour sans `worker_done` : relancé pour envoyer son rapport, une fois ; ensuite, ou s'il
     est tombé en erreur, c'est au Director."""
-    payload = _payload(message)
+    payload = ballet_orca.payload(message)
     role = next((role for role, dispatch in rehearsal.dispatches.items() if dispatch == payload.get("dispatchId")), None)
     if not role or payload.get("stopReason") != "finished" or rehearsal.nudges.get(role, 0) >= MAX_NUDGES:
         raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
@@ -1180,7 +1180,7 @@ def _mutation_tools(config):
 def _conductor_run(rehearsal, tools):
     """Le Run Orca des workers de la Rehearsal, lu sur le dispatch du Dancer : c'est celui du Conductor."""
     shown = json.loads(tools.orca(["orchestration", "worker-show", "--dispatch", rehearsal.dispatches["dancer"], "--json"]))
-    run_id = _find_key(shown, "runId")
+    run_id = ballet_orca.find_key(shown, "runId")
     if not run_id:
         raise RehearsalError(f"the Dancer's dispatch {rehearsal.dispatches['dancer']} names no Orca Run: the mutation could not wake the Conductor")
     return run_id
@@ -1193,7 +1193,7 @@ def _mutation_results_path(rehearsal, home):
 
 
 def _is_mutation_wake(message):
-    return message.get("type") == "status" and _payload(message).get("ballet") == "mutation"
+    return message.get("type") == "status" and ballet_orca.payload(message).get("ballet") == "mutation"
 
 
 def _verified_and_owned(rehearsal, role, config, home, tools):
@@ -1328,11 +1328,11 @@ def _start_worker(rehearsal, role, assignment, config, home, tools):
     if not agent:
         raise RehearsalError(f"the {role}'s CLI `{route.get('cli')}` cannot run as an Orca worker yet")
     spec = _write_spec(rehearsal, role, _role_spec(rehearsal, role, assignment), home)
-    arguments = ["orchestration", "worker-start", "--spec-file", str(spec), "--worktree", f"path:{rehearsal.worktree}",
-                 "--agent", agent, "--task-title", f"{role.capitalize()} · {rehearsal.id}", "--json"]
-    if route.get("model"):
-        arguments += ["--model", route["model"]]
-    rehearsal.dispatches[role] = _dispatch_id(tools.orca(arguments))
+    dispatch = ballet_orca.start_worker(spec, rehearsal.worktree, agent, f"{role.capitalize()} · {rehearsal.id}", tools,
+                                        model=route.get("model", ""))
+    if not dispatch:
+        raise RehearsalError("the worker started but its receipt names no dispatchId")
+    rehearsal.dispatches[role] = dispatch
     _log_handoff(rehearsal, role, "start", assignment, home, {"agent": agent, "model": route.get("model", "")})
 
 
@@ -1701,78 +1701,17 @@ def _parsed(body):
 def _orca_message(wanted, by, tools):
     """Le message entier, retrouvé dans la boîte d'Orca par son id ou comme le dernier du dispatch d'un worker.
     Un `escalation` d'Orca (worker arrêté sans rapport) n'est pas un message Ballet : `_worker_stopped` en décide."""
-    messages = _find_list(json.loads(tools.orca(["orchestration", "inbox", "--limit", "200", "--full", "--json"])), "messages")
-    message = _by_id(messages, wanted) if by == "message" else _latest_from(messages, wanted)
+    message = ballet_orca.inbox_message(wanted, by, tools)
     if not message:
         raise RehearsalError(f"no Orca message {'from dispatch ' if by == 'dispatch' else ''}{wanted} in the inbox")
     return message
 
 
-def _by_id(messages, message_id):
-    return next((message for message in messages if message.get("id") == message_id), None)
-
-
-def _latest_from(messages, dispatch_id):
-    sent = [message for message in messages
-            if message.get("type") in WORKER_MESSAGES and _payload(message).get("dispatchId") == dispatch_id]
-    return max(sent, key=lambda message: int(message.get("sequence") or 0), default=None)
-
-
-def _payload(message):
-    """Orca rend le payload en JSON dans une chaîne, ou déjà décodé, ou pas du tout."""
-    payload = message.get("payload")
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
-            return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _find_list(value, key):
-    if isinstance(value, dict):
-        if isinstance(value.get(key), list):
-            return value[key]
-        return next((found for item in value.values() if (found := _find_list(item, key))), [])
-    return []
-
-
 def _open_worktree(rehearsal, tools):
-    git = tools.git(rehearsal.repo)
-    git(["fetch", "origin", "main"])
-    linked = ["--issue", rehearsal.issue] if rehearsal.issue else []
-    tools.orca(["worktree", "create", "--name", rehearsal.branch.replace("/", "-").replace(".", "-"),
-                "--repo", f"path:{rehearsal.repo}", "--base-branch", "origin/main", "--branch", rehearsal.branch,
-                *linked, "--no-parent", "--json"])
-    return _worktree_of(rehearsal.branch, git(["worktree", "list", "--porcelain"]))
-
-
-def _worktree_of(branch, porcelain):
-    path = None
-    for line in porcelain.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-        elif line == f"branch refs/heads/{branch}":
-            return path
-    raise RehearsalError(f"no worktree found for {branch} after its creation")
-
-
-def _dispatch_id(output):
-    """Le dispatch du worker, où qu'il soit dans le reçu JSON d'Orca."""
-    found = _find_key(json.loads(output), "dispatchId")
-    if not found:
-        raise RehearsalError("the worker started but its receipt names no dispatchId")
-    return found
-
-
-def _find_key(value, key):
-    if isinstance(value, dict):
-        if isinstance(value.get(key), str):
-            return value[key]
-        value = list(value.values())
-    if isinstance(value, list):
-        return next((found for item in value if (found := _find_key(item, key))), None)
-    return None
+    path = ballet_orca.open_worktree(rehearsal.repo, rehearsal.branch, tools, rehearsal.issue)
+    if not path:
+        raise RehearsalError(f"no worktree found for {rehearsal.branch} after its creation")
+    return path
 
 
 def _run_proof(command, cwd, timeout):

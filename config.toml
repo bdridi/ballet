@@ -83,6 +83,11 @@ pattern = '''(?m)^\s*(?:Scenario|Scenario Outline|Scenario Template|Example):\s*
 [rehearsal]
 plan_approval = true             # en assisted, le plan attend le Director ; le champ `Plan approval` d'une issue l'emporte
 
+[workshop]
+# Le Workshop en autopilot publie ce qu'il cadre en `proposed` : le Director l'accepte (champ `Ballet status` à `ready`) avant
+# que ça entre dans la file. Les types listés ici (`Feature`, `Bug`, `Task`) sautent cette étape : ils sortent `ready` d'emblée.
+queue_approval_skipped = []
+
 [escalation]
 max_round_trips = 2              # allers-retours Dancer ↔ Critic
 max_exchange_rounds = 3          # tours de questions entre deux rôles sur un même sujet (message.md)

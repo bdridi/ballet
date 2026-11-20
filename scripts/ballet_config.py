@@ -17,6 +17,7 @@ PERIMETER_KEYS = ("writes", "except", "extra_writes", "extra_except", "branches"
 ROLES = ("dramaturg", "choreographer", "dancer", "critic")
 CLIS = ("claude", "grok", "mistral-vibe", "codex", "opencode", "gemini-cli", "kimi")
 MUTATION_REPORT_FORMATS = ("cargo-mutants",)
+QUEUED_TYPES = ("Feature", "Bug", "Task")   # les types d'issue que le Workshop publie dans la file
 
 
 class ConfigError(Exception):
@@ -37,6 +38,7 @@ def find_problems(config, plugin_root=PLUGIN_ROOT):
         + _role_problems(config)
         + _critic_dancer_problems(config)
         + _rehearsal_problems(config)
+        + _workshop_problems(config)
         + _threshold_problems(config)
         + _mutation_problems(config)
         + _policy_problems(config)
@@ -191,6 +193,13 @@ def _critic_dancer_problems(config):
 def _rehearsal_problems(config):
     if not isinstance(_table(config, "rehearsal").get("plan_approval"), bool):
         return ["[rehearsal] plan_approval must be true or false"]
+    return []
+
+
+def _workshop_problems(config):
+    skipped = _table(config, "workshop").get("queue_approval_skipped")
+    if not isinstance(skipped, list) or any(issue_type not in QUEUED_TYPES for issue_type in skipped):
+        return [f"[workshop] queue_approval_skipped must be a list of issue types among {', '.join(QUEUED_TYPES)}"]
     return []
 
 

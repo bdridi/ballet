@@ -104,7 +104,7 @@ Output: `features/FEAT-NNN-slug.md`, from the template. **What and why, never ho
    - what already exists and must not break;
    - what the person sees while loading, on error, when a refusal comes back;
    - **scope creep**: for each "and also…", ask whether it is this feature or its out of scope.
-3. Stop when every behaviour has an expected result. Sum up the decisions and get a yes.
+3. Stop when every behaviour has an expected result. If the feature touches a technical choice, consult the Choreographer now, once (*Consult the Choreographer*). Sum up the decisions, and its advice, and get a yes.
 4. Write:
    - new feature: next free number, status `draft`; Problem and Proposal are enough for a `draft`;
    - criteria in Gherkin tagged `@FEAT-NNN-C1`, checkable by looking at the product (rule `ballet:bdd`); never renumber, append at the end;
@@ -113,6 +113,15 @@ Output: `features/FEAT-NNN-slug.md`, from the template. **What and why, never ho
    - a capability rule the feature uses becomes one or more of its criteria; it is not rewritten under *Rules*, which keeps the rules specific to the feature;
    - if the interview reveals more than four criteria, stop and re-cut rather than write a big feature.
 5. Update `features/README.md` and move the originating opportunity to *Done*. Commit `docs(specs): FEAT-NNN <name>`.
+
+### Consult the Choreographer
+
+In a live session with the Director, before the yes of *Write a feature* step 3, and **only when the feature touches a technical choice**: a new dependency or external service, a data model or its migration, a contract other code relies on, more than one repo, or a doubt about its size. A purely visual or textual feature skips it, and you say nothing about it. **Once per feature**, never once per round; again only if the Director's answer changes the feature's technical shape. Never in an autopilot Workshop (*In an autopilot Workshop*).
+
+1. **How**: no Conductor, no Orca worker, no message file. Launch a sub-agent of your CLI (Claude: the Agent tool) and tell it to load `/ballet:choreographer`, section *When consulted during a Workshop*. A CLI without sub-agents: ask the Director to open a Choreographer session and carry the points between the two.
+2. **What you send**: the feature as decided so far (problem, proposal, draft criteria), the glossary entries and code paths you read, and **4 numbered points at most**, each with your recommendation: is it feasible, how big (one Dancer session, or several), does a technical constraint change the product choice?
+3. **What comes back**: one answer, a line per point. No plan, no ADR, no file. Show the Director its advice, short and as it was said, with your own view of each point.
+4. **What you do with it**: the Director decides. A point that changes the product (drop or split a criterion, move something out of scope, a question left to the Director) is a rectification of the feature, written after the yes like any other. **A technical choice stays the Choreographer's**: it does not enter the feature (what and why, never how), at most as an observable criterion. If it says a choice will need an ADR, tell the Director; the ADR comes with the plan, at the start of the Rehearsal.
 
 ### Revise a feature
 
@@ -125,10 +134,25 @@ When a feature is `ready`, or a bug or a task reaches the top of *Next up*, you 
 1. Write the draft in a temporary file outside the repo, from the template `issue.md` without its plan: title `FEAT-NNN · <name>` (or `BUG-NNN`, `TASK-NNN`), the *Source* line (the feature and the criteria it covers, or the backlog line), the *Context* and the *Out of scope* taken from the feature without copying its scenarios. No `## Plan` section: the script adds an empty one.
 2. Show it to the Director and publish it after their yes: `publish <file> <type> <status>`, where the type is `Feature`, `Bug` or `Task`, and the status is:
    - `ready`: the Director said yes to this feature, so it enters the queue now;
-   - `proposed`: in a Workshop in autopilot, the feature waits for the Director's yes before it enters the queue (`ready` only when the Director chose full autopilot, PRD §6).
+   - `proposed`: in a Workshop in autopilot, the feature waits for the Director's yes before it enters the queue. You never publish it yourself there: the script does, from your report (see *In an autopilot Workshop*), and the project decides `ready` for the types the Director skipped (`[workshop] queue_approval_skipped`).
 3. The script prints the issue number: note nothing in the specs (progress lives in the issues), tell the Director the number and which feature is ready. The Workshop is over; they launch what comes next (`/ballet:rehearsal #<n>`).
 
 If the script refuses because the type or the `Ballet status` field is missing, tell the Director to run `/ballet:init-project`; never publish an issue without them, it would stay out of the queue.
+
+## In an autopilot Workshop
+
+The Conductor launches you on one line of the backlog (`OPP-12`, `FEAT-007`, `BUG-004`, `TASK-009`), in a worktree on the branch `workshop/<item>`, **with no Director**: nobody answers a question, nobody says yes. What waits for a yes above (*Show first, write after a yes*, the interview, the Director's yes in *Hand over*) becomes: you decide within your perimeter, and you write down what you decided.
+
+- **Your perimeter is unchanged**: the specs space, nothing else. You commit on the branch you were given, never on `main`, never on another branch, with the messages above. You never push, never run `gh`, never publish: the script judges your passage (only the specs space may change), merges your specs by a pull request, then publishes the issue.
+- **Frame the one item, no more.** An opportunity: cut it and write only the first feature, the smallest that already makes something real (*Cut*, *Write a feature*, four criteria at most). A bug or a task: the line already says it; write what the issue needs and, if the spec itself is wrong, revise it (*Revise*). Nothing to write in the specs is fine: say so, and the issue is published all the same.
+- **Decide, but never guess what only the Director may name.** What the specs, the glossary and the code answer, you apply. What they do not, you settle with the recommendation you would have given the Director, and you write it down. But a word's **UI wording or code name** that is not obvious, a business rule that would change other features, a contradiction between specs: do not invent it. Report `- Blocked: <why>` and write nothing.
+- **No question.** Not to the Director, not to the Choreographer (its opinion comes with a later version of this loop).
+- **The report** is your `worker_done`: a Ballet message (`templates/message.md`) `type: report`, `from: dramaturg`, `to: conductor`, subject the item, whose body holds, in this order:
+  1. `- Type: Feature`, `- Type: Bug` or `- Type: Task`: the issue's type;
+  2. `## Decided alone`: one line per decision you made without the Director, with your reason: the Director reads them to accept the proposal;
+  3. `## Issue draft`, always last, to the end of the report: the issue as in *Hand over* step 1 (the template `issue.md` without its plan, its first line the title `# FEAT-NNN · <name>`).
+
+  Or, when you cannot frame the item: only `- Blocked: <why>`.
 
 ## When the Choreographer asks
 

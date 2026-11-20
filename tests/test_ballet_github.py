@@ -370,6 +370,51 @@ class BalletGitHubTest(unittest.TestCase):
         with self.assertRaises(ballet_github.GitHubError):
             ballet_github.open_pull_request("2", "main", run=FakeGh())
 
+    def test_pousse_aussi_la_branche_d_un_workshop(self):
+        git = FakeGit()
+        ballet_github.push_branch("workshop/BUG-004", git=git)
+        self.assertEqual(git.calls, [["push", "--set-upstream", "origin", "workshop/BUG-004"]])
+
+    def test_refuse_de_pousser_une_branche_de_workshop_qui_n_est_pas_une_ligne_du_backlog(self):
+        for branch in ("workshop/oops", "workshop/CAP-001", "workshop/BUG-004;rm", "workshop/"):
+            with self.subTest(branch=branch), self.assertRaises(ballet_github.GitHubError):
+                ballet_github.push_branch(branch, git=FakeGit())
+
+    def test_la_pr_des_specs_d_un_workshop_ne_ferme_aucune_issue(self):
+        gh = FakeGh()
+        self.assertEqual(ballet_github.open_specs_pull_request("workshop/BUG-004", run=gh), "43")
+        create = gh.calls[-1]
+        self.assertEqual(create[create.index("--base") + 1], "main")
+        self.assertEqual(create[create.index("--head") + 1], "workshop/BUG-004")
+        self.assertEqual(create[create.index("--title") + 1], "docs(specs): BUG-004")
+        self.assertNotIn("Closes", create[create.index("--body") + 1])
+
+    def test_refuse_d_ouvrir_la_pr_des_specs_depuis_une_branche_de_rehearsal(self):
+        with self.assertRaises(ballet_github.GitHubError):
+            ballet_github.open_specs_pull_request("rehearsal/FEAT-001.1", run=FakeGh())
+
+    def test_merge_les_specs_d_un_workshop_sans_verdict_puis_supprime_la_branche(self):
+        gh, git = FakeGh(pull_request={**mergeable_pull_request(), "headRefName": "workshop/BUG-004"}), FakeGit()
+        ballet_github.merge_specs_pull_request("#43", run=gh, git=git)
+        self.assertEqual(gh.calls[-1], ["pr", "merge", "43", "--rebase"])
+        self.assertEqual(git.calls, [["push", "origin", "--delete", "workshop/BUG-004"]])
+
+    def test_ne_merge_pas_sans_verdict_une_branche_de_rehearsal(self):
+        gh, git = FakeGh(pull_request=mergeable_pull_request()), FakeGit()
+        with self.assertRaisesRegex(ballet_github.GitHubError, "not a Workshop branch"):
+            ballet_github.merge_specs_pull_request("43", run=gh, git=git)
+        self.assertFalse([call for call in gh.calls if call[:2] == ["pr", "merge"]])
+        self.assertEqual(git.calls, [])
+
+    def test_merge_les_specs_d_un_workshop_sans_attendre_la_ci(self):
+        specs = {"headRefName": "workshop/BUG-004"}
+        running = {**GREEN_CHECK, "status": "IN_PROGRESS", "conclusion": ""}
+        for case, checks in {"no CI": (), "red": (RED_CHECK,), "running": (running,)}.items():
+            with self.subTest(case=case):
+                gh = FakeGh(pull_request={**mergeable_pull_request(checks=checks), **specs})
+                ballet_github.merge_specs_pull_request("43", run=gh, git=FakeGit())
+                self.assertEqual(gh.calls[-1], ["pr", "merge", "43", "--rebase"])
+
     def test_un_verdict_sans_point_situe_reste_une_review_sans_commentaire(self):
         gh = FakeGh()
         verdict = f"{VERDICT_HEADER}\n\nVERDICT: APPROVED\n\n- Proof: green.\n"
