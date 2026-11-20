@@ -85,6 +85,11 @@ class BalletStageTest(unittest.TestCase):
                           "items": ["#35", "#36"], "played": [{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}]}])
         self.assertEqual(project["queue_titles"]["#35"], "FEAT-001.2 · Issue 35")
 
+    def test_le_titre_de_l_issue_confiee_a_une_session_est_donne(self):
+        self._session(item="#12", items=["#35"], current="FEAT-001.2", played=[{"item": "#12", "rehearsal": "FEAT-001.2"}])
+        titles = ballet_stage.snapshot([self.home])["projects"][0]["queue_titles"]
+        self.assertEqual((titles["#12"], titles["#35"]), ("FEAT-001.2 · Issue 12", "FEAT-001.2 · Issue 35"))
+
     def test_une_session_finie_n_est_plus_ouverte(self):
         self._session(item="#12", status="done", items=[], current="", played=[{"item": "#12", "rehearsal": "FEAT-001.2"}])
         self.assertEqual(self._queue()["sessions"], [])

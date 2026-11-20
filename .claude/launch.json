@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {"name": "stage-mockups", "runtimeExecutable": "python3", "runtimeArgs": ["-m", "http.server", "7710", "-d", "stage/mockups", "--bind", "127.0.0.1"], "port": 7710}
+  ]
+}

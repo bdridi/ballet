@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scène · B Plateau</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* B — Le Plateau : la chaîne est la navigation. Chaque élément est posé à l'endroit de la chaîne où il se trouve ;
+     le diagramme d'états est le cœur de la page d'une Rehearsal, avec un rejouage dans le temps. */
+  .top { display:flex; align-items:center; gap:16px; padding:10px 18px; background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  .top .brand b { font-size:16px; } .top .project { color:var(--muted); font-size:13px; }
+  .chain { display:flex; align-items:center; gap:0; margin:0 auto; }
+  .chain a { display:flex; flex-direction:column; align-items:center; padding:4px 14px; border-radius:8px; font-size:12.5px; color:var(--muted); position:relative; }
+  .chain a b { font-size:15px; color:var(--fg); font-variant-numeric:tabular-nums; }
+  .chain a.on { background:var(--panel); color:var(--fg); font-weight:600; }
+  .chain a.hot b { color:var(--run); } .chain a.warn b { color:var(--warn); }
+  .chain .arrow { color:var(--faint); font-size:14px; }
+  .alert { display:flex; align-items:center; gap:6px; color:var(--warn); background:var(--warn-bg); border-radius:999px; padding:3px 10px; font-size:12.5px; font-weight:600; }
+  .layout { display:grid; grid-template-columns:280px minmax(0,1fr); height:calc(100vh - 59px); }
+  .layout.full { grid-template-columns:minmax(0,1fr); }
+  aside { border-right:1px solid var(--line); background:var(--surface); overflow:auto; }
+  .layout.full aside { display:none; }
+  aside .sh { padding:12px 14px 6px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); display:flex; justify-content:space-between; }
+  aside a { display:block; padding:8px 14px; border-left:3px solid transparent; }
+  aside a:hover { background:var(--panel); }
+  aside a.picked { background:color-mix(in srgb, var(--run) 9%, var(--surface)); border-left-color:var(--run); }
+  aside a .r1 { display:flex; gap:6px; align-items:center; font-size:13px; } aside a .r1 .pill { margin-left:auto; }
+  aside a .r2 { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  main { overflow:auto; padding:20px clamp(16px, 2.5vw, 32px) 60px; }
+  .wrap { display:grid; gap:18px; max-width:1240px; margin:0 auto; }
+  .hero-line { display:flex; flex-wrap:wrap; gap:10px; align-items:center; color:var(--muted); font-size:13px; }
+  /* le plateau */
+  .board { display:grid; grid-template-columns:repeat(4, minmax(150px, 1fr)) minmax(560px, 3fr) minmax(150px, 1fr); gap:10px; overflow-x:auto; padding-bottom:6px; }
+  .col { background:var(--panel); border-radius:12px; padding:8px; min-height:300px; display:flex; flex-direction:column; gap:6px; }
+  .col > h3 { margin:2px 4px 4px; justify-content:space-between; } .col > h3 small { font-weight:500; text-transform:none; letter-spacing:0; }
+  .col.rh { background:color-mix(in srgb, var(--run) 7%, var(--panel)); }
+  .lanes { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; flex:1; }
+  .lane { border-radius:8px; background:color-mix(in srgb, var(--surface) 50%, transparent); padding:4px; display:flex; flex-direction:column; gap:6px; }
+  .lane > small { font-size:10.5px; color:var(--muted); text-align:center; display:block; padding:2px 0 3px; }
+  .tile { background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:7px 9px; font-size:12.5px; display:block; }
+  .tile:hover { border-color:var(--faint); }
+  .tile .k { display:flex; gap:6px; align-items:center; font-size:12px; } .tile .k b { font-size:12.5px; }
+  .tile .k .kind, .tile .k .pill { margin-left:auto; }
+  .tile .tt { margin-top:2px; line-height:1.3; }
+  .tile .ss { font-size:11px; color:var(--muted); margin-top:3px; }
+  .tile.live { border-color:var(--run); box-shadow:0 0 0 1px var(--run) inset; }
+  .tile.esc { border-color:var(--warn); box-shadow:0 0 0 1px var(--warn) inset; }
+  .tile.ghost { opacity:.55; border-style:dashed; }
+  /* rehearsal */
+  .scrub { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; align-items:center; font-size:12.5px; color:var(--muted); }
+  .scrub input { width:100%; }
+  .scrub button { border:1px solid var(--line); background:var(--surface); border-radius:7px; padding:3px 10px; }
+  .split { display:grid; grid-template-columns:minmax(0, 1.5fr) minmax(260px, 1fr); gap:18px; align-items:start; }
+  .side-panel { display:grid; gap:12px; position:sticky; top:0; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px; } .kv span:nth-child(odd) { color:var(--muted); }
+  .node-filter { font-size:12.5px; display:flex; gap:8px; align-items:center; }
+  .node-filter button { border:0; background:none; color:var(--focus); font-size:12px; }
+  .slice-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; }
+  .slice { display:grid; gap:6px; }
+  .slice .h { display:flex; gap:6px; align-items:center; } .slice .h .pill { margin-left:auto; }
+  .stack { display:flex; height:10px; border-radius:4px; overflow:hidden; background:var(--panel); }
+  .stack i { display:block; height:100%; }
+  .kanban { display:grid; grid-template-columns:repeat(6, minmax(160px, 1fr)); gap:10px; overflow-x:auto; }
+  .btn { border:1px solid var(--line); background:var(--surface); border-radius:7px; padding:3px 10px; font-size:12px; }
+  .btn.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  @media (max-width:900px) { .layout { grid-template-columns:1fr; height:auto; } aside { max-height:35vh; } .split { grid-template-columns:1fr; } .chain a span { display:none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div><div class="brand"><b>Ballet</b></div><div class="project">antimurphy ▾</div></div>
+  <nav class="chain" id="chain"></nav>
+  <a class="alert" href="#/rehearsal/TASK-004">⚑ 2</a>
+</header>
+<div class="layout" id="layout"><aside id="side"></aside><main><div class="wrap" id="page"></div></main></div>
+<div class="mock-bar">Maquette <a href="index.html">↩</a><a href="a-regie.html">A Régie</a><a class="on" href="b-plateau.html">B Plateau</a><a href="c-partition.html">C Partition</a></div>
+<script src="shared.js"></script>
+<script>
+let node = '', cursor = null, filter = 'all';
+const route = () => { const [page = 'plateau', id = ''] = location.hash.slice(2).split('/').map(decodeURIComponent); return {page, id}; };
+const CHAIN = [['plateau', 'Plateau', '⌂'], ['backlog', 'Backlog', PROGRAM.nextUp.length], ['workshop', 'Workshop', 1, 'hot'], ['program', 'Programme', PROGRAM.ready.length + PROGRAM.proposed.length],
+  ['rehearsal', 'Rehearsal', 2, 'hot'], ['features', 'Premieres', REHEARSALS.filter(r => r.pr && r.status === 'done').length]];
+
+/* La sidebar suit la section : la liste des objets de cette étape de la chaîne. */
+function side({page, id}) {
+  const a = (href, on, r1, r2) => `<a href="#/${href}" class="${on ? 'picked' : ''}"><div class="r1">${r1}</div><div class="r2">${r2}</div></a>`;
+  if (page === 'workshop') return `<div class="sh">Workshops</div>` + WORKSHOPS.map(w => a('workshop/' + w.id, w.id === id, `<b>${esc(w.id)}</b> ${pill(w.status)}`, `${w.mode} · ${esc(w.title)}`)).join('');
+  if (page === 'features' || page === 'feature') return `<div class="sh">Features</div>` + FEATURES.slice().reverse().map(f => { const s = featureStats(f); return a('feature/' + f.id, f.id === id, `<b>${f.id}</b> <span class="muted">${s.done}/${s.slices}</span> ${pill(s.status)}`, esc(f.title)); }).join('');
+  if (page === 'program' || page === 'backlog') return `<div class="sh">Prêt</div>` + PROGRAM.ready.map(p => a('program', false, `<b>${p.item}</b> <span class="kind">${p.priority}</span>`, esc(p.title))).join('') +
+    `<div class="sh">Proposé</div>` + PROGRAM.proposed.map(p => a('program', false, `<b>${p.item}</b> <span class="badge warn">proposed</span>`, esc(p.title))).join('');
+  const groups = [['En scène', REHEARSALS.filter(r => ['open', 'escalated'].includes(r.status))], ['Plus tôt', REHEARSALS.filter(r => r.status === 'done').reverse()]];
+  return groups.map(([t, rs]) => `<div class="sh">${t}<span>${rs.length}</span></div>` + rs.map(r => a('rehearsal/' + r.id, r.id === id, `<b>${r.id}</b> ${pill(r.status)}`, esc(r.title))).join('')).join('');
+}
+
+function tile(href, k, title, sub = '', cls = '') { return `<a class="tile ${cls}" href="#/${href}"><div class="k">${k}</div><div class="tt">${esc(title)}</div>${sub ? `<div class="ss">${sub}</div>` : ''}</a>`; }
+
+const PAGES = {
+  plateau() {
+    const lanes = {plan: [], dancer: [], script: [], critic: []};
+    for (const r of REHEARSALS.filter(r => ['open', 'escalated'].includes(r.status))) {
+      const a = activeStep(eventsOf(r.id)), lane = r.status === 'escalated' ? 'script' : a.node === 'dancer' ? 'dancer' : a.node === 'critic' ? 'critic' : a.node === 'choreographer' ? 'plan' : 'script';
+      lanes[lane].push(tile('rehearsal/' + r.id, `<b>${r.id}</b>${pill(r.status)}`, r.title, r.status === 'escalated' ? '⚑ Director attendu' : `${esc(a.label)} · ${dur(minutes(a.since))}`, r.status === 'escalated' ? 'esc' : 'live'));
+    }
+    lanes.plan.push(tile('rehearsal/FEAT-006.3', '<b>FEAT-006.3</b><span class="kind">à venir</span>', 'Tie-break and refusal messages', 'slice suivante de la session #55', 'ghost'));
+    const today = REHEARSALS.filter(r => r.status === 'done' && r.end > '2026-11-20');
+    return `<div><h1>Plateau</h1><div class="hero-line">Toute la chaîne d'antimurphy, chaque élément là où il en est · en direct</div></div>
+      <div class="board">
+        <div class="col"><h3>Backlog <small>Next up</small></h3>${PROGRAM.nextUp.filter(p => !p.state).map(p => tile('backlog', `<b>${p.id}</b><span class="kind">${p.kind}</span>`, p.title)).join('')}</div>
+        <div class="col"><h3>Workshop</h3>${WORKSHOPS.filter(w => w.status === 'open').map(w => tile('workshop/' + w.id, `<b>${w.id}</b>${pill('open')}`, w.title, `${w.mode} · Choreographer consulté, tour 1/3`, 'live')).join('')}</div>
+        <div class="col"><h3>Proposé <small>Director</small></h3>${PROGRAM.proposed.map(p => tile('program', `<b>${p.item}</b><span class="badge warn">${p.decided_alone} seul</span>`, p.title, 'à accepter')).join('')}</div>
+        <div class="col"><h3>Programme <small>ready</small></h3>${PROGRAM.ready.map((p, i) => tile('program', `<span class="faint">${i + 1}</span><b>${p.item}</b><span class="kind">${p.type} · ${p.priority}</span>`, p.title, p.mode)).join('')}</div>
+        <div class="col rh"><h3>Rehearsal <small>${lanes.plan.length + lanes.dancer.length + lanes.script.length + lanes.critic.length - 1} en scène</small></h3>
+          <div class="lanes">${[['plan', '◆ Plan'], ['dancer', '◆ Dancer'], ['script', '⚙ Script / ⚑'], ['critic', '◆ Critic']].map(([k, l]) => `<div class="lane"><small>${l}</small>${lanes[k].join('')}</div>`).join('')}</div></div>
+        <div class="col"><h3>Premiere <small>aujourd'hui</small></h3>${today.map(r => tile('rehearsal/' + r.id, `<b>${r.id}</b>${pill('done')}`, r.title, `PR #${r.pr} · ${clock(r.end)}`)).join('')}</div>
+      </div>
+      <div><h3>Ce qui tourne</h3><div style="display:grid;gap:12px">${SESSIONS.map(s => `<a class="card" href="#/${s.kind}/${s.current}"><div class="hero-line"><b style="color:var(--fg)">${s.current}</b><span>${esc(s.title)}</span><span>${s.mode}</span>${pill(s.escalated ? 'escalated' : 'open')}</div>${diagram(s.kind, eventsOf(s.current), {compact: true})}</a>`).join('')}</div>${legend()}</div>`;
+  },
+  rehearsal(id) { return performance('rehearsal', id); },
+  workshop(id) { return performance('workshop', id || 'BUG-002'); },
+  backlog() { return PAGES.program(); },
+  program() {
+    const cols = [['proposed', 'proposed', PROGRAM.proposed.map(p => tile('program', `<b>${p.item}</b>`, p.title, `<button class="btn primary">Accepter</button>`))],
+      ['ready', 'ready · ordre de jeu', PROGRAM.ready.map((p, i) => tile('program', `<span class="faint">${i + 1}</span><b>${p.item}</b><span class="kind">${p.priority}</span>`, p.title, `${p.type} · ${p.mode} · ~${dur(p.estimate)}`))],
+      ['in-rehearsal', 'in-rehearsal', ['#55', '#58'].map(x => tile('rehearsal/FEAT-006.2', `<b>${x}</b>${pill('open')}`, x === '#55' ? 'FEAT-006 · Consume a stock item' : 'FEAT-006.2 · FEFO', '', 'live'))],
+      ['plan-review', 'plan-review', []], ['escalated', 'escalated', [tile('rehearsal/TASK-004', '<b>#56</b>', 'TASK-004 · Cache cargo-mutants in CI', 'preuve rouge ×3', 'esc')]],
+      ['done', 'done · 7 derniers jours', REHEARSALS.filter(r => r.pr && r.status === 'done').slice(-6).reverse().map(r => tile('rehearsal/' + r.id, `<b>#${r.issue}</b>`, r.title))]];
+    return `<div><h1>Programme</h1><div class="hero-line">Les issues GitHub par <b>Ballet status</b> · la colonne <b>ready</b> est la file, dans l'ordre où l'observateur la jouera</div></div>
+      <div class="kanban">${cols.map(([k, t, tiles]) => `<div class="col"><h3>${t}<small>${tiles.length}</small></h3>${tiles.join('') || '<p class="muted" style="font-size:12px;margin:4px">vide</p>'}</div>`).join('')}</div>
+      <div><h3>Backlog · Next up</h3><table class="list">${PROGRAM.nextUp.map(p => `<tr><td><b>${p.id}</b></td><td><span class="kind">${p.kind}</span></td><td>${esc(p.title)}</td><td>${p.state ? pill('open') : '<button class="btn">Lancer un Workshop autopilot</button>'}</td></tr>`).join('')}</table></div>`;
+  },
+  features() {
+    return `<h1>Premieres par feature</h1><div class="slice-row">${FEATURES.slice().reverse().map(f => { const s = featureStats(f);
+      return `<a class="card slice" href="#/feature/${f.id}"><div class="h"><b>${f.id}</b>${pill(s.status)}</div><div>${esc(f.title)}</div>
+        <div class="stack">${sliceOf(f).map(r => `<i style="flex:1;background:var(--${r.status === 'done' ? 'ok' : r.status === 'open' ? 'run' : 'line'});margin-right:2px"></i>`).join('')}</div>
+        <div class="muted" style="font-size:12px">${s.done}/${s.slices} slices · ${dur(s.wall)} · ${s.rt} retours · ${s.lines} lignes</div></a>`; }).join('')}</div>`;
+  },
+  feature(id) {
+    const f = featureOf(id), s = featureStats(f), slices = sliceOf(f), w = f.workshop && workshop(f.workshop), plan = REHEARSALS.find(r => r.feature === id && r.planning);
+    const parts = r => { const e = eventsOf(r.id), sp = split(e), crit = e.filter(x => x.event === 'message' && x.detail.from === 'critic').length * 2, tot = minutes(r.start || NOW, r.end || NOW) || 1;
+      return [['dancer', sp.agent - crit], ['script', sp.script], ['critic', crit], ['line', Math.max(0, tot - sp.agent - sp.script)]]; };
+    const step = (label, href, cls, body) => `<a class="card slice" href="${href}" ${cls ? `style="border-color:var(--${cls})"` : ''}><div class="h"><b>${label}</b></div>${body}</a>`;
+    return `<div class="hero-line"><a href="#/features">Premieres</a> / ${id}</div><div><h1><span class="muted">${id}</span> ${esc(f.title)}</h1><div class="hero-line">${pill(s.status)}<span>${f.cap}</span><span>#${f.issue}</span><span>${f.mode}</span></div></div>
+      <div class="metrics"><div class="metric"><small>Slices livrées</small><b>${s.done}<em> / ${s.slices}</em></b></div><div class="metric"><small>Cycle complet</small><b>${dur(s.wall)}</b></div><div class="metric"><small>Rejets du Critic</small><b>${s.rejected}</b></div>
+        <div class="metric"><small>Lignes</small><b>${s.lines}</b></div><div class="metric"><small>Agents</small><b>${dur(s.agent)}</b></div><div class="metric"><small>Script</small><b>${dur(s.script)}</b></div><div class="metric"><small>Director</small><b>${s.director}</b></div></div>
+      <div><h3>Le parcours de la feature</h3><div class="slice-row">
+        ${w ? step('Workshop', '#/workshop/' + w.id, 'dramaturg', `<div class="muted" style="font-size:12px">${w.mode} · ${w.decided_alone} décisions seul · ${dur(minutes(w.start, w.end))}</div>`) : step('Workshop', '#/workshop', '', '<div class="muted" style="font-size:12px">assisted · non journalisé</div>')}
+        ${plan ? step('Plan', '#/rehearsal/' + plan.id, 'choreographer', `<div class="muted" style="font-size:12px">${slices.length} slices · ${dur(minutes(plan.start, plan.end))}</div>`) : ''}
+        ${slices.map(r => `<a class="card slice" href="#/rehearsal/${r.id}"><div class="h"><b>${r.id}</b>${pill(r.status)}</div><div style="font-size:12.5px">${esc(r.title)}</div>
+          ${r.start ? `<div class="stack">${parts(r).map(([c, m]) => `<i style="flex:${Math.max(0, m)};background:var(--${c})" title="${c} ${m} min"></i>`).join('')}</div>
+          <div class="muted" style="font-size:11.5px">${dur(minutes(r.start, r.end || NOW))} · ${r.rt} retour(s) · ${r.size} lignes${r.pr ? ' · PR #' + r.pr : ''}</div>` : '<div class="muted" style="font-size:12px">en attente dans la session</div>'}</a>`).join('')}
+      </div><div class="legend"><span><i style="background:var(--dancer);border:0"></i>Dancer</span><span><i style="background:var(--script);border:0"></i>script (preuve, mutation)</span><span><i style="background:var(--critic);border:0"></i>Critic</span><span><i style="background:var(--line);border:0"></i>attente / Conductor</span></div></div>`;
+  },
+};
+
+/* Une représentation : le diagramme en grand, un curseur pour la rejouer, le fil filtré par le nœud cliqué. */
+function performance(kind, id) {
+  const all = eventsOf(id), upto = cursor ?? all.length - 1, shown = all.slice(0, upto + 1);
+  const item = kind === 'workshop' ? workshop(id) : rehearsal(id);
+  if (item.untracked) return `<h1>${esc(item.title)}</h1><div class="callout info"><b>Assisted</b> · pas de journal pour ce Workshop.</div>`;
+  const a = activeStep(shown), live = item.status !== 'done';
+  return `<div><h1><span class="muted">${esc(id)}</span> ${esc(item.title)}</h1><div class="hero-line">${pill(item.status)}<span>${kind === 'workshop' ? 'Workshop' : 'Rehearsal'}</span>${item.issue ? `<span>#${item.issue}</span>` : ''}${item.pr ? `<span>PR #${item.pr}</span>` : ''}</div></div>
+    ${item.status === 'escalated' ? `<div class="callout"><b>Escalade</b> · ${esc(item.escalation)} <button class="btn primary" style="margin-left:8px">Décider</button></div>` : ''}
+    <div class="card">${diagram(kind, shown, {selectable: true, selected: node})}${legend()}
+      <div class="scrub" style="margin-top:12px"><button data-play>▶ Rejouer</button><input type="range" min="0" max="${all.length - 1}" value="${upto}" data-scrub>
+      <span class="num">${clock(all[upto].at)} · ${upto + 1}/${all.length}${cursor === null && live ? ' · <b style="color:var(--run)">direct</b>' : ''}</span></div></div>
+    <div class="split"><div><h3>Fil <span class="tabs">${[['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([k, l]) => `<button data-filter="${k}" aria-pressed="${filter === k}">${l}</button>`).join('')}</span></h3>
+      ${node ? `<div class="node-filter">Filtré sur le nœud <b>${node}</b><button data-node-clear>tout montrer</button></div>` : '<div class="node-filter muted">Clique un nœud du diagramme pour ne voir que ses événements.</div>'}
+      ${thread(shown, {filter, kind, node})}</div>
+      <div class="side-panel"><div class="card"><h3>Maintenant</h3>${a ? `<div style="font-size:15px"><b>${esc(a.label)}</b></div><div class="muted">${a.kind === 'agent' ? 'agent' : a.kind === 'human' ? 'humain' : 'étape déterministe'} · depuis ${dur(minutes(a.since, cursor === null ? NOW : all[upto].at))}</div>` : '<div class="muted">terminé</div>'}</div>
+        <div class="card"><h3>Chiffres</h3><div class="kv">${kind === 'rehearsal' ? `<span>Allers-retours</span><span>${item.rt} / ${PROJECT.limits.max_round_trips}</span><span>Diff</span><span>${item.size} / ${PROJECT.limits.max_diff_lines}</span><span>Mutations</span><span>${item.mut}</span>` : `<span>Tours</span><span>${item.rounds} / ${PROJECT.limits.max_exchange_rounds}</span><span>Décidé seul</span><span>${item.decided_alone ?? '—'}</span>`}
+          <span>Agents</span><span>${dur(split(shown).agent)}</span><span>Script</span><span>${dur(split(shown).script)}</span></div></div>
+        <div class="card"><h3>Distribution</h3><div class="kv">${Object.entries(PROJECT.cast).map(([r, [c, m]]) => `<span>${role(r)}</span><span>${c} ${m}</span>`).join('')}</div></div></div></div>`;
+}
+
+let timer = null;
+function render() {
+  const rt = route();
+  document.getElementById('chain').innerHTML = CHAIN.map(([k, l, n, cls], i) => `${i ? '<span class="arrow">→</span>' : ''}<a href="#/${k}" class="${cls || ''} ${rt.page === k || (k === 'features' && rt.page === 'feature') ? 'on' : ''}"><b>${n}</b><span>${l}</span></a>`).join('');
+  document.getElementById('layout').classList.toggle('full', rt.page === 'plateau');
+  document.getElementById('side').innerHTML = side(rt);
+  document.getElementById('page').innerHTML = (PAGES[rt.page] || PAGES.plateau)(rt.id);
+}
+document.addEventListener('click', e => {
+  const n = e.target.closest('[data-node]'); if (n) { node = node === n.dataset.node ? '' : n.dataset.node; render(); }
+  if (e.target.closest('[data-node-clear]')) { node = ''; render(); }
+  const f = e.target.closest('[data-filter]'); if (f) { filter = f.dataset.filter; render(); }
+  if (e.target.closest('[data-play]')) {
+    clearInterval(timer); const max = +document.querySelector('[data-scrub]').max; cursor = 0;
+    timer = setInterval(() => { cursor++; if (cursor >= max) { clearInterval(timer); cursor = null; } render(); }, 280);
+  }
+});
+document.addEventListener('change', e => { if (e.target.matches('[data-scrub]')) { clearInterval(timer); const v = +e.target.value; cursor = v === +e.target.max ? null : v; render(); } });
+addEventListener('hashchange', () => { node = ''; cursor = null; clearInterval(timer); render(); });
+render();
+</script>
+</body>
+</html>

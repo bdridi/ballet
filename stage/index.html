@@ -11,6 +11,8 @@
     --open:#15803d; --open-bg:#dcfce7; --escalated:#b45309; --escalated-bg:#fef3c7; --done:#6b7280; --done-bg:#eef0f3;
     --bad:#b91c1c; --bad-bg:#fee2e2;
     --dramaturg:#9333ea; --choreographer:#0d9488; --dancer:#2563eb; --critic:#ea580c; --conductor:#52525b; --director:#be123c;
+    --a-running:#4f46e5; --a-prog:#a16207; --a-done:#047857;
+    --sky:#0369a1; --violet:#7c3aed; --blue:#2563eb; --red:#b91c1c; --teal:#0f766e; --orange:#c2410c; --amber:#a16207; --slate:#475569;
     --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
   }
   @media (prefers-color-scheme: dark) {
@@ -20,6 +22,8 @@
       --open:#4ade80; --open-bg:#14301f; --escalated:#fbbf24; --escalated-bg:#352a0e; --done:#9ca3af; --done-bg:#24262b;
       --bad:#f87171; --bad-bg:#3a1717;
       --dramaturg:#c084fc; --choreographer:#2dd4bf; --dancer:#60a5fa; --critic:#fb923c; --conductor:#a1a1aa; --director:#fb7185;
+      --a-running:#818cf8; --a-prog:#facc15; --a-done:#34d399;
+      --sky:#38bdf8; --violet:#a78bfa; --blue:#60a5fa; --red:#f87171; --teal:#2dd4bf; --orange:#fb923c; --amber:#fbbf24; --slate:#94a3b8;
       --shadow:none;
     }
   }
@@ -47,23 +51,44 @@
   .project + .project { margin-top:20px; }
   .project-head { display:flex; align-items:center; gap:8px; margin:4px 4px 8px; }
   .project-head h2 { font-size:13px; margin:0; letter-spacing:.02em; }
-  .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:0 7px; }
+  .tag { font-size:11px; font-weight:600; color:var(--c, var(--muted)); border:1px solid color-mix(in srgb, var(--c, var(--muted)) 30%, transparent);
+    background:color-mix(in srgb, var(--c, var(--muted)) 12%, transparent); border-radius:999px; padding:0 7px; white-space:nowrap; }
+  .c-sky { --c:var(--sky); } .c-violet { --c:var(--violet); } .c-blue { --c:var(--blue); } .c-red { --c:var(--red); }
+  .c-teal { --c:var(--teal); } .c-orange { --c:var(--orange); } .c-amber { --c:var(--amber); } .c-slate { --c:var(--slate); }
   .stopped { margin:0 4px 8px; padding:8px 10px; border-radius:8px; background:var(--escalated-bg); color:var(--escalated); font-size:12px; }
   .card-link { display:block; text-decoration:none; color:inherit; padding:10px 12px; border:1px solid transparent; border-radius:10px; margin-bottom:4px; }
   .card-link:hover { background:var(--panel); }
-  .card-link.picked { background:var(--pick); border-color:var(--pick-line); }
+  .card-link.picked { background:color-mix(in srgb, var(--accent) 11%, var(--surface)); border-color:color-mix(in srgb, var(--accent) 45%, transparent); }
+  .card-link.ghost { border:1px dashed var(--line); background:transparent; cursor:default; }
+  .card-link.ghost:hover { background:transparent; }
+  .side-block { --accent:var(--a-running); margin:0 0 14px; padding:8px 8px 4px; border:1px solid var(--line);
+    border-left:3px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+  .side-block.program { --accent:var(--a-prog); }
+  .side-block.finished { --accent:var(--a-done); background:var(--surface); }
+  .side-head { display:flex; align-items:center; gap:8px; width:calc(100% - 8px); margin:2px 4px 8px; padding:0; border:0; background:none; cursor:pointer; text-align:left;
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); }
+  .side-head::before { content:"▾"; font-size:14px; width:12px; transition:transform .12s; }
+  .side-block.folded .side-head { margin-bottom:4px; }
+  .side-block.folded .side-head::before { transform:rotate(-90deg); }
+  .side-block.folded .side-body { display:none; }
+  .side-head i { width:8px; height:8px; border-radius:50%; background:var(--accent); }
+  .side-head .count { margin-left:auto; min-width:20px; text-align:center; padding:0 6px; border-radius:999px; font-size:11px;
+    color:var(--accent); background:color-mix(in srgb, var(--accent) 15%, transparent); }
+  .side-empty { margin:0 4px 8px; color:var(--muted); font-size:12px; }
+  .side-block .group-label { display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:0; font-size:12px; color:var(--muted); margin:8px 4px 4px; }
+  .side-block .group-label b { color:var(--fg); }
   .card-row { display:flex; align-items:center; gap:8px; }
-  .card-row b { font-size:13px; font-variant-numeric:tabular-nums; }
+  .card-row b { font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .card-title { color:var(--fg); font-size:13px; margin:2px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card-meta { color:var(--muted); font-size:12px; display:flex; gap:8px; }
-  .card-link.is-done { opacity:.72; }
   .group-label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); margin:12px 4px 4px; }
 
   /* --- pastilles --- */
   .pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; }
-  .pill.open { color:var(--open); background:var(--open-bg); }
+  .pill.open { color:var(--a-running); background:color-mix(in srgb, var(--a-running) 14%, transparent); }
   .pill.escalated { color:var(--escalated); background:var(--escalated-bg); }
   .pill.done { color:var(--done); background:var(--done-bg); }
+  .pill.todo { color:var(--muted); background:var(--panel); }
   .role { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--r); }
   .role::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--r); }
   .r-dramaturg { --r:var(--dramaturg); } .r-choreographer { --r:var(--choreographer); } .r-dancer { --r:var(--dancer); }
@@ -71,16 +96,6 @@
   .badge { font-size:11px; font-weight:600; padding:0 6px; border-radius:4px; background:var(--panel); color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
   .badge.ok { background:var(--open-bg); color:var(--open); } .badge.warn { background:var(--escalated-bg); color:var(--escalated); }
   .badge.bad { background:var(--bad-bg); color:var(--bad); }
-
-  /* --- la file --- */
-  .queue { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:0 4px 8px; }
-  .q { font-size:11px; font-variant-numeric:tabular-nums; padding:2px 7px; border-radius:6px; border:1px solid var(--line); color:var(--muted); background:var(--surface); white-space:nowrap; }
-  .q.done { color:var(--done); background:var(--done-bg); border-color:transparent; }
-  .q.done::before { content:"✓ "; }
-  .q.now { color:var(--fg); border-color:var(--focus); font-weight:600; }
-  .q.now.escalated { border-color:var(--escalated); color:var(--escalated); }
-  .q.next { border-style:dashed; }
-  .q-arrow { color:var(--faint); font-size:11px; }
 
   /* --- détail --- */
   section#detail { overflow:auto; padding:24px clamp(16px, 3vw, 40px) 48px; }
@@ -194,6 +209,8 @@ const TALK = new Set(['message', 'handoff', 'nudge', 'handover', 'director-decis
 let data = null, version = '', picked = decodeURIComponent(location.hash.slice(1)), shown = '';
 let filter = remembered('ballet-stage-filter') || 'all';
 const opened = new Set();
+const folds = new Set((remembered('ballet-stage-folded') || '').split('\n').filter(Boolean));
+const isFolded = (project, kind) => folds.has(`${project}|${kind}`);
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[c]));
@@ -266,9 +283,9 @@ function phases(r){
   });
 }
 
-function sessionEntries(project, session){
+function sessionEntries(project, session, withDone = false){
   const states = Object.fromEntries(project.rehearsals.map(s => [s.id, s]));
-  const played = (session.played || []).filter(entry => states[entry.rehearsal]?.status !== 'done').map(entry => ({
+  const played = (session.played || []).filter(entry => withDone || states[entry.rehearsal]?.status !== 'done').map(entry => ({
     kind:'played', item:entry.item, id:entry.rehearsal, state:states[entry.rehearsal],
     now:entry.rehearsal === session.current, title:cleanTitle(project.titles?.[entry.rehearsal], entry.rehearsal),
   }));
@@ -278,47 +295,82 @@ function sessionEntries(project, session){
   return [...played, ...next];
 }
 
-const TYPE_LETTER = {Feature:'F', Bug:'B', Task:'T'};
-
-/* --- la colonne : chaque projet, sa file, ses Rehearsals --- */
-
 function renderList(){
   $('#list').innerHTML = data.projects.map(project => {
     const all = rehearsals(project), live = all.filter(r => r.state.status !== 'done'), past = all.filter(r => r.state.status === 'done');
     const queue = project.queue || {sessions:[], program:[]};
-    const stopped = project.queue_error
-      ? `<div class="stopped">Programme indisponible : ${esc(project.queue_error)}</div>` : '';
     return `<div class="project">
       <div class="project-head"><h2>${esc(project.name)}</h2></div>
-      ${(queue.sessions || []).map(session => sessionStrip(project, session)).join('')}${programStrip(queue.program || [])}${stopped}
-      ${live.map(card).join('')}
-      ${past.length ? `<div class="group-label">Terminées</div>${past.map(card).join('')}` : ''}
-      ${all.length ? '' : '<p class="empty">Aucune Rehearsal.</p>'}
+      ${runningBlock(project, all, live, sessions(project, all))}${programBlock(project, queue.program || [])}${finishedBlock(project, past)}
     </div>`;
   }).join('');
 }
 
-/* Une session de Conductor : l'élément confié, ce qui joue, ses slices à venir. */
-function sessionStrip(project, session){
-  const entries = sessionEntries(project, session);
-  const chips = entries.map(e => {
-    const cls = e.kind === 'next' ? 'next' : e.now ? `now ${e.state?.status || ''}` : e.state?.status === 'done' ? 'done' : '';
-    return `<span class="q ${cls}" title="${esc(e.title || e.item)}">${esc(e.id || e.item)}</span>`;
-  }).join('<span class="q-arrow">›</span>');
-  return `<div class="group-label">Session ${esc(session.item)}${session.mode ? ` <span class="tag">${esc(session.mode)}</span>` : ''}</div>
-    <div class="queue" aria-label="Session">${chips}</div>`;
+const TAG_COLOR = {assisted:'sky', autopilot:'violet', Feature:'blue', Bug:'red', Task:'teal', Urgent:'red', High:'orange', Medium:'amber', Low:'slate'};
+const tag = (label, key = label) => `<span class="tag c-${TAG_COLOR[key] || 'slate'}">${esc(label)}</span>`;
+const modeTag = mode => mode ? tag(mode) : '';
+
+/* La Rehearsal qui joue un élément de session ; une planification absorbée par sa slice y mène aussi. */
+const playing = (all, id) => all.find(r => r.state.id === id || r.planning?.id === id);
+
+/* Les sessions de Conductor ouvertes d'un projet (il peut y en avoir plusieurs), chacune avec sa Rehearsal en cours. */
+function sessions(project, all){
+  return (project.queue?.sessions || []).map(session => {
+    const entries = sessionEntries(project, session, true), current = playing(all, session.current) || null;
+    const first = playing(all, session.played?.[0]?.rehearsal);
+    return {
+      key:`${project.name}/session:${session.item}`, project, session, entries, current, all,
+      title:cleanTitle(project.queue_titles?.[session.item]) || first?.title || '',
+      done:entries.filter(e => e.kind === 'played' && e.state?.status === 'done').length, total:entries.length,
+      status:current?.state.status === 'escalated' ? 'escalated' : 'open',
+    };
+  });
 }
 
-/* Le programme GitHub : ce qui est prêt, par priorité puis ancienneté. */
-function programStrip(program){
-  if (!program.length) return '';
-  return `<div class="group-label">À jouer sur GitHub</div><div class="queue" aria-label="Programme">${program.map(p =>
-    `<span class="q next" title="${esc(`${p.type} · ${p.priority || 'sans priorité'} · ${p.title}`)}">${TYPE_LETTER[p.type] || '?'} ${esc(p.item)}${p.priority ? ` · ${esc(p.priority)}` : ''}</span>`).join('')}</div>`;
+const link = key => '#' + encodeURIComponent(key);
+
+/* Un bloc se plie ; le choix est gardé par projet, d'un rechargement à l'autre. */
+function sideBlock(project, kind, title, count, body){
+  const folded = isFolded(project.name, kind);
+  return `<div class="side-block ${kind} ${folded ? 'folded' : ''}"><button type="button" class="side-head" data-fold="${esc(project.name + '|' + kind)}" aria-expanded="${!folded}"><i></i>${title}<span class="count">${count}</span></button>
+    <div class="side-body">${body}</div></div>`;
+}
+
+/* Performances en cours : une carte par session de Conductor (sa page liste ses slices) ; puis ce qui joue hors session. */
+function runningBlock(project, all, live, running){
+  const inSession = new Set(running.flatMap(v => v.entries.map(e => playing(all, e.id)?.key)));
+  const cards = running.map(sessionCard).join('');
+  const alone = live.filter(r => !inSession.has(r.key));
+  const loose = alone.length ? `<div class="group-label">Hors session</div>${alone.map(card).join('')}` : '';
+  return sideBlock(project, 'running', 'Performances en cours', running.length + alone.length, cards + loose || '<p class="side-empty">Aucune performance en cours.</p>');
+}
+
+function sessionCard(v){
+  const s = v.session, inside = v.entries.some(e => playing(v.all, e.id)?.key === picked);
+  return `<a href="${link(v.key)}" class="card-link ${v.key === picked || inside ? 'picked' : ''}">
+    <div class="card-row"><b>${esc(s.item)}</b>${modeTag(s.mode)}<span style="margin-left:auto">${pill(v.status)}</span></div>
+    <div class="card-title">${esc(v.title)}</div>
+    <div class="card-meta"><span>${v.done} / ${v.total} slices jouées</span>${v.current?.current ? role(v.current.current) : ''}<span>${esc(ago(v.current?.last))}</span></div>
+  </a>`;
+}
+
+/* Programme : ce qui est prêt sur GitHub, par priorité puis ancienneté. */
+function programBlock(project, program){
+  const rows = program.map(p => `<div class="card-link ghost" title="${esc(p.title)}">
+    <div class="card-row">${tag(p.type)}<b class="mono">${esc(p.item)}</b>${p.priority ? `<span style="margin-left:auto">${tag(p.priority)}</span>` : ''}</div>
+    <div class="card-title">${esc(cleanTitle(p.title))}</div></div>`).join('');
+  const error = project.queue_error ? `<div class="stopped">Programme indisponible : ${esc(project.queue_error)}</div>` : '';
+  const empty = project.queue_error ? '' : '<p class="side-empty">Aucun élément prêt.</p>';
+  return sideBlock(project, 'program', 'Programme', program.length, error + (rows || empty));
+}
+
+function finishedBlock(project, past){
+  return sideBlock(project, 'finished', 'Terminées', past.length, past.map(card).join('') || '<p class="side-empty">Aucune Rehearsal terminée.</p>');
 }
 
 function card(r){
   const s = r.state;
-  return `<a href="#${esc(r.key)}" class="card-link ${r.key === picked ? 'picked' : ''} ${s.status === 'done' ? 'is-done' : ''}">
+  return `<a href="#${esc(r.key)}" class="card-link ${r.key === picked ? 'picked' : ''}">
     <div class="card-row"><b>${esc(s.id)}</b>${pill(s.status)}${r.current ? `<span style="margin-left:auto">${role(r.current)}</span>` : ''}</div>
     <div class="card-title">${esc(r.title || (s.issue ? '#' + s.issue : ''))}</div>
     <div class="card-meta">${s.issue ? `<span>#${esc(s.issue)}</span>` : ''}${s.pull_request ? `<span>PR #${esc(s.pull_request)}</span>` : ''}<span>${esc(ago(r.last))}</span></div>
@@ -328,15 +380,34 @@ function card(r){
 /* --- le détail --- */
 
 function renderDetail(){
-  const r = data.projects.flatMap(rehearsals).find(r => r.key === picked);
+  const projects = data.projects, r = projects.flatMap(rehearsals).find(r => r.key === picked);
+  const v = r ? null : projects.flatMap(p => sessions(p, rehearsals(p))).find(v => v.key === picked);
   const box = $('#detail');
-  if (!r){ box.innerHTML = '<p class="empty">Choisis une Rehearsal.</p>'; return; }
-  /* Une Rehearsal qu'on ouvre se lit d'en haut ; en bas du fil, on suit ce qui arrive. */
-  const fresh = shown !== r.key, atBottom = box.scrollTop > 0 && box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  if (!r && !v){ box.innerHTML = '<p class="empty">Choisis une Rehearsal.</p>'; return; }
+  /* Ce qu'on ouvre se lit d'en haut ; en bas du fil, on suit ce qui arrive. */
+  const key = (r || v).key, fresh = shown !== key, atBottom = box.scrollTop > 0 && box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   const scroll = box.scrollTop;
-  box.innerHTML = `<div class="wrap">${hero(r)}${callout(r)}${stepper(r)}${metrics(r)}${cast(r)}${queueBlock(r)}${thread(r)}</div>`;
+  box.innerHTML = `<div class="wrap">${r ? `${hero(r)}${callout(r)}${stepper(r)}${metrics(r)}${cast(r)}${queueBlock(r)}${thread(r)}` : sessionPage(v)}</div>`;
   box.scrollTop = fresh ? 0 : atBottom ? box.scrollHeight : scroll;
-  shown = r.key;
+  shown = key;
+}
+
+/* Une session : où elle en est, ses Rehearsals dans l'ordre, ce que doit faire le Director si elle est arrêtée. */
+function sessionPage(v){
+  const s = v.session, cur = v.current, rs = v.entries.map(e => playing(v.all, e.id)).filter(Boolean);
+  const events = rs.flatMap(r => r.events), first = events.map(e => e.at).sort()[0] || '';
+  const trips = rs.reduce((sum, r) => sum + (r.state.round_trips || 0), 0), escalations = events.filter(e => e.event === 'escalate').length;
+  const bits = [pill(v.status), modeTag(s.mode), cur?.current ? `en main : ${role(cur.current)}` : '', cur ? `joue ${esc(cur.state.id)}` : 'aucune Rehearsal en cours'].filter(Boolean);
+  return `<div class="hero"><h1><span class="id">Session ${esc(s.item)}</span>${esc(v.title)}</h1><div class="hero-line">${bits.join('<span class="sep">·</span>')}</div></div>
+    ${cur ? callout(cur) + stepper(cur) : ''}
+    <div class="grid">
+      <div class="metric"><small>Jouées</small><b>${v.done}<em> / ${v.total}</em></b></div>
+      <div class="metric"><small>À venir</small><b>${(s.items || []).length}</b></div>
+      <div class="metric"><small>Allers-retours Dancer ↔ Critic</small><b>${trips}</b></div>
+      <div class="metric"><small>Escalades</small><b>${escalations}</b></div>
+      <div class="metric"><small>Durée</small><b>${first ? span(first, new Date().toISOString()) : '—'}</b></div>
+    </div>
+    ${sessionList(v)}`;
 }
 
 function hero(r){
@@ -398,16 +469,21 @@ function cast(r){
 }
 
 function queueBlock(r){
-  const session = (r.project.queue?.sessions || []).find(s => s.current === r.state.id || (s.played || []).some(e => e.rehearsal === r.state.id));
-  if (!session) return '';
-  const entries = sessionEntries(r.project, session);
-  if (entries.length < 2) return '';
-  return `<div class="block"><h3>Session ${esc(session.item)}${session.mode ? ` <span class="tag">${esc(session.mode)}</span>` : ''}</h3><div class="qlist">${entries.map((e, i) => {
-    const status = e.kind === 'next' ? '<span class="muted">à venir</span>' : e.state ? pill(e.state.status) : '';
-    const inner = `<span class="n">${i + 1}</span><b class="mono">${esc(e.id || e.item)}</b>
-      <span class="t">${esc(e.title || '')}${e.id && e.item !== '#' + (e.state?.issue || '') ? ` <span class="muted">← ${esc(e.item)}</span>` : ''}</span>${status}`;
-    return e.id ? `<a class="qrow ${e.now ? 'now' : ''}" href="#${esc(r.project.name + '/' + e.id)}">${inner}</a>` : `<div class="qrow">${inner}</div>`;
-  }).join('')}</div></div>`;
+  const v = sessions(r.project, rehearsals(r.project)).find(v => v.entries.some(e => playing(v.all, e.id)?.key === r.key));
+  return v ? sessionList(v, true) : '';
+}
+
+/* Les Rehearsals d'une session dans l'ordre ; `linked` : le titre mène à la page de la session. */
+function sessionList(v, linked = false){
+  const name = `Session ${esc(v.session.item)}`;
+  const rows = v.entries.map((e, i) => {
+    const r = e.kind === 'played' ? playing(v.all, e.id) : null;
+    const status = e.kind === 'next' ? '<span class="muted">à venir</span>' : r ? pill(r.state.status) : '';
+    const inner = `<span class="n">${i + 1}</span><b class="mono">${esc(r?.state.id || e.item)}</b>
+      <span class="t">${esc(r?.title || e.title || '')}${r && e.item !== '#' + (r.state.issue || '') ? ` <span class="muted">← ${esc(e.item)}</span>` : ''}</span>${status}`;
+    return r ? `<a class="qrow ${e.now ? 'now' : ''}" href="#${esc(r.key)}">${inner}</a>` : `<div class="qrow">${inner}</div>`;
+  }).join('');
+  return `<div class="block"><h3>${linked ? `<a href="${link(v.key)}" style="color:inherit">${name}</a>` : name} ${modeTag(v.session.mode)}</h3><div class="qlist">${rows}</div></div>`;
 }
 
 /* --- le fil : les échanges entre rôles, et ce que le script a fait --- */
@@ -502,7 +578,8 @@ function text(t, key, lines){
 function render(){ if (data){ renderList(); renderDetail(); } }
 
 document.addEventListener('click', event => {
-  const toggle = event.target.closest('[data-open]'), tab = event.target.closest('[data-filter]');
+  const toggle = event.target.closest('[data-open]'), tab = event.target.closest('[data-filter]'), fold = event.target.closest('[data-fold]');
+  if (fold){ const key = fold.dataset.fold; folds.has(key) ? folds.delete(key) : folds.add(key); remember('ballet-stage-folded', [...folds].join('\n')); renderList(); }
   if (toggle){ const key = toggle.dataset.open; opened.has(key) ? opened.delete(key) : opened.add(key); renderDetail(); }
   if (tab){ filter = tab.dataset.filter; remember('ballet-stage-filter', filter); renderDetail(); }
 });
@@ -516,8 +593,9 @@ async function poll(){
     $('#live-text').textContent = 'en direct · ' + new Date().toLocaleTimeString('fr-FR');
     if (!answer.unchanged){
       version = answer.version; data = answer;
-      if (!data.projects.flatMap(rehearsals).some(r => r.key === picked)){
-        const first = data.projects.flatMap(rehearsals)[0];
+      const keys = data.projects.flatMap(p => [...rehearsals(p).map(r => r.key), ...sessions(p, rehearsals(p)).map(v => v.key)]);
+      if (!keys.includes(picked)){
+        const first = data.projects.flatMap(p => sessions(p, rehearsals(p)))[0] || data.projects.flatMap(rehearsals)[0];
         picked = first ? first.key : '';
       }
       render();

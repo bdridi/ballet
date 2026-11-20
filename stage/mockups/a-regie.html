@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scène · A Régie</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* A — La Régie : la v1 qui grandit. Une sidebar de sélection à gauche, une page par objet à droite. */
+  .top { height:52px; display:flex; align-items:center; gap:14px; padding:0 18px; border-bottom:1px solid var(--line); background:var(--surface); position:sticky; top:0; z-index:5; }
+  .brand b { font-size:16px; } .brand span { color:var(--muted); margin-left:6px; }
+  .project { border:1px solid var(--line); border-radius:8px; padding:3px 10px; background:var(--bg); font-size:13px; }
+  .top nav { display:flex; gap:2px; margin-left:12px; }
+  .top nav a { padding:5px 10px; border-radius:7px; color:var(--muted); font-size:13px; }
+  .top nav a.on { background:var(--panel); color:var(--fg); font-weight:600; }
+  .inbox { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--warn); background:var(--warn-bg); border-radius:999px; padding:3px 10px; font-weight:600; }
+  .live { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  .live i { width:8px; height:8px; border-radius:50%; background:var(--ok); animation:blink 2s infinite; }
+  .layout { display:grid; grid-template-columns:320px minmax(0,1fr); height:calc(100vh - 52px); }
+  aside { border-right:1px solid var(--line); background:var(--surface); overflow:auto; padding:12px; }
+  .blk { --a:var(--run); border:1px solid var(--line); border-left:3px solid var(--a); border-radius:10px; padding:6px 6px 4px; margin-bottom:12px; }
+  .blk.director { --a:var(--warn); } .blk.prog { --a:#a16207; } .blk.feat { --a:var(--ok); }
+  .blk-head { display:flex; align-items:center; gap:8px; padding:4px 6px 6px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--a); }
+  .blk-head .count { margin-left:auto; background:color-mix(in srgb, var(--a) 14%, transparent); padding:0 7px; border-radius:999px; }
+  .item { display:block; padding:8px 10px; border-radius:8px; border:1px solid transparent; }
+  .item:hover { background:var(--panel); }
+  .item.picked { background:color-mix(in srgb, var(--a) 10%, var(--surface)); border-color:color-mix(in srgb, var(--a) 40%, transparent); }
+  .item .row { display:flex; align-items:center; gap:6px; font-size:13px; } .item .row b { white-space:nowrap; }
+  .item .row .pill, .item .row .kind { margin-left:auto; }
+  .item .t { font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .s { font-size:11.5px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .item .slices { display:flex; gap:3px; margin-top:5px; } .item .slices i { flex:1; height:4px; border-radius:2px; background:var(--panel); }
+  .item .slices i.done { background:var(--ok); } .item .slices i.open { background:var(--run); animation:blink 1.4s infinite; } .item .slices i.escalated { background:var(--warn); }
+  main { overflow:auto; padding:22px clamp(16px, 3vw, 40px) 60px; }
+  .wrap { max-width:1060px; margin:0 auto; display:grid; gap:20px; }
+  .crumbs { font-size:12.5px; color:var(--muted); } .crumbs a:hover { color:var(--fg); }
+  .hero-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px; color:var(--muted); font-size:13px; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); gap:14px; }
+  .live-card { display:grid; gap:8px; }
+  .live-card:hover { border-color:var(--faint); }
+  .live-card .head { display:flex; align-items:center; gap:8px; }
+  .live-card .head .pill { margin-left:auto; }
+  .now-line { font-size:13px; display:flex; gap:8px; align-items:center; }
+  .now-line .dot { width:8px; height:8px; border-radius:50%; background:var(--run); animation:blink 1.4s infinite; }
+  .now-line.human .dot { background:var(--warn); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-flex; gap:6px; align-items:center; padding:4px 10px; border:1px solid var(--line); border-radius:999px; font-size:12.5px; background:var(--surface); }
+  .chip.on { border-color:var(--run); box-shadow:0 0 0 1px var(--run) inset; }
+  .gantt { display:grid; gap:4px; }
+  .gantt .g { display:grid; grid-template-columns:180px minmax(0,1fr) 70px; gap:10px; align-items:center; font-size:12.5px; }
+  .gantt .track { position:relative; height:16px; background:var(--panel); border-radius:4px; }
+  .gantt .track i { position:absolute; top:2px; bottom:2px; border-radius:3px; background:var(--ok); }
+  .gantt .track i.open { background:var(--run); } .gantt .track i.plan { background:var(--choreographer); } .gantt .track i.ws { background:var(--dramaturg); }
+  .row-act { display:flex; gap:8px; } .btn { border:1px solid var(--line); background:var(--surface); border-radius:7px; padding:3px 10px; font-size:12px; }
+  .btn.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  @media (max-width:860px) { .layout { grid-template-columns:1fr; height:auto; } aside { max-height:40vh; } .top nav { display:none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><b>Ballet</b><span>Scène</span></div>
+  <span class="project">antimurphy ▾</span>
+  <nav id="nav"></nav>
+  <a class="inbox" href="#/now">⚑ 2 pour le Director</a>
+  <span class="live"><i></i>en direct · 21:12</span>
+</header>
+<div class="layout">
+  <aside id="side"></aside>
+  <main><div class="wrap" id="page"></div></main>
+</div>
+<div class="mock-bar">Maquette <a href="index.html">↩</a><a class="on" href="a-regie.html">A Régie</a><a href="b-plateau.html">B Plateau</a><a href="c-partition.html">C Partition</a></div>
+<script src="shared.js"></script>
+<script>
+let filter = 'all';
+const NAV = [['now', 'En scène'], ['program', 'Programme'], ['workshops', 'Workshops'], ['rehearsals', 'Rehearsals'], ['features', 'Features'], ['cast', 'Distribution']];
+const route = () => { const [page = 'now', id = ''] = location.hash.slice(2).split('/').map(decodeURIComponent); return {page, id}; };
+
+function side({page, id}) {
+  const picked = key => key === `${page}/${id}` ? 'picked' : '';
+  const live = SESSIONS.map(s => {
+    const r = s.kind === 'workshop' ? null : rehearsal(s.current), a = activeStep(eventsOf(s.current));
+    const href = `${s.kind}/${s.current}`, all = [...s.played, ...s.next].filter(x => !rehearsal(x)?.planning);
+    return `<a class="item ${picked(href)}" href="#/${href}"><div class="row"><b>${esc(s.current)}</b><span class="kind">${s.kind === 'workshop' ? 'Workshop' : 'Rehearsal'}</span>${pill(s.escalated ? 'escalated' : 'open')}</div>
+      <div class="t">${esc(s.title)}</div><div class="s">${a ? `${role(a.node === 'proof' || a.node === 'mutation' ? 'script' : a.node)} ${esc(a.label)} · ${dur(minutes(a.since))}` : ''} · ${s.mode}</div>
+      ${all.length > 1 ? `<div class="slices">${all.map(x => `<i class="${rehearsal(x)?.status}" title="${x}"></i>`).join('')}</div>` : ''}</a>`;
+  }).join('');
+  const inbox = directorInbox().map(x => `<a class="item" href="#/${x.href}"><div class="t">${esc(x.text)}</div><div class="s">${ago(x.at)}</div></a>`).join('');
+  const prog = PROGRAM.ready.map((p, i) => `<a class="item ${picked('program/' + p.item)}" href="#/program/${encodeURIComponent(p.item)}"><div class="row"><span class="faint num">${i + 1}</span><b>${p.item}</b><span class="kind">${p.type} · ${p.priority}</span></div><div class="t">${esc(p.title)}</div></a>`).join('');
+  const feats = FEATURES.slice().reverse().map(f => { const s = featureStats(f);
+    return `<a class="item ${picked('feature/' + f.id)}" href="#/feature/${f.id}"><div class="row"><b>${f.id}</b>${pill(s.status)}</div><div class="t">${esc(f.title)}</div>
+    <div class="slices">${sliceOf(f).map(r => `<i class="${r.status}"></i>`).join('')}</div></a>`; }).join('');
+  return `<div class="blk"><div class="blk-head">En scène<span class="count">${SESSIONS.length}</span></div>${live}</div>
+    <div class="blk director"><div class="blk-head">Director attendu<span class="count">2</span></div>${inbox}</div>
+    <div class="blk prog"><div class="blk-head">Programme<span class="count">${PROGRAM.ready.length}</span></div>${prog}</div>
+    <div class="blk feat"><div class="blk-head">Features<span class="count">${FEATURES.length}</span></div>${feats}</div>`;
+}
+
+const PAGES = {
+  now() {
+    const cards = SESSIONS.map(s => {
+      const evs = eventsOf(s.current), a = activeStep(evs);
+      return `<a class="card live-card" href="#/${s.kind}/${s.current}"><div class="head"><span class="kind">${s.kind === 'workshop' ? 'Workshop' : 'Rehearsal'} · ${s.mode}</span><b>${esc(s.current)}</b>${pill(s.escalated ? 'escalated' : 'open')}</div>
+        <div>${esc(s.title)}</div>${diagram(s.kind, evs, {compact: true})}
+        <div class="now-line ${a?.kind === 'human' ? 'human' : ''}"><span class="dot"></span><b>${esc(a?.label)}</b><span class="muted">depuis ${dur(minutes(a.since))} · session ouverte ${ago(s.opened)}</span></div></a>`;
+    }).join('');
+    return `<div><h1>En scène</h1><div class="hero-line">3 sessions de Conductor ouvertes · 1 escalade · prochain au programme : <b>#60 BUG-001</b></div></div>
+      ${directorInbox().map(x => `<a class="callout" href="#/${x.href}"><b>Director</b> · ${esc(x.text)} <span class="muted">· ${ago(x.at)}</span></a>`).join('')}
+      <div class="grid2">${cards}</div>${legend()}
+      <div><h3>Dernières Premieres</h3>${rehearsalTable(REHEARSALS.filter(r => r.status === 'done' && !r.planning).slice(-5).reverse())}</div>`;
+  },
+  rehearsal(id) {
+    const r = rehearsal(id), f = featureOf(r.feature), evs = eventsOf(id), a = activeStep(evs), sp = split(evs);
+    const siblings = f ? REHEARSALS.filter(x => x.feature === f.id) : [r];
+    return `<div class="crumbs"><a href="#/rehearsals">Rehearsals</a> / ${f ? `<a href="#/feature/${f.id}">${f.id}</a> / ` : ''}${id}</div>
+      <div><h1><span class="muted">${id}</span> ${esc(r.title)}</h1><div class="hero-line">${pill(r.status)}<span>#${r.issue}</span>${r.pr ? `<span>PR #${r.pr}</span>` : ''}<span>${f?.mode || 'autopilot'}</span>${r.start ? `<span>${dayOf(r.start)} ${clock(r.start)} · ${dur(minutes(r.start, r.end || NOW))}</span>` : ''}</div></div>
+      ${r.status === 'escalated' ? `<div class="callout"><b>Escalade</b> · ${esc(r.escalation)}<div class="row-act" style="margin-top:8px"><button class="btn primary">Répondre sur #${r.issue}</button><button class="btn">Ouvrir le worktree</button></div></div>` : ''}
+      ${a && r.status === 'open' ? `<div class="callout info"><b>Maintenant</b> · ${esc(a.label)} depuis ${dur(minutes(a.since))} — ${a.kind === 'script' ? 'étape déterministe, aucun agent ne travaille' : 'un agent travaille dans le worktree'}</div>` : ''}
+      <div class="card">${diagram('rehearsal', evs)}${legend()}</div>
+      <div class="metrics"><div class="metric"><small>Allers-retours</small><b>${r.rt}<em> / ${PROJECT.limits.max_round_trips}</em></b></div>
+        <div class="metric"><small>Diff</small><b>${r.size}<em> / ${PROJECT.limits.max_diff_lines}</em></b><div class="bar"><i class="${r.size > 700 ? 'over' : ''}" style="width:${Math.min(100, r.size / 7)}%"></i></div></div>
+        <div class="metric"><small>Mutations</small><b>${r.mut}</b></div><div class="metric"><small>Temps agents</small><b>${dur(sp.agent)}</b></div><div class="metric"><small>Temps script</small><b>${dur(sp.script)}</b></div></div>
+      ${siblings.length > 1 ? `<div><h3>Slices de ${f.id}</h3><div class="chips">${siblings.map(x => `<a class="chip ${x.id === id ? 'on' : ''}" href="#/rehearsal/${x.id}">${x.planning ? '✎ plan' : x.id}${pill(x.status)}</a>`).join('')}</div></div>` : ''}
+      <div><h3>Fil <span class="tabs">${[['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([k, l]) => `<button data-filter="${k}" aria-pressed="${filter === k}">${l}</button>`).join('')}</span></h3>${thread(evs, {filter})}</div>`;
+  },
+  workshop(id) {
+    const w = workshop(id), evs = eventsOf(id);
+    const head = `<div class="crumbs"><a href="#/workshops">Workshops</a> / ${esc(id)}</div><div><h1><span class="muted">Workshop</span> ${esc(w.title)}</h1>
+      <div class="hero-line">${pill(w.status)}<span>${w.mode}</span><span>${w.picked ? 'choisi dans Next up' : w.request ? 'demande hors backlog' : 'session live avec le Director'}</span><span>${dayOf(w.start)} ${clock(w.start)}${w.end ? ' · ' + dur(minutes(w.start, w.end)) : ''}</span></div></div>`;
+    if (w.untracked) return head + `<div class="callout info"><b>Assisted</b> · cette session live avec le Dramaturg n'a pas laissé de journal : seule l'issue #${w.issue} en reste. <span class="muted">(piste : journaliser aussi le Workshop assisted)</span></div>`;
+    return head + `<div class="card">${diagram('workshop', evs)}${legend()}</div>
+      <div class="metrics"><div class="metric"><small>Tours Dramaturg ⇄ Choreographer</small><b>${w.rounds}<em> / ${PROJECT.limits.max_exchange_rounds}</em></b></div>
+        <div class="metric"><small>Décisions prises seul</small><b>${w.decided_alone ?? '—'}</b></div><div class="metric"><small>Issue publiée</small><b>${w.issue ? '#' + w.issue : '—'}</b></div><div class="metric"><small>PR des specs</small><b>${w.pr ? '#' + w.pr : '—'}</b></div></div>
+      ${w.decisions ? `<div class="card"><h3>Décidé seul · ballet:decided-alone</h3><ol>${w.decisions.map(d => `<li>${esc(d)}</li>`).join('')}</ol><div class="row-act"><button class="btn primary">Accepter #${w.issue} (ready)</button><button class="btn">Discuter avec le Dramaturg</button></div></div>` : ''}
+      <div><h3>Fil</h3>${thread(evs, {kind: 'workshop'})}</div>`;
+  },
+  workshops() {
+    return `<h1>Workshops</h1><table class="list"><tr><th>Ligne</th><th>Titre</th><th>Mode</th><th>Statut</th><th>Sortie</th><th>Quand</th></tr>${WORKSHOPS.map(w =>
+      `<tr data-href="#/workshop/${w.id}"><td><b>${esc(w.id)}</b></td><td>${esc(w.title)}</td><td>${w.mode}</td><td>${pill(w.status)}</td><td>${w.issue ? `#${w.issue}${w.status_out ? ` · <span class="badge warn">${w.status_out}</span>` : ''}` : '—'}</td><td class="muted">${dayOf(w.start)} ${clock(w.start)}</td></tr>`).join('')}</table>`;
+  },
+  rehearsals() { return `<h1>Rehearsals</h1>${rehearsalTable(REHEARSALS.filter(r => r.start).slice().reverse())}`; },
+  program(id) {
+    let eta = minutes('2026-11-20T21:12Z', '2026-11-20T21:30Z');
+    return `<div><h1>Programme</h1><div class="hero-line">Ce que GitHub tient prêt : Ballet status <b>ready</b>, ordonné par Priority puis ancienneté · relu il y a 12 s</div></div>
+      <div><h3>Prêt à jouer</h3><table class="list"><tr><th>#</th><th>Issue</th><th>Type</th><th>Prio</th><th>Mode</th><th>Titre</th><th>Démarrage estimé</th></tr>${PROGRAM.ready.map((p, i) => {
+        const at = new Date(+new Date(NOW) + eta * 60000).toISOString(); eta += p.estimate;
+        return `<tr ${id === p.item ? 'style="outline:2px solid var(--run)"' : ''}><td class="faint">${i + 1}</td><td><b>${p.item}</b> <span class="muted">${p.id}</span></td><td><span class="kind">${p.type}</span></td><td>${p.priority}</td><td>${p.mode}${p.plan ? ' · plan à valider' : ''}</td><td>${esc(p.title)}</td><td class="muted">~${clock(at)}</td></tr>`;
+      }).join('')}</table><p class="muted" style="font-size:12px">Estimation : durée médiane des Rehearsals du même type dans le journal.</p></div>
+      <div><h3>Proposé · attend le Director</h3><table class="list">${PROGRAM.proposed.map(p => `<tr><td><b>${p.item}</b> <span class="muted">${p.id}</span></td><td>${esc(p.title)}</td><td><span class="badge warn">${p.decided_alone} décidé seul</span></td><td class="muted">${p.from}</td><td><div class="row-act"><button class="btn primary">Accepter</button><button class="btn">Ouvrir</button></div></td></tr>`).join('')}</table></div>
+      <div><h3>Next up · backlog (candidats au Workshop)</h3><table class="list">${PROGRAM.nextUp.map(p => `<tr><td><b>${p.id}</b></td><td><span class="kind">${p.kind}</span></td><td>${esc(p.title)}</td><td>${p.state ? pill('open') : '<button class="btn">Workshop autopilot</button>'}</td></tr>`).join('')}</table></div>`;
+  },
+  features() {
+    return `<h1>Features</h1><table class="list"><tr><th>Feature</th><th>Titre</th><th>Statut</th><th>Slices</th><th>Durée</th><th>Allers-retours</th><th>Lignes</th><th>Agents / script</th></tr>${FEATURES.slice().reverse().map(f => { const s = featureStats(f);
+      return `<tr data-href="#/feature/${f.id}"><td><b>${f.id}</b><div class="muted" style="font-size:11.5px">${f.cap}</div></td><td>${esc(f.title)}</td><td>${pill(s.status)}</td><td class="num">${s.done}/${s.slices}</td><td class="num">${dur(s.wall)}</td><td class="num">${s.rt}</td><td class="num">${s.lines}</td>
+        <td style="min-width:110px"><div class="bar"><i class="agent" style="width:${100 * s.agent / (s.agent + s.script || 1)}%"></i><i class="script" style="flex:1"></i></div></td></tr>`; }).join('')}</table>`;
+  },
+  feature(id) {
+    const f = featureOf(id), s = featureStats(f), all = REHEARSALS.filter(r => r.feature === id && r.start), w = f.workshop && workshop(f.workshop);
+    const from = +new Date((w || all[0]).start), to = +new Date(all.some(r => r.status === 'open') ? NOW : all.at(-1).end), span = to - from || 1;
+    const bar = (start, end, cls) => `<i class="${cls}" style="left:${100 * (new Date(start) - from) / span}%;width:${Math.max(0.6, 100 * (new Date(end || NOW) - new Date(start)) / span)}%"></i>`;
+    return `<div class="crumbs"><a href="#/features">Features</a> / ${id}</div>
+      <div><h1><span class="muted">${id}</span> ${esc(f.title)}</h1><div class="hero-line">${pill(s.status)}<span>${f.cap}</span><span>issue #${f.issue}</span><span>${f.mode}</span></div></div>
+      <div class="metrics"><div class="metric"><small>Slices</small><b>${s.done}<em> / ${s.slices}</em></b></div><div class="metric"><small>De bout en bout</small><b>${dur(s.wall)}</b></div>
+        <div class="metric"><small>Allers-retours</small><b>${s.rt}</b></div><div class="metric"><small>Lignes livrées</small><b>${s.lines}</b></div><div class="metric"><small>Mutations</small><b>${s.mut}</b></div>
+        <div class="metric"><small>Interventions Director</small><b>${s.director}</b></div><div class="metric"><small>Temps agents / script</small><b>${dur(s.agent)}<em> / ${dur(s.script)}</em></b></div></div>
+      ${s.slices > 3 ? `<div class="callout"><b>Coût</b> · ${s.slices} slices : au-dessus de la règle des 3 slices par critère (0.30.0).</div>` : ''}
+      <div class="card"><h3>Déroulé</h3><div class="gantt">${w ? `<a class="g" href="#/workshop/${w.id}"><span>Workshop · ${w.mode}</span><span class="track">${bar(w.start, w.end, 'ws')}</span><span class="muted">${dur(minutes(w.start, w.end))}</span></a>` : ''}
+        ${all.map(r => `<a class="g" href="#/rehearsal/${r.id}"><span><b>${r.planning ? 'Plan' : r.id}</b> <span class="muted">${r.planning ? '' : '#' + r.issue}</span></span><span class="track">${bar(r.start, r.end, r.planning ? 'plan' : r.status)}</span><span class="muted num">${dur(minutes(r.start, r.end || NOW))}</span></a>`).join('')}</div></div>
+      <div><h3>Slices</h3>${rehearsalTable(sliceOf(f))}</div>`;
+  },
+  cast() {
+    const rows = [['dancer', 'claude', 'sonnet', 24, '17 min', '29 %', '0'], ['critic', 'claude', 'opus', 24, '2 min', '29 % rejets', '0'], ['choreographer', 'claude', 'opus', 5, '11 min', '—', '1'], ['dramaturg', 'claude', 'opus', 2, '3 min', '11 décidé seul', '0']];
+    return `<div><h1>Distribution</h1><div class="hero-line">Qui joue chaque rôle, et comment il s'en sort : de quoi décider quand passer en autopilot.</div></div>
+      <table class="list"><tr><th>Rôle</th><th>CLI</th><th>Modèle</th><th>Sessions</th><th>Durée médiane</th><th>Retours</th><th>Violations</th></tr>${rows.map(([r, c, m, n, d, x, v]) => `<tr><td>${role(r)}</td><td>${c}</td><td>${m}</td><td class="num">${n}</td><td>${d}</td><td>${x}</td><td>${v}</td></tr>`).join('')}</table>`;
+  },
+};
+
+function rehearsalTable(list) {
+  return `<table class="list"><tr><th>Rehearsal</th><th>Titre</th><th>Statut</th><th>PR</th><th>Allers-retours</th><th>Diff</th><th>Durée</th></tr>${list.map(r =>
+    `<tr ${r.start ? `data-href="#/rehearsal/${r.id}"` : ''}><td><b>${r.id}</b></td><td>${esc(r.title)}</td><td>${pill(r.status)}</td><td>${r.pr ? '#' + r.pr : '—'}</td><td class="num">${r.rt}</td><td class="num">${r.size || '—'}</td><td class="num">${r.start ? dur(minutes(r.start, r.end || NOW)) : '—'}</td></tr>`).join('')}</table>`;
+}
+
+function render() {
+  const rt = route();
+  document.getElementById('nav').innerHTML = NAV.map(([k, l]) => `<a href="#/${k}" class="${rt.page === k || (rt.page === k.slice(0, -1)) ? 'on' : ''}">${l}</a>`).join('');
+  document.getElementById('side').innerHTML = side(rt);
+  document.getElementById('page').innerHTML = (PAGES[rt.page] || PAGES.now)(rt.id);
+}
+document.addEventListener('click', e => {
+  const f = e.target.closest('[data-filter]'); if (f) { filter = f.dataset.filter; render(); }
+  const tr = e.target.closest('tr[data-href]'); if (tr) location.hash = tr.dataset.href;
+});
+addEventListener('hashchange', () => { render(); document.querySelector('main').scrollTop = 0; });
+render();
+</script>
+</body>
+</html>

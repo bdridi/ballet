@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scène · trois propositions</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  main { max-width:1100px; margin:0 auto; padding:40px 20px 80px; display:grid; gap:24px; }
+  .props { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; }
+  .prop { display:grid; gap:10px; align-content:start; }
+  .prop:hover { border-color:var(--faint); }
+  .prop .letter { font-size:30px; font-weight:800; letter-spacing:-.03em; }
+  .prop ul { margin:0; padding-left:18px; font-size:13px; } .prop li { margin:3px 0; }
+  .prop .go { font-weight:600; color:var(--focus); }
+  .prop h4 { margin:6px 0 0; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  table.list td:first-child { color:var(--muted); white-space:nowrap; }
+</style>
+</head>
+<body>
+<main>
+  <div><h1>La Scène · trois propositions multi-pages</h1>
+    <p class="muted">Maquettes cliquables, style neutre (le design system viendra après). Données réelles d'antimurphy (FEAT-001 à FEAT-005, le Workshop « consume-a-stock-item ») ; FEAT-006.2, TASK-004 et le Workshop BUG-002 sont simulés en direct pour montrer une soirée vivante, avec deux Rehearsals en parallèle.</p></div>
+  <div class="props">
+    <a class="card prop" href="a-regie.html"><span class="letter">A · Régie</span><b>La v1 qui grandit</b>
+      <span class="muted">La sidebar de la v1 reste le centre : En scène, Director attendu, Programme, Features. Une page par objet à droite, une barre d'onglets en haut.</span>
+      <h4>Ce qui la distingue</h4><ul><li>« En scène » : une carte par session, avec son diagramme compact</li><li>Rehearsal : diagramme + métriques + slices de la feature + fil v1</li><li>Feature : un Gantt Workshop → Plan → slices</li><li>Page Distribution : comparer les modèles par rôle</li></ul>
+      <h4>Pour qui</h4><span class="muted">Le moins de risque : on garde les réflexes de la v1.</span><span class="go">Ouvrir A →</span></a>
+    <a class="card prop" href="b-plateau.html"><span class="letter">B · Plateau</span><b>La chaîne est la navigation</b>
+      <span class="muted">En haut, la chaîne Backlog → Workshop → Programme → Rehearsal → Premieres avec ses compteurs. L'accueil pose chaque élément sur un grand plateau ; la sidebar change selon l'étape.</span>
+      <h4>Ce qui la distingue</h4><ul><li>Rehearsal sous-découpée en couloirs Plan / Dancer / Script / Critic</li><li>Diagramme cliquable : un nœud filtre le fil</li><li>Rejouer une Rehearsal : un curseur dans le temps anime le diagramme</li><li>Programme en kanban par Ballet status (le champ GitHub)</li></ul>
+      <h4>Pour qui</h4><span class="muted">Voir le flux et les goulots d'un coup d'œil, et les étapes parallèles.</span><span class="go">Ouvrir B →</span></a>
+    <a class="card prop" href="c-partition.html"><span class="letter">C · Partition</span><b>La feature est l'œuvre</b>
+      <span class="muted">La sidebar est l'arbre Capability → Feature → slices. Le temps se lit comme une partition : une portée par rôle, une mesure par Rehearsal, un ◆ par Premiere. Un lecteur « en scène » reste en bas de chaque page.</span>
+      <h4>Ce qui la distingue</h4><ul><li>« Ce soir » : toutes les sessions sur un même axe (le parallèle se voit)</li><li>Workshop en conversation Dramaturg ⇄ Choreographer, les décisions prises seul à valider une par une</li><li>Programme : une affiche estimée (quand chaque élément passera)</li><li>Features en small multiples (durée de chaque slice)</li></ul>
+      <h4>Pour qui</h4><span class="muted">Piloter par le produit, comprendre où part le temps et le coût.</span><span class="go">Ouvrir C →</span></a>
+  </div>
+  <div><h3>Ce que les trois couvrent</h3>
+    <table class="list">
+      <tr><td>Workshop</td><td>A : page + diagramme + décisions · B : diagramme rejouable · C : conversation + décisions à valider</td></tr>
+      <tr><td>Rehearsal</td><td>diagramme d'états (agents en pilule, étapes du script en rectangle pointillé, Director en losange, nœud courant qui pulse, boucles de retour comptées) + fil v1 (Tout / Échanges / Script)</td></tr>
+      <tr><td>Programme</td><td>A : tableau avec démarrage estimé · B : kanban par Ballet status · C : affiche en Gantt prévisionnel ; partout : proposé à accepter et Next up du backlog</td></tr>
+      <tr><td>En cours</td><td>A : cartes « En scène » · B : plateau + couloirs · C : lecteur en bas + « Ce soir »</td></tr>
+      <tr><td>Features</td><td>liste avec stats (slices, durée, allers-retours, lignes, agents / script) et page détail qui liste toutes les slices</td></tr>
+      <tr><td>Director</td><td>une boîte « pour le Director » : escalades, issues proposées (et plus tard, les plans à valider)</td></tr>
+    </table></div>
+  <div><h3>Ce que les maquettes ont révélé</h3>
+    <ul class="muted">
+      <li>Le Workshop assisted ne laisse pas de journal : la Scène ne peut montrer que son issue.</li>
+      <li>Les statistiques agent / script viennent des paires handoff → message et proof/mutation start → end : le journal suffit, sans nouveaux événements.</li>
+      <li>Un événement porte désormais <code>rehearsal</code> ou <code>workshop</code> : la page doit lire les deux clés.</li>
+      <li>L'estimation du programme demande une durée médiane par type d'élément, calculable depuis le journal.</li>
+    </ul></div>
+</main>
+</body>
+</html>

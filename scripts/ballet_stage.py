@@ -141,9 +141,10 @@ def _session(saved):
 
 
 def _session_titles(home, sessions):
-    """Le titre des slices qui attendent (`#35`) ; une feature sans issue (`FEAT-003`) n'a pas encore de titre."""
-    waiting = [item for session in sessions for item in session["items"] if item.startswith("#")]
-    return {item: _issue_title(home, item[1:]) for item in waiting}
+    """Le titre des issues d'une session : l'élément confié et ses slices qui attendent (`#35`) ; une feature sans issue
+    (`FEAT-003`) n'a pas encore de titre."""
+    items = [item for session in sessions for item in [session["item"], *session["items"]] if item.startswith("#")]
+    return {item: _issue_title(home, item[1:]) for item in items}
 
 
 def _program(home):

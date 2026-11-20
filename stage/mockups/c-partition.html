@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scène · C Partition</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* C — La Partition : la feature est l'œuvre. La sidebar est son arbre (capability → feature → slices) ;
+     le temps se lit comme une partition, une portée par rôle ; un lecteur « en scène » reste en bas de chaque page. */
+  body { display:grid; grid-template-rows:minmax(0,1fr) auto; height:100vh; }
+  .layout { display:grid; grid-template-columns:290px minmax(0,1fr); min-height:0; }
+  aside { background:var(--surface); border-right:1px solid var(--line); overflow:auto; display:flex; flex-direction:column; }
+  .brand { padding:14px 16px 8px; display:flex; align-items:baseline; gap:8px; } .brand b { font-size:16px; } .brand span { color:var(--muted); font-size:13px; }
+  .search { margin:0 12px 10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; color:var(--faint); font-size:12.5px; display:flex; justify-content:space-between; }
+  .nav a { display:flex; align-items:center; gap:8px; padding:6px 16px; font-size:13px; color:var(--muted); }
+  .nav a:hover { background:var(--panel); } .nav a.on { color:var(--fg); font-weight:600; background:var(--panel); }
+  .nav a .n { margin-left:auto; font-size:11px; background:var(--panel); border-radius:999px; padding:0 7px; }
+  .nav a .n.warn { background:var(--warn-bg); color:var(--warn); font-weight:700; }
+  .tree { padding:6px 0 20px; border-top:1px solid var(--line); margin-top:8px; }
+  .tree .cap { padding:10px 16px 4px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .tree a { display:flex; align-items:center; gap:8px; padding:5px 16px; font-size:13px; border-left:3px solid transparent; }
+  .tree a:hover { background:var(--panel); }
+  .tree a.on { background:color-mix(in srgb, var(--run) 9%, var(--surface)); border-left-color:var(--run); }
+  .tree a.slice { padding-left:34px; font-size:12.5px; color:var(--muted); }
+  .tree a .t { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
+  .tree .dot { width:8px; height:8px; border-radius:50%; background:var(--line); flex:none; }
+  .dot.done { background:var(--ok); } .dot.open { background:var(--run); animation:blink 1.4s infinite; } .dot.escalated { background:var(--warn); }
+  main { overflow:auto; padding:22px clamp(16px, 3vw, 40px) 40px; }
+  .wrap { max-width:1120px; margin:0 auto; display:grid; gap:20px; }
+  .crumbs { font-size:12.5px; color:var(--muted); }
+  .hero-line { display:flex; flex-wrap:wrap; gap:10px; align-items:center; color:var(--muted); font-size:13px; }
+  /* la partition */
+  .score { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:10px 14px 8px; }
+  .staff { display:grid; grid-template-columns:120px minmax(0,1fr); align-items:center; height:24px; }
+  .staff > span { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:6px; }
+  .staff .line { position:relative; height:100%; border-bottom:1px solid var(--line); }
+  .staff .seg { position:absolute; top:5px; height:14px; border-radius:3px; background:var(--r); opacity:.85; min-width:3px; }
+  .staff .seg.script { background:var(--script); opacity:.55; border-radius:1px; }
+  .staff .seg.bad { background:var(--bad); opacity:.9; } .staff .seg.live { animation:blink 1.4s infinite; }
+  .staff .seg.human { background:repeating-linear-gradient(45deg, var(--director), var(--director) 4px, transparent 4px, transparent 7px); border:1px solid var(--director); }
+  .bars { position:relative; height:22px; margin-left:120px; }
+  .bars .m { position:absolute; top:0; bottom:0; border-left:1px dashed var(--faint); font-size:10.5px; color:var(--muted); padding-left:4px; white-space:nowrap; }
+  .bars .m.prem::before { content:"◆ "; color:var(--ok); }
+  .axis { display:flex; justify-content:space-between; margin-left:120px; font-size:10.5px; color:var(--faint); padding-top:4px; }
+  .score .measures { position:absolute; inset:0; pointer-events:none; }
+  .score-body { position:relative; }
+  .score-body .vline { position:absolute; top:0; bottom:0; width:0; border-left:1px dashed color-mix(in srgb, var(--faint) 60%, transparent); }
+  .score-body .nowline { position:absolute; top:-6px; bottom:0; border-left:2px solid var(--run); }
+  .score-body .nowline::before { content:"maintenant"; position:absolute; top:-12px; left:-28px; font-size:10px; color:var(--run); font-weight:700; }
+  /* lecteur en bas */
+  .player { border-top:1px solid var(--line); background:var(--surface); display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); }
+  .player a { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:4px 10px; align-items:center; padding:9px 16px; border-right:1px solid var(--line); }
+  .player a:hover { background:var(--panel); }
+  .player .eq { width:28px; height:28px; border-radius:8px; display:grid; place-items:center; background:color-mix(in srgb, var(--r) 15%, transparent); color:var(--r); font-weight:700; grid-row:span 2; }
+  .player .eq.esc { --r:var(--warn); }
+  .player .who { font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .player .what { font-size:11.5px; color:var(--muted); }
+  .player .rail { grid-column:2 / 4; display:flex; gap:3px; }
+  .player .rail i { flex:1; height:3px; border-radius:2px; background:var(--line); } .player .rail i.v { background:var(--muted); } .player .rail i.now { background:var(--run); animation:blink 1.4s infinite; } .player .rail i.bad { background:var(--bad); }
+  .player .t { font-size:12px; font-variant-numeric:tabular-nums; color:var(--muted); grid-row:1; grid-column:3; }
+  /* workshop en conversation */
+  .convo { display:grid; gap:10px; }
+  .msg { max-width:72%; padding:9px 13px; border-radius:14px; background:var(--surface); border:1px solid var(--line); font-size:13px; }
+  .msg.left { justify-self:start; border-bottom-left-radius:4px; border-color:color-mix(in srgb, var(--dramaturg) 40%, var(--line)); }
+  .msg.right { justify-self:end; border-bottom-right-radius:4px; border-color:color-mix(in srgb, var(--choreographer) 40%, var(--line)); }
+  .msg .h { display:flex; gap:8px; font-size:12px; margin-bottom:3px; } .msg .h time { margin-left:auto; color:var(--faint); }
+  .sys { justify-self:center; font-size:12px; color:var(--muted); background:var(--panel); padding:3px 12px; border-radius:999px; }
+  .sys.ok { color:var(--ok); background:var(--ok-bg); }
+  .typing { justify-self:end; font-size:12px; color:var(--choreographer); } .typing::after { content:" ●●●"; animation:blink 1.2s infinite; }
+  .ws-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr); gap:18px; align-items:start; }
+  .decision { display:grid; grid-template-columns:auto 1fr; gap:8px; padding:8px 0; border-top:1px solid var(--line); font-size:13px; }
+  .decision:first-of-type { border-top:0; }
+  .decision .acts { grid-column:2; display:flex; gap:6px; }
+  .btn { border:1px solid var(--line); background:var(--surface); border-radius:7px; padding:2px 9px; font-size:12px; }
+  .btn.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  /* programme */
+  .forecast .row { display:grid; grid-template-columns:200px minmax(0,1fr); align-items:center; gap:10px; padding:6px 0; border-top:1px solid var(--line); font-size:12.5px; }
+  .forecast .track { position:relative; height:20px; }
+  .forecast .track i { position:absolute; top:2px; bottom:2px; border-radius:4px; font-style:normal; font-size:11px; color:#fff; padding:0 6px; line-height:16px; white-space:nowrap; overflow:hidden; }
+  .feat-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px; }
+  .spark { display:flex; align-items:flex-end; gap:3px; height:36px; }
+  .spark i { flex:1; background:var(--ok); border-radius:2px 2px 0 0; min-height:2px; } .spark i.open { background:var(--run); } .spark i.next { background:var(--line); }
+  @media (max-width:860px) { .layout { grid-template-columns:1fr; } aside { max-height:35vh; } .ws-grid { grid-template-columns:1fr; } .staff { grid-template-columns:80px 1fr; } .bars, .axis { margin-left:80px; } }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside id="side"></aside>
+  <main><div class="wrap" id="page"></div></main>
+</div>
+<footer class="player" id="player" aria-label="En scène"></footer>
+<div class="mock-bar" style="bottom:70px">Maquette <a href="index.html">↩</a><a href="a-regie.html">A Régie</a><a href="b-plateau.html">B Plateau</a><a class="on" href="c-partition.html">C Partition</a></div>
+<script src="shared.js"></script>
+<script>
+const route = () => { const [page = 'tonight', id = ''] = location.hash.slice(2).split('/').map(decodeURIComponent); return {page, id}; };
+const LANES = ['director', 'dramaturg', 'choreographer', 'dancer', 'critic', 'script'];
+
+/* Les segments joués par chaque portée : un agent du handoff à son message, le script de la preuve ou de la mutation à leur fin, le Director de l'escalade à sa décision. */
+function segments(events) {
+  const segs = [];
+  events.forEach((e, i) => {
+    const rest = events.slice(i + 1), d = e.detail;
+    if (e.event === 'handoff') { const back = rest.find(x => x.event === 'message' && x.detail.from === d.role); segs.push({lane: d.role, from: e.at, to: back?.at || NOW, live: !back, bad: back?.detail.verdict === 'REJECTED'}); }
+    if (e.event === 'proof-start' || e.event === 'mutation-start') { const end = rest.find(x => x.event === e.event.replace('start', 'end')); segs.push({lane: 'script', from: e.at, to: end?.at || NOW, live: !end, bad: end && !end.detail.passed, cls: 'script'}); }
+    if (e.event === 'escalate') { const dec = rest.find(x => x.event === 'director-decision'); segs.push({lane: 'director', from: e.at, to: dec?.at || NOW, live: !dec, cls: 'human'}); }
+    if (e.event === 'director-decision' && !events.slice(0, i).some(x => x.event === 'escalate')) segs.push({lane: 'director', from: new Date(+new Date(e.at) - 180000).toISOString(), to: e.at, cls: 'human'});
+  });
+  return segs;
+}
+
+/* Une partition : une portée par rôle, une mesure par Rehearsal (ou Workshop), un ◆ par Premiere. */
+function score(parts, {lanes = LANES} = {}) {
+  const evs = parts.flatMap(p => p.events);
+  if (!evs.length) return '<p class="empty">Rien de joué.</p>';
+  const t0 = Math.min(...evs.map(e => +new Date(e.at))), live = parts.some(p => p.live), t1 = live ? +new Date(NOW) : Math.max(...evs.map(e => +new Date(e.at)));
+  const x = at => (100 * (+new Date(at) - t0) / (t1 - t0 || 1)).toFixed(2) + '%';
+  const segs = parts.flatMap(p => segments(p.events));
+  const used = lanes.filter(l => segs.some(s => s.lane === l));
+  return `<div class="score"><div class="bars">${parts.map(p => `<span class="m ${p.premiere ? 'prem' : ''}" style="left:${x(p.events[0].at)}">${esc(p.label)}</span>`).join('')}</div>
+    <div class="score-body">${used.map(l => `<div class="staff"><span>${role(l)}</span><div class="line">${segs.filter(s => s.lane === l).map(s =>
+      `<i class="seg ${s.cls || ''} ${s.bad ? 'bad' : ''} ${s.live ? 'live' : ''}" style="--r:var(--${l});left:${x(s.from)};width:calc(${x(s.to)} - ${x(s.from)})" title="${l} ${clock(s.from)}–${clock(s.to)}"></i>`).join('')}</div></div>`).join('')}
+      <div style="position:absolute;left:120px;right:0;top:0;bottom:0;pointer-events:none">${parts.slice(1).map(p => `<span class="vline" style="left:${x(p.events[0].at)}"></span>`).join('')}${live ? '<span class="nowline" style="left:100%"></span>' : ''}</div></div>
+    <div class="axis"><span>${dayOf(new Date(t0).toISOString())} ${clock(new Date(t0).toISOString())}</span><span>${dur(Math.round((t1 - t0) / 60000))}</span><span>${live ? 'maintenant' : clock(new Date(t1).toISOString())}</span></div></div>`;
+}
+const partOf = r => ({label: r.planning ? 'plan' : r.id.replace(r.feature, '') || r.id, events: eventsOf(r.id), live: r.status === 'open' || r.status === 'escalated', premiere: r.status === 'done' && r.pr});
+
+function side({page, id}) {
+  const on = (p, i = '') => page === p && (!i || id === i) ? 'on' : '';
+  const caps = [...new Set(FEATURES.map(f => f.cap))];
+  const open = id && (featureOf(id) || featureOf(rehearsal(id)?.feature));
+  return `<div class="brand"><b>Ballet</b><span>antimurphy ▾</span></div><div class="search">Aller à…<span>⌘K</span></div>
+    <nav class="nav"><a href="#/tonight" class="${on('tonight')}">♪ Ce soir</a><a href="#/program" class="${on('program')}">☰ Programme<span class="n">${PROGRAM.ready.length}</span></a>
+      <a href="#/workshop/BUG-002" class="${on('workshop')}">✎ Workshops<span class="n">1</span></a><a href="#/features" class="${on('features')}">◆ Features<span class="n">${FEATURES.length}</span></a>
+      <a href="#/director" class="${on('director')}">⚑ Pour le Director<span class="n warn">2</span></a><a href="#/tasks" class="${on('tasks')}">· Bugs et tâches<span class="n">1</span></a></nav>
+    <div class="tree">${caps.map(c => `<div class="cap">${esc(c)}</div>${FEATURES.filter(f => f.cap === c).slice().reverse().map(f => { const s = featureStats(f);
+      return `<a href="#/feature/${f.id}" class="${on('feature', f.id)}"><span class="dot ${s.status}"></span><span class="t"><b>${f.id}</b> ${esc(f.title)}</span><span class="faint" style="font-size:11px">${s.done}/${s.slices}</span></a>` +
+        (open === f ? REHEARSALS.filter(r => r.feature === f.id).map(r => `<a class="slice ${on('rehearsal', r.id)}" href="#/rehearsal/${r.id}"><span class="dot ${r.status}"></span><span class="t">${r.planning ? 'plan' : r.id}</span></a>`).join('') : ''); }).join('')}`).join('')}</div>`;
+}
+
+function player() {
+  return SESSIONS.map(s => {
+    const evs = eventsOf(s.current), a = activeStep(evs), st = graphState(s.kind, evs), g = GRAPHS[s.kind];
+    const who = a.kind === 'agent' ? a.node : a.kind === 'human' ? 'director' : 'script';
+    return `<a href="#/${s.kind}/${s.current}"><span class="eq ${a.kind === 'human' ? 'esc' : ''}" style="--r:var(--${who})">${a.kind === 'script' ? '⚙' : a.kind === 'human' ? '⚑' : '◆'}</span>
+      <span class="who"><b>${esc(s.current)}</b> ${esc(s.title)}</span><span class="t">${dur(minutes(a.since))}</span>
+      <span class="rail">${Object.keys(g.nodes).filter(n => n !== 'director').map(n => `<i class="${st.now === n ? 'now' : st.bad[n] ? 'bad' : st.visits[n] ? 'v' : ''}" title="${n}"></i>`).join('')}</span>
+      <span class="what" style="grid-column:2/4">${esc(a.label)} · ${s.mode}</span></a>`;
+  }).join('');
+}
+
+const PAGES = {
+  tonight() {
+    const parts = SESSIONS.map(s => ({label: s.current, events: eventsOf(s.current), live: true}));
+    const t0 = +new Date('2026-11-20T19:45Z'), t1 = +new Date(NOW), x = at => (100 * (+new Date(at) - t0) / (t1 - t0)).toFixed(2) + '%';
+    const past = [{current: 'consume-a-stock-item', title: 'Workshop · Consume a stock item'}, {current: 'FEAT-006', title: 'Plan'}, {current: 'FEAT-006.1', title: 'FEAT-006.1'}];
+    const staves = [...past, ...SESSIONS].map(s => `<div class="staff"><span><a href="#/${s.kind || (workshop(s.current) ? 'workshop' : 'rehearsal')}/${s.current}"><b>${esc(s.current)}</b></a></span><div class="line">${segments(eventsOf(s.current)).map(g =>
+      `<i class="seg ${g.cls || ''} ${g.bad ? 'bad' : ''} ${g.live ? 'live' : ''}" style="--r:var(--${g.lane});left:${x(g.from)};width:calc(${x(g.to)} - ${x(g.from)})" title="${g.lane}"></i>`).join('')}</div></div>`).join('');
+    return `<div><h1>Ce soir</h1><div class="hero-line">Toutes les représentations sur un même axe : une portée par Rehearsal ou Workshop, la couleur dit qui joue</div></div>
+      <div class="score"><div class="score-body">${staves}<div style="position:absolute;left:120px;right:0;top:0;bottom:0;pointer-events:none"><span class="nowline" style="left:100%"></span></div></div>
+        <div class="axis"><span>19:45</span><span>20:30</span><span>maintenant 21:12</span></div>
+        <div class="legend">${LANES.map(l => `<span><i style="background:var(--${l});border:0"></i>${ROLE_NAMES[l]}</span>`).join('')}</div></div>
+      <h3 style="margin-top:8px">En scène, une par une</h3>
+      ${SESSIONS.map(s => `<div><h3><a href="#/${s.kind}/${s.current}">${s.current}</a> <span style="text-transform:none;letter-spacing:0;font-weight:400">${esc(s.title)} · ${s.kind} ${s.mode}</span></h3>${score([{label: '', events: eventsOf(s.current), live: true}])}</div>`).join('')}
+      <div class="card"><h3>Ce qui vient</h3>${forecast()}</div>`;
+  },
+  feature(id) {
+    const f = featureOf(id), s = featureStats(f), all = REHEARSALS.filter(r => r.feature === id && r.start), w = f.workshop && workshop(f.workshop);
+    const parts = [...(w ? [{label: 'workshop', events: eventsOf(w.id)}] : []), ...all.map(partOf)];
+    const durs = sliceOf(f).map(r => r.start ? minutes(r.start, r.end || NOW) : 0), max = Math.max(...durs, 1);
+    return `<div class="crumbs">${f.cap} / ${id}</div><div><h1><span class="muted">${id}</span> ${esc(f.title)}</h1><div class="hero-line">${pill(s.status)}<span>#${f.issue}</span><span>${f.mode}</span><span>${s.done}/${s.slices} slices</span></div></div>
+      <div class="metrics"><div class="metric"><small>Cycle</small><b>${dur(s.wall)}</b></div><div class="metric"><small>Slices</small><b>${s.done}<em> / ${s.slices}</em></b></div><div class="metric"><small>Rejets Critic</small><b>${s.rejected}</b></div>
+        <div class="metric"><small>Allers-retours</small><b>${s.rt}</b></div><div class="metric"><small>Lignes</small><b>${s.lines}</b></div><div class="metric"><small>Mutations</small><b>${s.mut}</b></div><div class="metric"><small>Director</small><b>${s.director}</b></div></div>
+      <div><h3>Partition de la feature <span style="text-transform:none;letter-spacing:0;font-weight:400">une portée par rôle · une mesure par Rehearsal · ◆ Premiere</span></h3>${score(parts)}</div>
+      <div><h3>Slices</h3><table class="list"><tr><th></th><th>Slice</th><th>Titre</th><th>Durée</th><th>Retours</th><th>Diff</th><th>PR</th></tr>${sliceOf(f).map((r, i) =>
+        `<tr ${r.start ? `data-href="#/rehearsal/${r.id}"` : ''}><td><span class="dot ${r.status}" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span></td><td><b>${r.id}</b></td><td>${esc(r.title)}</td>
+        <td style="width:160px"><div class="bar"><i style="width:${100 * durs[i] / max}%;background:var(--${r.status === 'open' ? 'run' : 'ok'})"></i></div><span class="muted num" style="font-size:11.5px">${r.start ? dur(durs[i]) : 'à venir'}</span></td>
+        <td class="num">${r.rt}</td><td class="num">${r.size || '—'}</td><td>${r.pr ? '#' + r.pr : '—'}</td></tr>`).join('')}</table></div>`;
+  },
+  rehearsal(id) {
+    const r = rehearsal(id), evs = eventsOf(id), a = activeStep(evs), f = featureOf(r.feature);
+    return `<div class="crumbs">${f ? `<a href="#/feature/${f.id}">${f.id} ${esc(f.title)}</a> / ` : ''}${id}</div>
+      <div><h1><span class="muted">${id}</span> ${esc(r.title)}</h1><div class="hero-line">${pill(r.status)}<span>#${r.issue}</span>${r.pr ? `<span>PR #${r.pr}</span>` : ''}${a && r.status !== 'done' ? `<span><b style="color:var(--fg)">${esc(a.label)}</b> depuis ${dur(minutes(a.since))}</span>` : ''}</div></div>
+      ${r.status === 'escalated' ? `<div class="callout"><b>Escalade</b> · ${esc(r.escalation)}</div>` : ''}
+      ${score([partOf(r)])}
+      <div class="card">${diagram('rehearsal', evs)}${legend()}</div>
+      <div><h3>Fil</h3>${thread(evs)}</div>`;
+  },
+  workshop(id) {
+    const w = workshop(id || 'BUG-002'), evs = eventsOf(w.id), live = w.status === 'open';
+    const list = WORKSHOPS.map(x => `<a class="btn ${x.id === w.id ? 'primary' : ''}" href="#/workshop/${x.id}">${esc(x.id)}</a>`).join(' ');
+    const convo = evs.map(e => { const d = e.detail;
+      if (e.event === 'message' && d.from === 'dramaturg' || e.event === 'message' && d.from === 'choreographer') return `<div class="msg ${d.from === 'dramaturg' ? 'left' : 'right'}"><div class="h">${role(d.from)} → ${role(d.to)} <span class="badge">${d.type}</span><time>${clock(e.at)}</time></div>${esc(d.text).replace(/\n/g, '<br>')}</div>`;
+      if (e.event === 'begin') return `<div class="sys">${clock(e.at)} · ouverture ${d.picked ? '(choisi dans Next up)' : `· « ${esc(d.request)} »`}</div>`;
+      if (e.event === 'published') return `<div class="sys ok">${clock(e.at)} · issue #${d.issue} publiée ${d.status}</div>`;
+      if (e.event === 'done') return `<div class="sys ok">${clock(e.at)} · specs mergées, Workshop terminé</div>`;
+      return ''; }).join('');
+    return `<div class="hero-line">${list}</div><div><h1><span class="muted">Workshop</span> ${esc(w.title)}</h1><div class="hero-line">${pill(w.status)}<span>${w.mode}</span><span>tour ${w.rounds || '—'} / ${PROJECT.limits.max_exchange_rounds}</span></div></div>
+      ${w.untracked ? `<div class="callout info"><b>Assisted</b> · session live, pas de journal ; issue #${w.issue}.</div>` : `
+      <div class="ws-grid"><div class="card convo">${convo}${live ? '<div class="typing">Choreographer répond</div>' : ''}</div>
+        <div style="display:grid;gap:12px"><div class="card"><h3>Décidé seul</h3>${w.decisions ? w.decisions.map((d, i) => `<div class="decision"><span class="faint num">${i + 1}</span><span>${esc(d)}</span><span class="acts"><button class="btn">✓ ok</button><button class="btn">✎ revoir</button></span></div>`).join('') + `<p class="muted" style="font-size:12px">+ ${w.decided_alone - w.decisions.length} autres sur l'issue #${w.issue}</p>` : '<p class="muted">Le Dramaturg n\'a pas encore rendu son rapport.</p>'}</div>
+        <div class="card">${diagram('workshop', evs, {compact: true})}</div></div></div>`}`;
+  },
+  program() {
+    return `<div><h1>Programme</h1><div class="hero-line">La file GitHub, et quand chaque élément devrait passer si la soirée se déroule comme d'habitude</div></div>
+      <div class="card forecast"><h3>Affiche estimée</h3>${forecast()}</div>
+      <div><h3>Proposé · à accepter</h3><table class="list">${PROGRAM.proposed.map(p => `<tr><td><b>${p.item}</b> ${p.id}</td><td>${esc(p.title)}</td><td><span class="badge warn">${p.decided_alone} décidé seul</span></td><td><button class="btn primary">Accepter</button> <button class="btn">Lire</button></td></tr>`).join('')}</table></div>
+      <div><h3>Backlog · Next up</h3><table class="list">${PROGRAM.nextUp.map(p => `<tr><td><b>${p.id}</b></td><td>${p.kind}</td><td>${esc(p.title)}</td><td>${p.state ? pill('open') : '<button class="btn">Workshop</button>'}</td></tr>`).join('')}</table></div>`;
+  },
+  features() {
+    return `<h1>Features</h1><div class="feat-grid">${FEATURES.slice().reverse().map(f => { const s = featureStats(f), sl = sliceOf(f), d = sl.map(r => r.start ? minutes(r.start, r.end || NOW) : 0), m = Math.max(...d, 1);
+      return `<a class="card" href="#/feature/${f.id}"><div class="hero-line"><b style="color:var(--fg)">${f.id}</b>${pill(s.status)}</div><div style="margin:2px 0 8px">${esc(f.title)}</div>
+        <div class="spark">${sl.map((r, i) => `<i class="${r.status}" style="height:${r.start ? 8 + 92 * d[i] / m : 6}%" title="${r.id} ${dur(d[i])}"></i>`).join('')}</div>
+        <div class="muted" style="font-size:12px;margin-top:6px">${s.done}/${s.slices} slices · ${dur(s.wall)} · ${s.rejected} rejets</div></a>`; }).join('')}</div>`;
+  },
+  director() {
+    return `<h1>Pour le Director</h1>${directorInbox().map(x => `<a class="callout" href="#/${x.href.startsWith('program') ? 'program' : x.href}"><b>${x.kind === 'escalation' ? 'Escalade' : 'Proposé'}</b> · ${esc(x.text)} <span class="muted">· ${ago(x.at)}</span></a>`).join('')}
+      <p class="muted">Plus tard : les plans à valider (assisted), les notes du Critic à lire, les décisions prises seul en autopilot.</p>`;
+  },
+  tasks() { return `<h1>Bugs et tâches</h1><table class="list"><tr data-href="#/rehearsal/TASK-004"><td><b>TASK-004</b></td><td>Cache cargo-mutants in CI</td><td>${pill('escalated')}</td></tr></table>`; },
+};
+
+function forecast() {
+  const start = +new Date(NOW), span = 6 * 3600000; let t = start + 18 * 60000;
+  const rows = [['FEAT-006.3 · fin de la session #55', 18, 'run'], ...PROGRAM.ready.map(p => [`${p.item} ${p.id} · ${p.mode}`, p.estimate, p.mode === 'autopilot' ? 'ok' : 'dramaturg'])];
+  let at = start;
+  return `<div class="forecast">${rows.map(([l, m, c]) => { const left = 100 * (at - start) / span, w = 100 * m * 60000 / span; const html = `<div class="row"><span>${esc(l)}</span><span class="track"><i style="left:${left}%;width:${w}%;background:var(--${c})">${clock(new Date(at).toISOString())}</i></span></div>`; at += m * 60000; return html; }).join('')}
+    <div class="axis" style="margin-left:210px"><span>21:12</span><span>+3 h</span><span>+6 h</span></div><p class="muted" style="font-size:12px">Durées : médiane par type dans le journal. FEAT-007 attend la validation de son plan (assisted).</p></div>`;
+}
+
+function render() {
+  const rt = route();
+  document.getElementById('side').innerHTML = side(rt);
+  document.getElementById('page').innerHTML = (PAGES[rt.page] || PAGES.tonight)(rt.id);
+  document.getElementById('player').innerHTML = player();
+}
+document.addEventListener('click', e => { const tr = e.target.closest('tr[data-href]'); if (tr) location.hash = tr.dataset.href; });
+addEventListener('hashchange', () => { render(); document.querySelector('main').scrollTop = 0; });
+render();
+</script>
+</body>
+</html>
