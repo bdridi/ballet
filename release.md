@@ -2,6 +2,19 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.35.0 — 2026-11-21 · `v0.35.0`
+
+Maestro, étape 3 sur 5 : Maestro lance les Conductors, par un script à part, et le registre devient complet. OPP-02 (partiel).
+
+- `ballet_launch.py` (appelé par Maestro seul) : `rehearsal <projet> <élément>` (`#12`, `12` ou `FEAT-002`) et `workshop <projet> [<élément>]` (toujours en autopilot ; sans élément, la première ligne de *Next up* sans Workshop, via `ballet_workshop.next_item`). Il ouvre un terminal Orca dans le dossier du projet (`orca terminal create --worktree path:<projet> --title '<projet>#<élément>' --command …`) qui lance `claude --remote-control '<projet>#<élément>' '/ballet:rehearsal #N' --allowedTools 'Bash(python3:*)'` : le prompt avant les options (`--allowedTools` avale ce qui la suit), et `python3` seul autorisé, puisqu'un Conductor ne lance que les scripts de Ballet (`gh`, `git`, `orca` sont leurs affaires). `BALLET_CONDUCTOR_COMMAND` remplace `claude` (arguments inchangés) pour essayer sans tokens. Il affiche une ligne : ce qui est parti, où, le terminal, l'URL Remote Control.
+- Quatre garde-fous avant tout lancement, chacun avec son refus (aucun terminal n'est créé) : projet connu de `maestro.toml` ; pas de Conductor vivant sur l'élément (ligne `running` du registre dont le terminal vit, ou session ouverte du projet, lue par `ballet_maestro.sessions_of`) ; plafond de Conductors simultanés ; plafond de lancements du jour. Les plafonds sont la table `[limits]` de `maestro.toml` : `max_running` (3) et `max_per_day` (10). Un lancement à la fois (`launch.lock`) ; Orca injoignable, rien n'est lancé.
+- L'URL Remote Control est lue dans le terminal (`orca terminal read --screen`, jusqu'à 8 secondes) ; absente, la ligne la laisse vide.
+- `ballet_conductors.py` : le registre `conductors.json`, lecture et écriture à un seul endroit (sous verrou, atomique), pour `ballet_launch.py` et `ballet_maestro.py`. Une ligne par `<projet>#<élément>` : projet, élément, genre, terminal, URL, `started` et `starts` (le plafond du jour), `seen`, `event`, et `state` (`running`/`finished`). `wait` et `recap` y notent toujours le terminal et le dernier événement ; un `done` marque la ligne `finished`, un autre événement la rouvre ; un Conductor lancé à la main y entre à son premier message. Les lignes de 0.34.0 se relisent.
+- `ballet_state.py` : le dossier `~/.ballet` (chemin, écriture atomique, verrou), sorti de `ballet_maestro.py` pour être partagé.
+- `status` montre aussi les Conductors du registre avec l'état de leur terminal (`alive`, `gone`, ou `state unknown` quand Orca ne répond pas) ; un Conductor fini dont le terminal est fermé n'est plus montré. `tell` marche dès le lancement, le terminal étant noté avant tout message.
+- Le skill `/ballet:maestro` : `launch <projet> <élément>` et `launch <projet> --workshop [<élément>]`, sur demande du Director seulement ; il lui dit ce qui est parti et l'URL Remote Control. « launch à venir » retiré. README et `/ballet:setup` à jour.
+- Vérifié en vrai sur Orca (terminal dans le bon dossier, ligne du registre, doublon et plafond refusés, `tell` reçu, URL d'un vrai `claude --remote-control` lue). Traite OPP-02 en partie (étape 3 sur 5, l'opportunité reste 🆕).
+
 ## 0.34.0 — 2026-11-21 · `v0.34.0`
 
 Maestro, étape 2 : la session `/ballet:maestro`, et la garantie qu'une seule session lit la boîte.

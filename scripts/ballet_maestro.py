@@ -6,7 +6,7 @@
     python3 ballet_maestro.py claim [--take-over]            # prend le bail : une seule session Maestro lit la boîte
     python3 ballet_maestro.py wait --owner <jeton>           # attend la boîte (en arrière-plan), affiche ce qui arrive
     python3 ballet_maestro.py recap --owner <jeton>          # au démarrage : le non-lu (consommé) et l'historique
-    python3 ballet_maestro.py status                         # les sessions ouvertes de chaque projet
+    python3 ballet_maestro.py status                         # les sessions ouvertes de chaque projet, et les Conductors lancés
     python3 ballet_maestro.py tell <projet>#<élément> <texte>   # la réponse du Director, au terminal du Conductor
 
 L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) :
@@ -24,6 +24,10 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
 
+    [limits]                  les plafonds de `ballet_launch.py` (facultatif ; ces valeurs par défaut)
+    max_running = 3           Conductors vivants en même temps, tous projets confondus
+    max_per_day = 10          lancements par jour (jour local)
+
 Il n'existe jamais deux boîtes : `mailbox` ne fait rien quand le terminal noté vit encore dans Orca, et un verrou
 (`maestro.lock`) empêche deux appels de créer chacun la sienne. Chaque écriture passe par un fichier temporaire, puis
 un renommage.
@@ -33,15 +37,16 @@ session, entre deux attentes, pour traiter un message. `claim` refuse un bail vi
 de l'ancien propriétaire et le remplace (après un `/clear`, ou une session morte). `wait` ne lit la boîte que pour le jeton
 qui tient le bail ; sinon la session n'est plus Maestro.
 
-`wait` note, pour chaque `status` de sujet `<projet>#<élément> · <événement>`, le terminal expéditeur dans
-`~/.ballet/conductors.json` : c'est où `tell` écrit. Il lit en consommant (jamais `--peek`) : un message lu n'est plus non lu.
+`wait` et `recap` notent, pour chaque `status` de sujet `<projet>#<élément> · <événement>`, le terminal expéditeur et
+l'événement dans le registre des Conductors (`ballet_conductors.py`, `~/.ballet/conductors.json`, que `ballet_launch.py`
+remplit déjà au lancement) : c'est où `tell` écrit ; un `done` clôt la ligne. Ils lisent en consommant (jamais `--peek`) :
+un message lu n'est plus non lu.
 
 Les Conductors (`ballet_rehearsal.py`, `ballet_workshop.py`) appellent `announce` quand ils écrivent `NEXT: escalate`
 ou `NEXT: done` : un message `status`, priorité `high`, sujet `<projet>#<élément> · <événement>`, dans la boîte. Sans
 `maestro.toml` ou sans boîte, rien n'est envoyé ; un envoi qui échoue n'arrête jamais le Conductor.
 """
 
-import fcntl
 import json
 import os
 import re
@@ -49,14 +54,15 @@ import secrets
 import signal
 import subprocess
 import sys
-import tempfile
 import tomllib
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import ballet_conductors
+import ballet_state
+
 CONFIG_NAME = "maestro.toml"
-CONDUCTORS_NAME = "conductors.json"
 LOCK_NAME = "maestro.lock"
 MAILBOX_TITLE = "maestro-mailbox"
 MAILBOX_OBJECTIVE = "Maestro's mailbox: the Conductors and the Monitor write here, Maestro reads"
@@ -68,7 +74,6 @@ LEASE_TTL = timedelta(minutes=10)   # le temps de la session, entre deux attente
 WAIT_TIMEOUT_MS = 600_000           # une attente qui expire sans message est relancée : `wait` ne rend la main qu'avec du courrier
 RECAP_LIMIT = 10                    # les derniers messages de l'historique relus au démarrage
 EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": ""}
-CONDUCTOR_SUBJECT = re.compile(r"^(\S+#\S+) · (.+)$")   # `<projet>#<élément> · <événement>`
 TARGET = re.compile(r"^[^\s#]+#\S+$")
 USAGE = ("usage: mailbox | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
          "| recap --owner <token> | status | tell <project>#<item> <text>")
@@ -89,7 +94,7 @@ def mailbox(orca, state=None):
     """La boîte de Maestro, créée une seule fois : un terminal Orca vide, puis une Run créée `--from` lui. Si le
     terminal noté vit encore, rien ne change ; sinon une nouvelle boîte le remplace, et l'ancienne Run est gardée
     pour une dernière lecture."""
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         box = config["mailbox"]
         alive = bool(box.get("terminal")) and _terminal_alive(box["terminal"], orca)
@@ -108,7 +113,7 @@ def add_project(alias, path, state=None):
     folder = Path(path).expanduser().resolve()
     if not folder.is_dir():
         raise MaestroError(f"no folder at {folder}")
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         config["projects"][alias] = {"path": str(folder)}
         write_config(config, state)
@@ -155,7 +160,7 @@ def project_of(home, config):
 def claim(take_over=False, state=None):
     """Le bail de lecture de la boîte, pour une seule session : refusé quand une autre le tient vivant, sauf `take_over`,
     qui arrête d'abord l'attente de l'ancien propriétaire. Rend le jeton de la nouvelle propriétaire."""
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         lease = config["lease"]
         if _lease_alive(lease) and not take_over:
@@ -173,7 +178,7 @@ def wait(owner, orca, state=None):
     box = _take_the_wait(owner, state)
     try:
         messages = _wait_for_messages(box, orca)
-        _note_conductors(messages, state)
+        ballet_conductors.note_events(messages, state)
     finally:
         _release_the_wait(owner, state)
     return _render_messages(messages)
@@ -185,29 +190,40 @@ def recap(owner, orca, state=None):
     plus non lu), ceux de la boîte précédente compris, qu'on oublie ensuite. Seul le jeton qui tient le bail lit."""
     box = _owned_mailbox(owner, state)
     unread = _consume_unread(box, orca)
-    _note_conductors(unread, state)
+    ballet_conductors.note_events(unread, state)
     history = [message for run in _runs_of(box) for message in _history_of(run, orca)]
     _forget_previous_run(state)
     return _render_history(_latest(history), {message.get("id") for message in unread})
 
 
-def status(state=None):
-    """Les sessions ouvertes de chaque projet, une ligne chacune : élément, Rehearsal courante, état, terminal connu."""
+def status(orca, state=None):
+    """Les sessions ouvertes de chaque projet, une ligne chacune (élément, Rehearsal courante, état, terminal connu),
+    puis les Conductors du registre, avec l'état de leur terminal."""
     config = read_config(state)
-    registry = read_conductors(state)
-    lines = [_session_line(alias, session, registry) for alias, project in sorted(config["projects"].items())
-             for session in _sessions_of(Path(project["path"]))]
-    return "\n".join(lines) or "no open session in any project"
+    registry = ballet_conductors.read(state)
+    sessions = [_session_line(alias, session, registry) for alias, project in sorted(config["projects"].items())
+                for session in sessions_of(Path(project["path"]))]
+    launched = _conductor_lines(registry, orca)
+    return "\n".join(sessions or ["no open session in any project"]) + ("\n\nConductors:\n" + "\n".join(launched) if launched else "")
 
 
 def tell(target, text, orca, state=None):
     """La réponse du Director, tapée dans le terminal du Conductor de `<projet>#<élément>` : le Conductor l'écrit en
     message Ballet et la reçoit lui-même. Un élément inconnu, ou un terminal disparu, est refusé."""
-    handle = _known_terminal(target, read_conductors(state))
+    handle = _known_terminal(target, ballet_conductors.read(state))
     if not _terminal_alive(handle, orca):
         raise MaestroError(f"the terminal {handle} of {target} is gone: the Conductor is not running anymore")
     orca(["terminal", "send", "--terminal", handle, "--text", f"Director answers: {text}", "--enter"])
     return f"told {target} (terminal {handle})"
+
+
+def _known_terminal(target, registry):
+    if not TARGET.match(target):
+        raise MaestroError(f"not an item: {target} (expected <project>#<item>, e.g. antimurphy#12)")
+    if target not in registry:
+        known = ", ".join(sorted(registry)) or "none yet"
+        raise MaestroError(f"no terminal known for {target}: a Conductor is known once Maestro launches it, or it escalates or finishes (known: {known})")
+    return registry[target]["terminal"]
 
 
 # --- le bail ---------------------------------------------------------------
@@ -246,7 +262,7 @@ def _wait_runs(pid):
 
 def _take_the_wait(owner, state):
     """Le jeton tient le bail et aucune autre attente ne tourne pour lui : l'attente note son pid. Rend la boîte."""
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         lease = config["lease"]
         if lease["owner"] != owner:
@@ -261,7 +277,7 @@ def _take_the_wait(owner, state):
 
 def _release_the_wait(owner, state):
     """L'attente finie : pid remis à 0 et bail renouvelé, sauf si un autre a pris le bail entre-temps."""
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         if config["lease"]["owner"] != owner:
             return
@@ -312,7 +328,7 @@ def _wait_for_messages(box, orca):
 
 def _owned_mailbox(owner, state):
     """Le jeton tient le bail : le bail est renouvelé, et la boîte rendue."""
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         if config["lease"]["owner"] != owner:
             raise MaestroError("this session is not Maestro anymore: " + _who_holds(config["lease"]))
@@ -343,7 +359,7 @@ def _history_of(run, orca):
 
 
 def _forget_previous_run(state):
-    with _locked(state):
+    with ballet_state.locked(state):
         config = read_config(state)
         if config["mailbox"].pop("previous_run", None):
             write_config(config, state)
@@ -369,46 +385,10 @@ def _message_text(message, tag=""):
     return f"{head}{when}{' · ' + tag if tag else ''}\nSubject: {message.get('subject', '')}\n{message.get('body', '')}".rstrip()
 
 
-# --- conductors.json ------------------------------------------------------------
-
-
-def read_conductors(state=None):
-    """Le registre minimal des Conductors : `<projet>#<élément>` → son terminal, vu quand, son dernier événement."""
-    path = _conductors_path(state)
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-
-
-def _note_conductors(messages, state):
-    """Chaque `status` de sujet `<projet>#<élément> · <événement>` dit où est son Conductor : son terminal expéditeur."""
-    seen = {}
-    for message in messages:
-        found = CONDUCTOR_SUBJECT.match(message.get("subject", ""))
-        if message.get("type") == "status" and found and message.get("from"):
-            seen[found.group(1)] = {"terminal": message["from"], "seen": _now(), "event": found.group(2)}
-    if not seen:
-        return
-    with _locked(state):
-        registry = {**read_conductors(state), **seen}
-        _write_atomically(_conductors_path(state), json.dumps(registry, indent=2, ensure_ascii=False) + "\n")
-
-
-def _known_terminal(target, registry):
-    if not TARGET.match(target):
-        raise MaestroError(f"not an item: {target} (expected <project>#<item>, e.g. antimurphy#12)")
-    if target not in registry:
-        known = ", ".join(sorted(registry)) or "none yet"
-        raise MaestroError(f"no terminal known for {target}: a Conductor is known once it escalates or finishes (known: {known})")
-    return registry[target]["terminal"]
-
-
-def _conductors_path(state=None):
-    return _state_dir(state) / CONDUCTORS_NAME
-
-
 # --- les sessions d'un projet -----------------------------------------------------
 
 
-def _sessions_of(home):
+def sessions_of(home):
     """Les sessions ouvertes d'un projet, Rehearsal puis Workshop, lues avec les fonctions de leurs scripts. Ces
     scripts importent celui-ci : l'import se fait ici, pas en tête. Un projet sans `.ballet/run/` n'a aucune session
     (et rien n'y est créé). Chacune : (élément, Rehearsal courante, état)."""
@@ -429,6 +409,35 @@ def _rehearsal_state(session, home):
         return ballet_rehearsal.load(session.current, home).status if session.current else session.status
     except ballet_rehearsal.RehearsalError:
         return session.status
+
+
+def _conductor_lines(registry, orca):
+    """Un Conductor par ligne : élément, genre, état, terminal et s'il vit, dernier événement, URL Remote Control. Un
+    Conductor fini dont le terminal est fermé n'est plus que de l'histoire : il n'est pas montré."""
+    if not registry:
+        return []
+    alive = _live_terminals_or_none(orca)
+    lines = []
+    for key, line in sorted(registry.items()):
+        terminal = _terminal_state(line["terminal"], alive)
+        if ballet_conductors.state_of(line) == ballet_conductors.FINISHED and terminal == "gone":
+            continue
+        last = f"last: {line['event']}" if line.get("event") else "no event yet"
+        lines.append("  ".join(part for part in (key, line.get("kind") or "?", ballet_conductors.state_of(line),
+                                                  f"{line['terminal']} ({terminal})", last, line.get("url", "")) if part))
+    return lines
+
+
+def _live_terminals_or_none(orca):
+    """Les terminaux vivants ; `None` quand Orca ne répond pas : `status` le dit au lieu d'échouer."""
+    try:
+        return live_terminals(orca)
+    except (MaestroError, json.JSONDecodeError):
+        return None
+
+
+def _terminal_state(handle, alive):
+    return "state unknown" if alive is None else "alive" if handle in alive else "gone"
 
 
 def _session_line(alias, session, registry):
@@ -453,22 +462,7 @@ def read_config(state=None):
 
 def write_config(config, state=None):
     """Écrit l'état d'un coup, par un fichier temporaire puis un renommage."""
-    _write_atomically(_config_path(state), to_toml(config))
-
-
-def _write_atomically(path, text):
-    """Un fichier temporaire à côté, puis un renommage ; un lecteur voit l'ancien contenu ou le nouveau, jamais la moitié."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as file:
-            file.write(text)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    ballet_state.write_atomically(_config_path(state), to_toml(config))
 
 
 def to_toml(config):
@@ -503,25 +497,8 @@ def _value(value):
     raise MaestroError(f"cannot write {type(value).__name__} in {CONFIG_NAME}")
 
 
-def _state_dir(state=None):
-    return Path(state or os.environ.get("BALLET_HOME") or Path.home() / ".ballet")
-
-
 def _config_path(state=None):
-    return _state_dir(state) / CONFIG_NAME
-
-
-@contextmanager
-def _locked(state=None):
-    """Un seul appel de Maestro à la fois modifie son état."""
-    folder = _state_dir(state)
-    folder.mkdir(parents=True, exist_ok=True)
-    with open(folder / LOCK_NAME, "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+    return ballet_state.state_dir(state) / CONFIG_NAME
 
 
 # --- Orca ---------------------------------------------------------------------
@@ -529,14 +506,19 @@ def _locked(state=None):
 
 def _terminal_alive(handle, orca):
     """Le terminal vit-il encore dans Orca ? Une Orca injoignable lève : on ne recrée jamais une boîte à l'aveugle."""
-    return handle in _texts(json.loads(orca(["terminal", "list", "--json"])))
+    return handle in live_terminals(orca)
+
+
+def live_terminals(orca):
+    """Les terminaux ouverts dans Orca. Une Orca injoignable lève."""
+    return set(_texts(json.loads(orca(["terminal", "list", "--json"]))))
 
 
 def _replace_terminal(config, orca, state):
     """Un nouveau terminal vide pour la boîte, noté aussitôt (avant sa Run) : un appel qui échoue ensuite le retrouve."""
     previous_run = config["mailbox"].get("run")
     receipt = json.loads(orca(["terminal", "create", "--title", MAILBOX_TITLE, "--json"]))
-    terminal = _first_id(receipt, "term_", "orca terminal create")
+    terminal = first_id(receipt, "term_", "orca terminal create")
     config["mailbox"] = {"terminal": terminal, **({"previous_run": previous_run} if previous_run else {})}
     write_config(config, state)
     return config["mailbox"]
@@ -544,10 +526,10 @@ def _replace_terminal(config, orca, state):
 
 def _new_run(terminal, orca):
     receipt = json.loads(orca(["orchestration", "run-create", "--objective", MAILBOX_OBJECTIVE, "--from", terminal, "--json"]))
-    return _first_id(receipt, "run_", "orca orchestration run-create")
+    return first_id(receipt, "run_", "orca orchestration run-create")
 
 
-def _first_id(receipt, prefix, command):
+def first_id(receipt, prefix, command):
     found = next((text for text in _texts(receipt) if text.startswith(prefix)), None)
     if not found:
         raise MaestroError(f"{command} returned no {prefix}… id: {json.dumps(receipt)[:300]}")
@@ -566,7 +548,7 @@ def _texts(value):
             yield from _texts(item)
 
 
-def _orca(arguments):
+def run_orca(arguments):
     completed = subprocess.run([os.environ.get("ORCA_CLI_COMMAND", "orca"), *arguments], capture_output=True, text=True)
     if completed.returncode != 0:
         raise MaestroError(completed.stderr.strip() or completed.stdout.strip() or "orca failed")
@@ -579,7 +561,7 @@ def _orca(arguments):
 def main(argv, orca=None):
     """Affiche le résultat et sort avec 0 ; 1 si Maestro ne peut pas le faire, 2 sur un usage invalide."""
     try:
-        print(_command(argv[1:], orca or _orca))
+        print(_command(argv[1:], orca or run_orca))
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
@@ -604,7 +586,7 @@ def _command(arguments, orca):
     if arguments[:2] == ["recap", "--owner"] and len(arguments) == 3:
         return recap(arguments[2], orca)
     if arguments == ["status"]:
-        return status()
+        return status(orca)
     if arguments[:1] == ["tell"] and len(arguments) >= 3:
         return tell(arguments[1], " ".join(arguments[2:]), orca)
     raise UsageError(USAGE)

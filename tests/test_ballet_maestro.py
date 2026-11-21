@@ -11,6 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import ballet_conductors  # noqa: E402
 import ballet_maestro  # noqa: E402
 from ballet_rehearsal import Rehearsal, Session, Step  # noqa: E402
 from ballet_workshop import Workshop  # noqa: E402
@@ -412,7 +413,7 @@ class BalletMaestroTest(unittest.TestCase):
                              [self.message(sender="term_11", subject="am#3 · escalate")]]
         for _ in range(3):
             ballet_maestro.wait(owner, self.orca)
-        registry = ballet_maestro.read_conductors()
+        registry = ballet_conductors.read()
         self.assertEqual({key: value["terminal"] for key, value in registry.items()}, {"antimurphy#12": "term_10", "am#3": "term_11"})
 
     def test_wait_sans_status_de_conductor_n_ecrit_pas_de_registre(self):
@@ -446,7 +447,7 @@ class BalletMaestroTest(unittest.TestCase):
         check = self.orca.ran("orchestration", "check")[0]
         self.assertNotIn("--wait", check)
         self.assertNotIn("--peek", check)
-        self.assertEqual(ballet_maestro.read_conductors()["antimurphy#12"]["terminal"], "term_9")
+        self.assertEqual(ballet_conductors.read()["antimurphy#12"]["terminal"], "term_9")
         inbox = self.orca.ran("orchestration", "inbox")[0]
         self.assertEqual(inbox[inbox.index("--terminal") + 1], "run:run_1")
         self.assertIn("--full", inbox)
@@ -500,9 +501,9 @@ class BalletMaestroTest(unittest.TestCase):
         self.open_session(folder, "#12", current="FEAT-004.1", rehearsal_status="escalated")
         self.open_session(folder, "FEAT-005")
         (self.state / "conductors.json").write_text(json.dumps({"antimurphy#12": {"terminal": "term_9", "seen": "x", "event": "escalate"}}), encoding="utf-8")
-        lines = ballet_maestro.status().splitlines()
-        self.assertEqual(lines, ["antimurphy  #12  FEAT-004.1  escalated  term_9",
-                                 "antimurphy  FEAT-005  -  open  no terminal known"])
+        lines = ballet_maestro.status(self.orca).splitlines()
+        self.assertEqual(lines[:2], ["antimurphy  #12  FEAT-004.1  escalated  term_9",
+                                     "antimurphy  FEAT-005  -  open  no terminal known"])
 
     def test_status_montre_aussi_les_workshops_ouverts_et_ignore_les_sessions_finies(self):
         import ballet_rehearsal
@@ -512,12 +513,12 @@ class BalletMaestroTest(unittest.TestCase):
         run = folder / ".ballet" / "run"
         (run / "workshop-OPP-12.json").write_text(json.dumps({"item": "OPP-12", "repo": "r", "status": "escalated"}), encoding="utf-8")
         (run / "workshop-OPP-13.json").write_text(json.dumps({"item": "OPP-13", "repo": "r", "status": "done"}), encoding="utf-8")
-        self.assertEqual(ballet_maestro.status(), "antimurphy  OPP-12  Workshop  escalated  no terminal known")
+        self.assertEqual(ballet_maestro.status(self.orca), "antimurphy  OPP-12  Workshop  escalated  no terminal known")
 
     def test_status_sans_session_ni_dossier_run_le_dit_et_ne_cree_rien(self):
         folder = self.project("antimurphy")
         ballet_maestro.add_project("antimurphy", str(folder))
-        self.assertEqual(ballet_maestro.status(), "no open session in any project")
+        self.assertEqual(ballet_maestro.status(self.orca), "no open session in any project")
         self.assertFalse((folder / ".ballet").exists())
 
     def test_status_parcourt_chaque_projet(self):
@@ -525,7 +526,7 @@ class BalletMaestroTest(unittest.TestCase):
             folder = self.project(name)
             ballet_maestro.add_project(name, str(folder))
             self.open_session(folder, item)
-        self.assertEqual([line.split()[0] for line in ballet_maestro.status().splitlines()], ["alpha", "beta"])
+        self.assertEqual([line.split()[0] for line in ballet_maestro.status(self.orca).splitlines()], ["alpha", "beta"])
 
     # --- tell ---
 

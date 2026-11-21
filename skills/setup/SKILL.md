@@ -66,8 +66,8 @@ From now on, each Conductor (`/ballet:rehearsal`, `/ballet:workshop --autopilot`
 
 Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca, with or without a profile), the mailbox. Then tell the Director what to do next: **open `/ballet:maestro`** in a session of their own, from anywhere. That session takes the lease (only one session reads the mailbox), tells what happened while they were away, then sleeps on the mailbox and wakes at each escalation. Then say plainly what is **not there yet**:
 
-- `ballet_launch.py` and the Conductors' registry: Conductors are still launched by hand, one per item;
-- the Monitor (`ballet_monitor.py`), which will watch GitHub for items turned `ready`;
+- `stop` and `restart` (Maestro launches Conductors on the Director's word, but cannot stop one yet);
+- the Monitor (`ballet_monitor.py`), which will watch GitHub for items turned `ready` and let Maestro launch them without being asked;
 - the headless mode (a VPS, `orca serve` under systemd, the keeper).
 
 You change nothing in the projects: only `~/.ballet/`, Orca's project list and its mailbox terminal.

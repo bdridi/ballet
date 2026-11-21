@@ -1,0 +1,113 @@
+"""Le registre des Conductors de Maestro (OPP-02) : `~/.ballet/conductors.json` (`BALLET_HOME` pour un autre dossier).
+
+Une ligne par `<projet>#<élément>`, écrite par deux voies : `ballet_launch.py` quand Maestro lance le Conductor, et
+`ballet_maestro.py` (`wait`, `recap`) quand un Conductor annonce `escalate` ou `done`. Chaque ligne :
+
+    project, item   le projet (son alias) et l'élément (`12`, `FEAT-002`, `BUG-004`)
+    kind            `rehearsal` ou `workshop` ; vide pour un Conductor que Maestro n'a pas lancé
+    terminal        le terminal Orca du Conductor : c'est où `tell` écrit
+    url             l'URL Remote Control de sa session ; vide quand on ne l'a pas trouvée
+    started         la date du dernier lancement ; `starts`, celles des dernières 48 heures (le plafond du jour)
+    seen, event     la date et le nom du dernier événement annoncé (`escalate`, `done`)
+    state           `running`, ou `finished` dès que le Conductor a annoncé `done`
+
+Une ligne écrite avant l'étape 3 (terminal, `seen`, `event`) reste lisible : ce qui manque se déduit.
+Toute écriture passe par un verrou, un fichier temporaire, puis un renommage.
+"""
+
+import json
+import re
+from datetime import datetime, timedelta, timezone
+
+import ballet_state
+
+CONDUCTORS_NAME = "conductors.json"
+RUNNING, FINISHED = "running", "finished"
+DONE_EVENT = "done"
+CONDUCTOR_SUBJECT = re.compile(r"^(\S+#\S+) · (.+)$")   # `<projet>#<élément> · <événement>`
+KEEP_STARTS = timedelta(hours=48)
+
+
+def read(state=None):
+    """Tout le registre : `<projet>#<élément>` → sa ligne ; vide sans fichier."""
+    path = _path(state)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def record_launch(key, project, item, kind, terminal, state=None):
+    """Une nouvelle ligne pour un lancement : elle remplace celle du même élément, dont elle garde les dates de lancement."""
+    now = _now()
+    with ballet_state.locked(state):
+        registry = read(state)
+        starts = [*_recent(registry.get(key, {}).get("starts", [])), now]
+        registry[key] = {"project": project, "item": item, "kind": kind, "terminal": terminal, "url": "",
+                         "started": now, "starts": starts, "seen": "", "event": "", "state": RUNNING}
+        _write(registry, state)
+
+
+def note_url(key, url, state=None):
+    """L'URL Remote Control trouvée après le lancement, sur la ligne du lancement."""
+    with ballet_state.locked(state):
+        registry = read(state)
+        if key in registry:
+            registry[key]["url"] = url
+            _write(registry, state)
+
+
+def note_events(messages, state=None):
+    """Chaque `status` de sujet `<projet>#<élément> · <événement>` dit où est son Conductor (son terminal expéditeur) et
+    ce qu'il vient d'annoncer ; `done` clôt la ligne. Un Conductor que Maestro n'a pas lancé reçoit une ligne ici."""
+    seen = {}
+    for message in messages:
+        found = CONDUCTOR_SUBJECT.match(message.get("subject", ""))
+        if message.get("type") == "status" and found and message.get("from"):
+            seen[found.group(1)] = (message["from"], found.group(2))
+    if not seen:
+        return
+    with ballet_state.locked(state):
+        registry = read(state)
+        for key, (terminal, event) in seen.items():
+            registry[key] = _seen(registry.get(key) or _unlaunched(key), terminal, event)
+        _write(registry, state)
+
+
+def state_of(line):
+    """`running` ou `finished` ; une ligne d'avant l'état se lit sur son dernier événement."""
+    return line.get("state") or (FINISHED if line.get("event") == DONE_EVENT else RUNNING)
+
+
+def launches_today(registry):
+    """Combien de Conductors ont été lancés aujourd'hui (jour local), toutes lignes confondues."""
+    today = datetime.now().astimezone().date()
+    return sum(1 for line in registry.values() for start in line.get("starts", []) if _local_day(start) == today)
+
+
+def _seen(line, terminal, event):
+    return {**line, "terminal": terminal, "seen": _now(), "event": event,
+            "state": FINISHED if event == DONE_EVENT else RUNNING}
+
+
+def _unlaunched(key):
+    project, _, item = key.partition("#")
+    return {"project": project, "item": item, "kind": "", "url": "", "started": "", "starts": []}
+
+
+def _recent(starts):
+    limit = datetime.now(timezone.utc) - KEEP_STARTS
+    return [start for start in starts if datetime.fromisoformat(start) > limit]
+
+
+def _local_day(start):
+    return datetime.fromisoformat(start).astimezone().date()
+
+
+def _write(registry, state):
+    ballet_state.write_atomically(_path(state), json.dumps(registry, indent=2, ensure_ascii=False) + "\n")
+
+
+def _path(state=None):
+    return ballet_state.state_dir(state) / CONDUCTORS_NAME
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")

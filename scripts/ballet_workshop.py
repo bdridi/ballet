@@ -574,6 +574,11 @@ def _load(item, home):
     return Workshop(**json.loads(path.read_text(encoding="utf-8")))
 
 
+def next_item(home):
+    """L'élément qu'un Workshop autopilot sans nom choisirait dans ce projet : la première ligne de *Next up* sans Workshop."""
+    return _pick_in_backlog(_checked_config(home), home)
+
+
 def _pick_in_backlog(config, home):
     """L'élément du Workshop qui choisit seul : la première ligne de *Next up* (rangée par le Dramaturg avec le Director)
     qui n'a encore aucune session ici. Les lignes `CAP-` n'en sont pas : une capability se découpe d'abord."""
