@@ -24,8 +24,7 @@ def issue(number, kind="Feature", status="ready", priority="", mode="", created=
         "createdAt": created,
         "issueType": {"name": kind} if kind else None,
         "issueFieldValues": {"nodes": [{"name": value, "field": {"name": field}} for field, value in values if value]},
-        "issueDependenciesSummary": {"totalBlockedBy": len(blocked_by) if total_blocked_by is None else total_blocked_by},
-        "blockedBy": {"nodes": list(blocked_by)},
+        "blockedBy": {"totalCount": len(blocked_by) if total_blocked_by is None else total_blocked_by, "nodes": list(blocked_by)},
     }
 
 
@@ -102,7 +101,8 @@ class DependenciesTest(unittest.TestCase):
         self.assertEqual(len(github.calls), 1)
         query = next(argument for argument in github.calls[0] if argument.startswith("query="))
         self.assertIn("blockedBy(first: 20)", query)
-        self.assertIn("issueDependenciesSummary { totalBlockedBy }", query)
+        self.assertIn("blockedBy(first: 20) { totalCount nodes {", query)
+        self.assertNotIn("issueDependenciesSummary", query)   # son compte a plusieurs secondes de retard : blockedBy.totalCount est à jour
         self.assertIn("nameWithOwner", query)
 
     def test_un_element_sans_bloqueur_est_lancable(self):
@@ -166,6 +166,12 @@ class DependenciesTest(unittest.TestCase):
     def test_un_bloqueur_nul_dans_la_reponse_est_ignore_et_compte_comme_illisible(self):
         item = self.items(issue(2, blocked_by=[None], total_blocked_by=1))["#2"]
         self.assertIn("cannot be read", item["doubt"])
+
+    def test_le_compte_en_retard_de_issue_dependencies_summary_ne_fait_pas_un_doute(self):
+        stale = issue(2)
+        stale["issueDependenciesSummary"] = {"totalBlockedBy": 1}   # GitHub le met à jour plusieurs secondes après un `unblock`
+        item = self.items(stale)["#2"]
+        self.assertEqual((item["blocked_by"], item["doubt"]), ([], ""))
 
     def test_dependencies_of_rend_les_dependances_d_une_issue_ouverte_meme_non_prete(self):
         github = FakeGitHub(page(issue(1), issue(2, status="in-rehearsal", blocked_by=[blocker(1)])))

@@ -39,8 +39,7 @@ OPEN_ISSUES = """query($owner: String!, $name: String!, $after: String) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number title url createdAt issueType { name }
-        issueDependenciesSummary { totalBlockedBy }
-        blockedBy(first: 20) { nodes { number state stateReason url repository { nameWithOwner } } }
+        blockedBy(first: 20) { totalCount nodes { number state stateReason url repository { nameWithOwner } } }
         issueFieldValues(first: 20) { nodes {
           ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } }
         } }
@@ -160,8 +159,10 @@ def _readable_blockers(issue):
 
 
 def _unreadable_doubt(issue, readable):
-    """GitHub compte plus de bloqueurs que d'entrées lisibles : un repo inaccessible, ou plus que `MAX_BLOCKERS`."""
-    total = (issue.get("issueDependenciesSummary") or {}).get("totalBlockedBy", len(readable))
+    """GitHub compte plus de bloqueurs que d'entrées lisibles : un repo inaccessible, ou plus que `MAX_BLOCKERS`.
+    Le compte est `blockedBy.totalCount`, à jour tout de suite ; `issueDependenciesSummary` a plusieurs secondes de retard
+    (vérifié en vrai) et ferait voir un bloqueur illisible juste après un `unblock`."""
+    total = (issue.get("blockedBy") or {}).get("totalCount", len(readable))
     if total > len(readable):
         return f"{total - len(readable)} of its {total} blockers cannot be read (inaccessible repo, or more than {MAX_BLOCKERS})"
     return ""
