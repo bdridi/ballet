@@ -46,7 +46,7 @@ It returns when a message arrives: the background command ends and wakes you. It
 1. Tell the Director what happened, by the subject's event:
    - **`escalate`** or **`done`** (a Conductor): **the reason** (the body's `NEXT:` line), **the links** (issue, pull request, plan), and **what needs deciding**, if anything. Short; no raw dump. An `escalate` waits for the Director; a `done` is news.
    - **`ready`** (the Monitor): an item turned `ready` (or, `<project> · ready (<n> already)`, the items already ready when the Monitor first looked at a project). Each item line is followed by a `DECISION:` line: apply it (section 3, *Ready items*).
-   - **`gone`** (the Monitor): a Conductor's terminal no longer exists. Say so (item, kind, when it started, last event), and **propose to relaunch it: only on the Director's yes**, with the same `ballet_launch.py` command as its kind (`rehearsal` or `workshop`).
+   - **`gone`** (the Monitor): a Conductor's terminal no longer exists. Say so (item, kind, when it started, last event), and **propose to relaunch it: only on the Director's yes** (the script agrees: `ready` lists that item with `DECISION: ask the Director (its last Conductor is gone …)`), with the same `ballet_launch.py` command as its kind (`rehearsal` or `workshop`).
 2. After a `done` or a `gone`, a Conductor slot is free: run `ready`, and apply the rule to the items it lists (one that a limit refused earlier is still there).
 3. Start the wait again. Always exactly **one** wait at a time: never start a second before the first has ended.
 

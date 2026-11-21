@@ -633,6 +633,20 @@ class BalletMaestroTest(unittest.TestCase):
         ballet_maestro.add_project("antimurphy", str(self.project("antimurphy")))
         self.assertIn("ask the Director", ballet_maestro.decision("antimurphy", "Task"))
 
+    def test_un_element_dont_le_conductor_a_disparu_est_demande_au_director(self):
+        self.trust("antimurphy", "Feature")
+        ballet_conductors.record_launch("antimurphy#49", "antimurphy", "#49", "rehearsal", "term_7")
+        ballet_conductors.mark_gone("antimurphy#49", "term_7")
+        self.assertIn("its last Conductor is gone", ballet_maestro.decision("antimurphy", "Feature", number="49"))
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Feature", number="50"), "launch")
+
+    def test_un_element_relance_par_le_director_retrouve_la_regle(self):
+        self.trust("antimurphy", "Feature")
+        ballet_conductors.record_launch("antimurphy#49", "antimurphy", "#49", "rehearsal", "term_7")
+        ballet_conductors.mark_gone("antimurphy#49", "term_7")
+        ballet_conductors.record_launch("antimurphy#49", "antimurphy", "#49", "rehearsal", "term_8")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Feature", number="49"), "launch")
+
     def test_la_confiance_est_par_projet(self):
         self.trust("antimurphy", "Task")
         self.trust("beta")

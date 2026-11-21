@@ -270,10 +270,11 @@ def ready(state=None):
     return "\n".join(lines) if lines else "no item is waiting: every ready item has its Conductor (or the Monitor has not seen any)"
 
 
-def decision(project, kind, state=None):
-    """`launch` quand le type est confié à l'auto par son projet et que rien n'est en pause ; sinon `ask the Director
-    (<raison>)`. C'est ici que cela se décide : l'agent ne fait que relayer le verdict."""
-    return _decision(project, kind, read_config(state), state)
+def decision(project, kind, state=None, number=None):
+    """`launch` quand le type est confié à l'auto par son projet, que rien n'est en pause et que le dernier Conductor de
+    l'élément n'a pas disparu ; sinon `ask the Director (<raison>)`. C'est ici que cela se décide : l'agent ne fait que
+    relayer le verdict."""
+    return _decision(project, kind, read_config(state), state, number)
 
 
 def pause(state=None):
@@ -294,7 +295,7 @@ def resume(state=None):
     return "auto launch resumed: the projects' auto_launch rule applies again"
 
 
-def _decision(project, kind, config, state):
+def _decision(project, kind, config, state, number=None):
     if project not in config["projects"]:
         return f"ask the Director (unknown project {project})"
     if _pause_flag(state).exists():
@@ -304,7 +305,15 @@ def _decision(project, kind, config, state):
         return f"ask the Director ([projects.{project}] auto_launch must be a list of types)"
     if kind.casefold() not in (entrusted.casefold() for entrusted in trusted):
         return f"ask the Director ({kind} is not in auto_launch of {project})"
+    if number is not None and _conductor_gone(f"{project}#{number}", state):
+        return "ask the Director (its last Conductor is gone: relaunching on its own could loop)"
     return "launch"
+
+
+def _conductor_gone(key, state):
+    """Le dernier Conductor de l'élément a disparu sans finir : seul le Director décide de le relancer."""
+    line = ballet_conductors.read(state).get(key)
+    return bool(line) and ballet_conductors.state_of(line) == ballet_conductors.GONE
 
 
 def _is_list_of_text(value):
@@ -323,7 +332,7 @@ def _ready_lines(config, registry, state):
     for alias, items in sorted(ballet_monitor.read_ready(state).items()):
         for item in items:
             if alias in config["projects"] and not _is_running(registry.get(f"{alias}#{item['number']}")):
-                verdict = _decision(alias, item["type"], config, state)
+                verdict = _decision(alias, item["type"], config, state, item["number"])
                 lines.append(f"{alias}#{item['number']}  {item['type']}  {item['priority'] or '-'}  {item['title']}  {item['url']}  "
                              f"DECISION: {verdict}")
     return lines
@@ -526,7 +535,7 @@ def _body_with_decisions(message, config, state):
         lines.append(line)
         item = ballet_monitor.READY_LINE.match(line)
         if item:
-            lines.append(f"DECISION: {_decision(project, item.group('type'), config, state)}")
+            lines.append(f"DECISION: {_decision(project, item.group('type'), config, state, item.group('number'))}")
     return "\n".join(lines)
 
 
