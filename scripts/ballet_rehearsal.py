@@ -1760,8 +1760,16 @@ def main(argv, home=".", tools=None):
         print(error, file=sys.stderr)
         return 2
     except (RehearsalError, ballet_github.GitHubError) as error:
-        print(Step("escalate", str(error)).render())
+        print(_shown(Step("escalate", str(error), item=named_item(command, arguments)), home, tools))
     return 0
+
+
+def named_item(command, arguments):
+    """L'élément nommé sur la ligne de commande (`#12`, `FEAT-002`), sinon `?` : une panne est annoncée à Maestro
+    même avant que la session existe. Rien pour `status`, une simple lecture."""
+    if command == "status":
+        return ""
+    return next((item for item in map(_as_item, arguments) if item), "?")
 
 
 def _shown(result, home, tools):

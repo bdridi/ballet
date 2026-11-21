@@ -1358,6 +1358,14 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertIn("- Maestro told: antimurphy#3 · escalate", lines)
         self.assertTrue(lines[-1].startswith("NEXT: escalate"))
 
+    def test_une_panne_au_demarrage_est_annoncee_a_maestro_sous_l_element_nomme(self):
+        self.maestro_mailbox()
+        self.begin()
+        _, lines = self.run_main("begin", "3")
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--subject") + 1], "antimurphy#3 · escalate")
+        self.assertTrue(lines[-1].startswith("NEXT: escalate"))
+
     def test_un_pas_qui_attend_ou_une_simple_lecture_n_est_pas_annonce(self):
         self.maestro_mailbox()
         _, waited = self.run_main("begin", "3")

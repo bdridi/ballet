@@ -197,7 +197,7 @@ Chaque boucle se lance en `assisted` (par défaut) ou en `autopilot`.
 
 **En autopilot, chacun décide dans son périmètre** : le Dramaturg tranche le métier ; le Choreographer l'architecture, et demande le métier au Dramaturg ; le Dancer suit l'architecture, et demande au Choreographer. Le Dramaturg ne sait pas plus que les specs : ce qu'il tranche seul, il le devine. Chaque décision prise sans le Director est donc tracée (ADR pour l'architecture, specs ou rapport pour le métier), **marquée** sur l'issue ou la PR, et réunie dans un **rapport du matin** (OPP-52). Ne remonte au Director en direct que ce qui sort de tous les périmètres, et les déclencheurs mécaniques ci-dessous.
 
-**Un budget borne l'autopilot** (par nuit, par projet ; OPP-53) : atteint, l'observateur n'ouvre plus rien et le dit.
+**Un budget borne l'autopilot** (par nuit, par projet ; OPP-53) : atteint, Maestro n'ouvre plus rien et le dit.
 
 **Exécution** : une Rehearsal ouverte à la fois, dans son worktree, une PR à la fois ; plus tard, plusieurs en parallèle, chacune dans son worktree, avec une file de merge (§7).
 
@@ -236,7 +236,7 @@ Attendre le tampon du Director n'est jamais un échec : le Conductor prévient l
 
 ## 7. Le Conductor
 
-- **Une session de Conductor par élément de la file**, neuve : l'observateur la lance quand une `task`, un `bug` ou une `feature` passe prête, et lance la suivante après la Premiere. L'état vit dans les scripts et sur GitHub, pas dans la session : rien à garder d'un élément à l'autre, pas de contexte qui dérive.
+- **Une session de Conductor par élément de la file**, neuve : le Monitor signale à Maestro la `task`, le `bug` ou la `feature` passé prêt, et Maestro la lance (seul pour ce que le projet confie à l'auto, sinon sur le oui du Director), puis la suivante après la Premiere. L'état vit dans les scripts et sur GitHub, pas dans la session : rien à garder d'un élément à l'autre, pas de contexte qui dérive.
 - **Le Workshop** se lance à la demande du Director (`assisted`), ou à heure fixe (`autopilot`) ; ce qu'il sort entre dans la file par le script GitHub.
 - **Plus tard, en parallèle**, le Conductor de Rehearsal ouvre plusieurs Rehearsals, avec une file de merge (`parallel-conductor`, hors V1) :
   - il ne lance en parallèle que des Rehearsals indépendantes : pas de `needs` entre leurs repos, pas de slices d'une même feature ;
@@ -253,7 +253,7 @@ Attendre le tampon du Director n'est jamais un échec : le Conductor prévient l
 
 ### 7.1 La Rehearsal séquentielle
 
-L'observateur joue la file dans son ordre (à trancher, §17). Une seule Rehearsal ouverte à la fois, un seul worker actif, pas de dépendances entre éléments (OPP-54). À la Premiere d'une Rehearsal, l'observateur lance la suivante, depuis `main` : une feature est donc planifiée sur le vrai `main`, après la dernière Premiere de la précédente. Une escalade met la file en pause ; le Director tranche, puis la Rehearsal reprend, et la file avec elle.
+Maestro joue la file dans son ordre (à trancher, §17). Une seule Rehearsal ouverte à la fois, un seul worker actif, pas de dépendances entre éléments (OPP-54). À la Premiere d'une Rehearsal, Maestro lance la suivante, depuis `main` : une feature est donc planifiée sur le vrai `main`, après la dernière Premiere de la précédente. Une escalade met la file en pause ; le Director tranche, puis la Rehearsal reprend, et la file avec elle.
 - **Une feature sans plan** ouvre une Rehearsal de **planification**, dont le seul rôle est le Choreographer : il tranche, découpe et publie sans attendre de oui ; les questions de produit vont au Dramaturg, ce qu'il ne peut pas trancher au Director (escalade). Une issue sans plan suit le même chemin.
 - **À son rapport**, le script lit sur GitHub l'issue et ses slices (`Part of #N` en première ligne) et les place en tête de file ; une issue sans slices entre seule.
 - **Les ADR** du Choreographer (et `AGENTS.md`) partent avec la première slice, ou l'issue unique : le worktree de la planification devient le sien, ses commits restent au Choreographer pour la politique et arrivent sur `main` au premier merge. Pas de PR d'ADR à part.
@@ -436,7 +436,7 @@ En mono-repo, une seule entrée `[repos.<nom>]` avec `path = "."` et sans `needs
 **Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca. Chaque boucle a sa commande (noms à trancher, OPP-08) :
 
 1. le Workshop, `/ballet:workshop` : `assisted` par défaut, le Director cadre en direct avec le Dramaturg (`/ballet:dramaturg`), qui demande l'avis du Choreographer au besoin, sans session ; la feature prête est publiée en issue et entre dans la file. `/ballet:workshop --autopilot [<élément>]` (une ligne du backlog, `BUG-004` ; sans élément, la première de *Next up*) confie l'élément à un Conductor, qui le joue jusqu'à l'issue publiée (`proposed`, ou `ready` selon `[workshop] queue_approval_skipped`, sauf pour l'élément que le Workshop a choisi seul) ;
-2. l'observateur surveille la file et lance, pour chaque élément prêt, `/ballet:rehearsal <élément>` dans une session neuve, au mode lu sur son champ Rehearsal mode (`--autopilot`, `--require-plan-approval`) ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
+2. le Monitor surveille la file et signale à Maestro chaque élément prêt ; Maestro lance `/ballet:rehearsal <élément>` dans une session neuve, au mode lu sur son champ Rehearsal mode (`--autopilot`, `--require-plan-approval`) ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
 3. le Conductor lit le profil et lance Choreographer, Dancer et Critic dans les bons repos (`orca orchestration worker-start --worktree path:<repo>`).
 
 Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte sans effort, Mistral Vibe n'y charge `AGENTS.md` et les skills que dans un dossier de confiance, et une session y correspond à un projet.
@@ -472,7 +472,7 @@ La méthode s'éprouve sur un **projet de test** (`../antimurphy`, mono-repo Rus
 2. la Rehearsal séquentielle, avec le journal ;
 3. les mêmes issues rejouées avec un Dancer Claude puis Mistral, et comparées ;
 4. les deux boucles en `autopilot`, Workshop puis Rehearsal (le mode nuit) ;
-5. la file sur GitHub et l'observateur ;
+5. la file sur GitHub, le Monitor et Maestro ;
 6. un projet multi-repos, pour éprouver le profil ;
 7. la Rehearsal en parallèle ;
 8. la migration de Flownest.
@@ -491,7 +491,7 @@ Tranchées : voir `docs/ADR/`.
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
 - Les types et les champs natifs des issues, par l'API : lecture, écriture, et trace de leurs changements dans la timeline (OPP-03, à vérifier par un spike).
 - En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas (OPP-54) ?
-- L'observateur : un script lancé à intervalle, ou les automations Orca ? Et pour réveiller le Workshop en autopilot ?
+- Le Monitor : un script qui tourne en continu dans un terminal Orca (OPP-01, OPP-02) ; reste à trancher comment réveiller le Workshop en autopilot à heure fixe.
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.
 - Le Dramaturg consulté pendant la Rehearsal reste-t-il éphémère, ou devient-il persistant ?
 - Le format exact du journal d'événements (OPP-36).

@@ -892,6 +892,16 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertIn(f"- Maestro told: {self.home.resolve().name}#BUG-004 · done", out)
         self.assertTrue(out.splitlines()[-1].startswith("NEXT: done"))
 
+    def test_une_panne_au_demarrage_est_annoncee_a_maestro_mais_pas_celle_d_un_status(self):
+        ballet_maestro.write_config({"mailbox": {"terminal": "term_box", "run": "run_box"}})
+        self.begin()
+        _, out, _ = self.run_main("begin", "BUG-004")
+        self.run_main("status", "BUG-009")
+        sends = [command for command in self.world.ran("orca", "orchestration", "send") if "run:run_box" in command]
+        self.assertEqual([send[send.index("--subject") + 1] for send in sends],
+                         [f"{self.home.resolve().name}#BUG-004 · escalate"])
+        self.assertIn("NEXT: escalate the Workshop of BUG-004 is already open", out)
+
     def test_sans_maestro_toml_rien_n_est_envoye_a_maestro(self):
         self.begin()
         self.world.said("worker_done", report(), "msg_1")

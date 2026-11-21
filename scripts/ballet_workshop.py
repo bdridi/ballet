@@ -703,7 +703,9 @@ def main(argv, home=".", tools=None):
         print(error, file=sys.stderr)
         return 2
     except ERRORS as error:
-        print(Step("escalate", str(error)).render())
+        step = Step("escalate", str(error), item=_named_item(command, arguments))
+        ballet_maestro.announce(step, home, tools.orca)
+        print(step.render())
     return 0
 
 
@@ -721,6 +723,14 @@ def _command(command, arguments, home, tools):
         if command == "status" and not rest:
             return status(item, home, tools)
     raise UsageError(USAGE)
+
+
+def _named_item(command, arguments):
+    """L'élément nommé sur la ligne de commande (`BUG-004`), sinon `?` : une panne est annoncée à Maestro même avant
+    que la session existe. Rien pour `status`, une simple lecture."""
+    if command == "status":
+        return ""
+    return next((argument for argument in arguments if WORKSHOP_ITEM.match(argument)), "?")
 
 
 def _item(text):
