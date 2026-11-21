@@ -428,51 +428,62 @@ class BalletMaestroTest(unittest.TestCase):
                 "body": body, "type": "status", "priority": "high", "read": read, "sequence": sequence,
                 "created_at": "2026-11-21T13:46:09Z"}
 
-    def test_recap_montre_le_non_lu_et_l_historique_du_plus_ancien_au_plus_recent(self):
-        ballet_maestro.mailbox(self.orca)
+    def test_recap_montre_l_historique_du_plus_ancien_au_plus_recent_et_marque_le_non_lu_consomme(self):
+        owner = self.claimed()
+        self.orca.batches = [[{"id": "msg_3", "type": "status", "from": "term_9", "subject": "am#3 · done"}]]
         self.orca.history = [self.row(3, read=0, subject="am#3 · done"), self.row(2, subject="am#2 · escalate"), self.row(1, subject="am#1 · done")]
-        output = ballet_maestro.recap(self.orca)
+        output = ballet_maestro.recap(owner, self.orca)
         self.assertLess(output.index("am#1"), output.index("am#2"))
         self.assertLess(output.index("am#2"), output.index("am#3"))
-        self.assertIn("3 message(s), 1 unread", output)
+        self.assertIn("3 message(s), 1 unread until now", output)
         self.assertIn("· unread\nSubject: am#3 · done", output)
         self.assertIn("· read\nSubject: am#1 · done", output)
 
-    def test_recap_ne_consomme_rien(self):
-        ballet_maestro.mailbox(self.orca)
-        self.orca.history = [self.row(1, read=0)]
-        ballet_maestro.recap(self.orca)
-        self.assertEqual(self.orca.ran("orchestration", "check"), [])
+    def test_recap_consomme_le_non_lu_sans_attendre_et_note_ses_conductors(self):
+        owner = self.claimed()
+        self.orca.batches = [[{"id": "msg_1", "type": "status", "from": "term_9", "subject": "antimurphy#12 · escalate"}]]
+        ballet_maestro.recap(owner, self.orca)
+        check = self.orca.ran("orchestration", "check")[0]
+        self.assertNotIn("--wait", check)
+        self.assertNotIn("--peek", check)
+        self.assertEqual(ballet_maestro.read_conductors()["antimurphy#12"]["terminal"], "term_9")
         inbox = self.orca.ran("orchestration", "inbox")[0]
         self.assertEqual(inbox[inbox.index("--terminal") + 1], "run:run_1")
         self.assertIn("--full", inbox)
 
+    def test_recap_refuse_un_jeton_qui_ne_tient_pas_le_bail(self):
+        self.claimed()
+        with self.assertRaisesRegex(ballet_maestro.MaestroError, "not Maestro anymore"):
+            ballet_maestro.recap("someone-else", self.orca)
+        self.assertEqual(self.orca.ran("orchestration", "check"), [])
+
     def test_recap_ne_garde_que_les_derniers_messages(self):
-        ballet_maestro.mailbox(self.orca)
+        owner = self.claimed()
         self.orca.history = [self.row(number, subject=f"am#{number} · done") for number in range(30, 0, -1)]
-        output = ballet_maestro.recap(self.orca)
+        output = ballet_maestro.recap(owner, self.orca)
         self.assertIn("10 message(s)", output)
         self.assertIn("am#30 · done", output)
         self.assertNotIn("am#20 · done", output)
 
     def test_recap_relit_la_run_precedente_puis_l_oublie(self):
-        ballet_maestro.mailbox(self.orca)
+        owner = self.claimed()
         config = ballet_maestro.read_config()
         config["mailbox"]["previous_run"] = "run_0"
         ballet_maestro.write_config(config)
         self.orca.history = [self.row(2, subject="am#2 · done"), self.row(1, run="run_0", subject="old#1 · escalate")]
-        output = ballet_maestro.recap(self.orca)
+        output = ballet_maestro.recap(owner, self.orca)
         self.assertIn("old#1 · escalate", output)
         self.assertNotIn("previous_run", self.config()["mailbox"])
-        self.assertNotIn("old#1", ballet_maestro.recap(self.orca))
+        self.assertNotIn("old#1", ballet_maestro.recap(owner, self.orca))
 
     def test_recap_d_une_boite_vide_le_dit(self):
-        ballet_maestro.mailbox(self.orca)
-        self.assertEqual(ballet_maestro.recap(self.orca), "the mailbox is empty")
+        owner = self.claimed()
+        self.assertEqual(ballet_maestro.recap(owner, self.orca), "the mailbox is empty")
 
     def test_recap_sans_boite_dit_de_la_creer(self):
-        with self.assertRaises(ballet_maestro.MaestroError):
-            ballet_maestro.recap(self.orca)
+        owner = ballet_maestro.claim().split()[-1]
+        with self.assertRaisesRegex(ballet_maestro.MaestroError, "no mailbox yet"):
+            ballet_maestro.recap(owner, self.orca)
 
     # --- status ---
 

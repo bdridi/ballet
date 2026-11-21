@@ -617,7 +617,7 @@ def _refuse_if_open(item, home):
         raise WorkshopError(f"the Workshop of {item} is already open ({path})")
 
 
-def _open_workshops(home):
+def open_workshops(home):
     found = [Workshop(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(_run_dir(home).glob(f"{WORKSHOP_PREFIX}*.json"))]
     return [workshop for workshop in found if workshop.status != "done"]
 
@@ -747,7 +747,7 @@ def _item_and_rest(arguments, home):
 
 
 def _only_open_workshop(home):
-    workshops = _open_workshops(home)
+    workshops = open_workshops(home)
     if len(workshops) != 1:
         listed = ", ".join(workshop.item for workshop in workshops) or "none"
         raise UsageError(f"{len(workshops)} Workshops are open ({listed}): name the item\n" + USAGE)

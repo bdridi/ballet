@@ -293,7 +293,7 @@ def _begin(item, session, home, tools):
 def receive(rehearsal_id, message_path, question_id, home, tools):
     """Un message écrit dans un fichier : celui du Director (une réponse)."""
     config = _checked_config(home)
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     try:
         header, text = _message(message_path)
         step = _handle(rehearsal, header, text, question_id, config, home, tools)
@@ -306,7 +306,7 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
     """Le message d'un worker, lu chez Orca par son id (`by="message"`) ou comme le dernier de son dispatch
     (`by="dispatch"`, quand le réveil ne nomme que lui) : le Conductor ne le recopie pas."""
     config = _checked_config(home)
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     try:
         message = _orca_message(wanted, by, tools)
         if _is_mutation_wake(message):
@@ -325,7 +325,7 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
 def receive_mutation(rehearsal_id, home, tools):
     """La fin de la mutation en cours, sans son réveil Orca (perdu) : ses résultats sont lus dans `.ballet/run/<ID>/`."""
     config = _checked_config(home)
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     try:
         step = _after_mutation(rehearsal, rehearsal.mutation.get("round"), config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
@@ -336,7 +336,7 @@ def receive_mutation(rehearsal_id, home, tools):
 def mutate(rehearsal_id, home, tools):
     """La moitié en arrière-plan du nœud de mutation : les outils, leurs résultats dans `.ballet/run/<ID>/`, puis le
     réveil du Conductor. Quoi qu'il arrive, le Conductor est réveillé : une panne devient un résultat."""
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     try:
         results = {"outcomes": [asdict(outcome) for outcome in _mutate_each_tool(rehearsal, _checked_config(home), home, tools)]}
     except Exception as error:  # le Conductor attend ce réveil : rien ne doit l'empêcher de partir
@@ -347,14 +347,14 @@ def mutate(rehearsal_id, home, tools):
 
 def premiere(rehearsal_id, home, tools):
     config = _checked_config(home)
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     return _settle(rehearsal, _then_premiere(rehearsal, Step("wait"), config, tools), home, tools)
 
 
 def resume(rehearsal_id, home, tools):
     """Applique la décision du Director sur une Rehearsal escaladée, lue sur le libellé de sa PR."""
     config = _checked_config(home)
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     if rehearsal.status != "escalated":
         return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, [f"nothing to resume: Rehearsal {rehearsal.id} is {rehearsal.status}"])
     try:
@@ -377,7 +377,7 @@ def resume_session(session_item, home, tools):
 def status(rehearsal_id, home, tools):
     """Où en est la Rehearsal, en clair : sa dernière ligne `NEXT` est celle du dernier pas."""
     config = _checked_config(home)
-    rehearsal = _load(rehearsal_id, home)
+    rehearsal = load(rehearsal_id, home)
     summary = [_where(rehearsal), _pull_request_line(rehearsal, tools), _size_line(rehearsal), _round_trips_line(rehearsal, config)]
     summary += _mutation_lines(rehearsal)
     summary += _pending_lines(rehearsal) + _workers_line(rehearsal) + _session_lines(_session_of(rehearsal, home), rehearsal.id)
@@ -508,7 +508,7 @@ def _push_back(session_item, item, home):
 def _refuse_if_in_session(item, home):
     """Un élément n'est joué que par une session à la fois, qu'on le nomme par sa feature ou par son issue."""
     number = item[1:] if item.startswith("#") else ""
-    for session in _open_sessions(home):
+    for session in open_sessions(home):
         if session.item == item or (number and session.issue == number):
             raise RehearsalError(f"{item} is already played by the session of {session.item} "
                                  f"({_session_path(session.item, home)}): resume it, or delete that file first")
@@ -551,7 +551,7 @@ def _ballet_status_of(step, session, home):
 def _waits_for_its_plan(session, home):
     if not session.current or not _state_path(session.current, home).is_file():
         return False
-    return _load(session.current, home).blocked_on == "plan"
+    return load(session.current, home).blocked_on == "plan"
 
 
 def _session_lines(session, current):
@@ -1561,7 +1561,7 @@ def _save(rehearsal, home):
     _state_path(rehearsal.id, home).write_text(json.dumps(asdict(rehearsal), indent=2) + "\n", encoding="utf-8")
 
 
-def _load(rehearsal_id, home):
+def load(rehearsal_id, home):
     path = _state_path(rehearsal_id, home)
     if not path.is_file():
         raise RehearsalError(f"no Rehearsal {rehearsal_id} in {path.parent}")
@@ -1592,7 +1592,7 @@ def _session_of(rehearsal, home):
     return _load_session(rehearsal.session, home)
 
 
-def _open_sessions(home):
+def open_sessions(home):
     found = [Session(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(_run_dir(home).glob(f"{SESSION_PREFIX}*.json"))]
     return [session for session in found if session.status == "open"]
 
@@ -1823,7 +1823,7 @@ def _rehearsal_command(command, arguments, home, tools):
     if command == "status" and len(arguments) == 1:
         return status(arguments[0], home, tools)
     if command == "status" and arguments[1:] == ["--json"]:
-        return json.dumps(asdict(_load(arguments[0], home)), indent=2)
+        return json.dumps(asdict(load(arguments[0], home)), indent=2)
     raise UsageError(USAGE)
 
 
@@ -1854,7 +1854,7 @@ def _session_named(text, home):
 
 def _only_open_session(home):
     """Sans `<ID>` : la seule session ouverte ; plusieurs, il faut la nommer."""
-    sessions = _open_sessions(home)
+    sessions = open_sessions(home)
     if len(sessions) > 1:
         listed = ", ".join(f"{session.item} playing {session.current or 'nothing'}" for session in sessions)
         raise UsageError(f"{len(sessions)} sessions are open ({listed}): name the Rehearsal <ID> or the session's item\n" + USAGE)

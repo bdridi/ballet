@@ -17,20 +17,20 @@ Take the lease first. Reading the mailbox consumes its messages, so only one Mae
 python3 <path>/scripts/ballet_maestro.py claim
 ```
 
-- `lease claimed, owner <token>`: keep that token for the whole session; every `wait` takes it.
+- `lease claimed, owner <token>`: keep that token for the whole session; `recap` and every `wait` take it.
 - Refused (another session holds the lease): tell the Director, and propose `claim --take-over` (it stops the other session's wait and takes the lease: right after a `/clear`, or when that session is dead). **Run it only after the Director says yes.** Until then, read nothing: no `recap`, no `wait`.
 - `no mailbox yet`: the machine is not set up, send the Director to `/ballet:setup`.
 
 Then look at what happened while the Director was away:
 
 ```sh
-python3 <path>/scripts/ballet_maestro.py recap
+python3 <path>/scripts/ballet_maestro.py recap --owner <token>
 python3 <path>/scripts/ballet_maestro.py status
 ```
 
-`recap` prints the unread messages and the latest ones of the history (a message read just before a session died is no longer unread, so the history is the source). It consumes nothing. `status` prints one line per open session: `<project>  <item>  <Rehearsal>  <state>  <terminal>`.
+`recap` prints the unread messages and the latest ones of the history (a message read just before a session died is no longer unread, so the history is the source). It consumes the unread ones: no `wait` delivers them again. `status` prints one line per open session: `<project>  <item>  <Rehearsal>  <state>  <terminal>`.
 
-Open with a summary that starts with **"While you were away: …"** (what escalated, what finished, what is still running), or **"Nothing new"** when the mailbox is empty and no session is open. The unread messages are delivered again by the first `wait`: report them once.
+Open with a summary that starts with **"While you were away: …"** (what escalated, what finished, what is still running), or **"Nothing new"** when the mailbox is empty and no session is open.
 
 ## 2. Wait, one at a time
 

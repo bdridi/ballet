@@ -5,7 +5,7 @@
     python3 ballet_maestro.py project list                   # les projets connus
     python3 ballet_maestro.py claim [--take-over]            # prend le bail : une seule session Maestro lit la boîte
     python3 ballet_maestro.py wait --owner <jeton>           # attend la boîte (en arrière-plan), affiche ce qui arrive
-    python3 ballet_maestro.py recap                          # le non-lu et l'historique de la boîte, au démarrage
+    python3 ballet_maestro.py recap --owner <jeton>          # au démarrage : le non-lu (consommé) et l'historique
     python3 ballet_maestro.py status                         # les sessions ouvertes de chaque projet
     python3 ballet_maestro.py tell <projet>#<élément> <texte>   # la réponse du Director, au terminal du Conductor
 
@@ -71,7 +71,7 @@ EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": ""}
 CONDUCTOR_SUBJECT = re.compile(r"^(\S+#\S+) · (.+)$")   # `<projet>#<élément> · <événement>`
 TARGET = re.compile(r"^[^\s#]+#\S+$")
 USAGE = ("usage: mailbox | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
-         "| recap | status | tell <project>#<item> <text>")
+         "| recap --owner <token> | status | tell <project>#<item> <text>")
 
 
 class MaestroError(Exception):
@@ -179,16 +179,16 @@ def wait(owner, orca, state=None):
     return _render_messages(messages)
 
 
-def recap(orca, state=None):
-    """Ce qui s'est dit dans la boîte pendant l'absence de la session : le non-lu et les derniers messages de
-    l'historique (un message lu juste avant sa mort n'est plus non lu), ceux de la boîte précédente comprise, qu'on
-    oublie ensuite."""
-    config = read_config(state)
-    box = _checked_mailbox(config)
-    runs = [box["run"], *([box["previous_run"]] if box.get("previous_run") else [])]
-    history = [message for run in runs for message in _history_of(run, orca)]
+def recap(owner, orca, state=None):
+    """Ce qui s'est dit dans la boîte pendant l'absence de la session : le non-lu, consommé ici pour qu'aucun `wait`
+    ne le redonne, et les derniers messages de l'historique (un message lu juste avant la mort d'une session n'est
+    plus non lu), ceux de la boîte précédente compris, qu'on oublie ensuite. Seul le jeton qui tient le bail lit."""
+    box = _owned_mailbox(owner, state)
+    unread = _consume_unread(box, orca)
+    _note_conductors(unread, state)
+    history = [message for run in _runs_of(box) for message in _history_of(run, orca)]
     _forget_previous_run(state)
-    return _render_history(sorted(history, key=lambda message: message["sequence"])[-RECAP_LIMIT:])
+    return _render_history(_latest(history), {message.get("id") for message in unread})
 
 
 def status(state=None):
@@ -196,7 +196,7 @@ def status(state=None):
     config = read_config(state)
     registry = read_conductors(state)
     lines = [_session_line(alias, session, registry) for alias, project in sorted(config["projects"].items())
-             for session in _open_sessions(Path(project["path"]))]
+             for session in _sessions_of(Path(project["path"]))]
     return "\n".join(lines) or "no open session in any project"
 
 
@@ -310,6 +310,32 @@ def _wait_for_messages(box, orca):
             return answer["result"]["messages"]
 
 
+def _owned_mailbox(owner, state):
+    """Le jeton tient le bail : le bail est renouvelé, et la boîte rendue."""
+    with _locked(state):
+        config = read_config(state)
+        if config["lease"]["owner"] != owner:
+            raise MaestroError("this session is not Maestro anymore: " + _who_holds(config["lease"]))
+        box = _checked_mailbox(config)
+        config["lease"] = {**config["lease"], "renewed": _now()}
+        write_config(config, state)
+    return box
+
+
+def _consume_unread(box, orca):
+    """Le non-lu de la boîte, consommé d'un coup, sans attendre."""
+    answer = json.loads(orca(["orchestration", "check", "--terminal", box["terminal"], "--run", box["run"], "--json"]))
+    return answer["result"]["messages"]
+
+
+def _runs_of(box):
+    return [box["run"], *([box["previous_run"]] if box.get("previous_run") else [])]
+
+
+def _latest(history):
+    return sorted(history, key=lambda message: message["sequence"])[-RECAP_LIMIT:]
+
+
 def _history_of(run, orca):
     """Les derniers messages d'une Run de boîte, lus ou non (l'historique ne consomme rien)."""
     answer = json.loads(orca(["orchestration", "inbox", "--terminal", f"run:{run}", "--limit", str(RECAP_LIMIT), "--full", "--json"]))
@@ -327,12 +353,13 @@ def _render_messages(messages):
     return "\n\n".join(_message_text(message) for message in messages)
 
 
-def _render_history(messages):
+def _render_history(messages, unread_ids):
     if not messages:
         return "the mailbox is empty"
-    unread = sum(1 for message in messages if not message["read"])
-    shown = "\n\n".join(_message_text(message, tag="unread" if not message["read"] else "read") for message in messages)
-    return f"{len(messages)} message(s), {unread} unread (a wait will deliver the unread ones again):\n\n{shown}"
+    unread = sum(1 for message in messages if message.get("id") in unread_ids)
+    shown = "\n\n".join(_message_text(message, tag="unread" if message.get("id") in unread_ids else "read")
+                         for message in messages)
+    return f"{len(messages)} message(s), {unread} unread until now:\n\n{shown}"
 
 
 def _message_text(message, tag=""):
@@ -381,7 +408,7 @@ def _conductors_path(state=None):
 # --- les sessions d'un projet -----------------------------------------------------
 
 
-def _open_sessions(home):
+def _sessions_of(home):
     """Les sessions ouvertes d'un projet, Rehearsal puis Workshop, lues avec les fonctions de leurs scripts. Ces
     scripts importent celui-ci : l'import se fait ici, pas en tête. Un projet sans `.ballet/run/` n'a aucune session
     (et rien n'y est créé). Chacune : (élément, Rehearsal courante, état)."""
@@ -390,8 +417,8 @@ def _open_sessions(home):
     if not (home / ballet_rehearsal.RUN_DIR).is_dir():
         return []
     rehearsals = [(session.item, session.current or "-", _rehearsal_state(session, home))
-                  for session in ballet_rehearsal._open_sessions(home)]
-    workshops = [(workshop.item, "Workshop", workshop.status) for workshop in ballet_workshop._open_workshops(home)]
+                  for session in ballet_rehearsal.open_sessions(home)]
+    workshops = [(workshop.item, "Workshop", workshop.status) for workshop in ballet_workshop.open_workshops(home)]
     return rehearsals + workshops
 
 
@@ -399,7 +426,7 @@ def _rehearsal_state(session, home):
     """L'état de la Rehearsal en cours (open, escalated…) ; celui de la session tant qu'aucune n'est lisible."""
     import ballet_rehearsal
     try:
-        return ballet_rehearsal._load(session.current, home).status if session.current else session.status
+        return ballet_rehearsal.load(session.current, home).status if session.current else session.status
     except ballet_rehearsal.RehearsalError:
         return session.status
 
@@ -574,8 +601,8 @@ def _command(arguments, orca):
     if arguments[:2] == ["wait", "--owner"] and len(arguments) == 3:
         with _stopped_by_take_over():
             return wait(arguments[2], orca)
-    if arguments == ["recap"]:
-        return recap(orca)
+    if arguments[:2] == ["recap", "--owner"] and len(arguments) == 3:
+        return recap(arguments[2], orca)
     if arguments == ["status"]:
         return status()
     if arguments[:1] == ["tell"] and len(arguments) >= 3:
