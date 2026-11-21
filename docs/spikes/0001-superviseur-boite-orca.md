@@ -109,10 +109,9 @@ flowchart TB
     github[("GitHub<br/>issues, Ballet status, PR, CI")]
 
     subgraph vps["VPS · systemd"]
-        orcad["orca serve --supervise<br/>(orcad)"]
-        subgraph orca["terminaux Orca"]
+        subgraph orca["terminaux Orca · orca serve --supervise (orcad)"]
             supervisor["Supervisor<br/>claude --remote-control<br/>/ballet:supervisor"]
-            mailbox[["boîte du Supervisor<br/>Run run:&lt;id&gt;"]]
+            mailbox[["boîte du Supervisor<br/>une Run Orca"]]
             daemon["Monitor<br/>ballet_monitor.py, sans LLM"]
             conductor["Conductor projet#élément<br/>claude --remote-control<br/>/ballet:rehearsal"]
             workers["workers Orca<br/>Choreographer · Dancer · Critic"]
@@ -133,7 +132,6 @@ flowchart TB
     conductor -->|"status : escalate, question, done"| mailbox
     conductor <-->|"worker-start / worker_done"| workers
     conductor -->|"PR, labels, merge"| github
-    orcad -.- orca
 ```
 
 ### Les quatre voies de communication
