@@ -110,7 +110,7 @@ quand le Monitor est arrêté.
 **Un seul lanceur, Maestro**, par `ballet_launch.py` : le script crée le terminal Orca, lance
 `claude --remote-control '<projet>#<élément>' … /ballet:rehearsal #N`, écrit la ligne du registre (écriture
 atomique) et vérifie les garde-fous (projets autorisés, plafonds, budget). À un élément passé `ready`, le
-Maestro applique la règle du projet : en auto (`[maestro] auto_launch`, sans drapeau de pause), il lance
+Maestro applique la règle du projet : en auto (`auto_launch` du projet dans `maestro.toml`, sans drapeau de pause), il lance
 et le dit après coup ; sinon il demande. Le prix : l'autonomie dépend d'un Maestro vivant ; mort la nuit,
 un élément prêt attend dans la boîte jusqu'à sa relance par le gardien.
 

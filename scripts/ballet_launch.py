@@ -3,7 +3,8 @@
     python3 ballet_launch.py rehearsal <projet> <élément>       # `#12`, `12` ou `FEAT-002`
     python3 ballet_launch.py workshop <projet> [<élément>]      # un Workshop autopilot : `BUG-004`, ou la première ligne de *Next up*
 
-Maestro seul l'appelle (sur la demande du Director, plus tard sur celle du Monitor) : c'est le seul lanceur de Ballet.
+Maestro seul l'appelle (sur la demande du Director, ou quand sa règle `auto_launch` le décide pour un élément que le Monitor
+a vu passer `ready`) : c'est le seul lanceur de Ballet.
 
 Le Conductor est `claude --remote-control '<projet>#<élément>' '<prompt>' --allowedTools 'Bash(python3:*)' 'Edit(.ballet/run/**)'`, lancé par
 `orca terminal create --worktree path:<projet> --command …`. Le prompt vient avant les options : `--allowedTools` prend

@@ -1,12 +1,15 @@
 """L'état de Maestro, le point d'entrée du Director (OPP-02) : sa boîte Orca, ses projets, son bail, et les commandes de sa session.
 
     python3 ballet_maestro.py mailbox                        # crée la boîte de Maestro, une seule fois
+    python3 ballet_maestro.py monitor                        # crée le terminal du Monitor (`ballet_monitor.py run`), une seule fois
     python3 ballet_maestro.py project add <alias> <chemin>   # enregistre un projet (ou change son chemin)
     python3 ballet_maestro.py project list                   # les projets connus
     python3 ballet_maestro.py claim [--take-over]            # prend le bail : une seule session Maestro lit la boîte
     python3 ballet_maestro.py wait --owner <jeton>           # attend la boîte (en arrière-plan), affiche ce qui arrive
     python3 ballet_maestro.py recap --owner <jeton>          # au démarrage : le non-lu (consommé) et l'historique
-    python3 ballet_maestro.py status                         # les sessions ouvertes de chaque projet, et les Conductors lancés
+    python3 ballet_maestro.py status                         # les sessions ouvertes de chaque projet, les Conductors lancés, les éléments prêts
+    python3 ballet_maestro.py ready                          # les éléments prêts sans Conductor, dans l'ordre de la file, avec la décision
+    python3 ballet_maestro.py pause | resume                 # plus rien ne part seul (`~/.ballet/auto_launch_paused`) | tout repart
     python3 ballet_maestro.py tell <projet>#<élément> <texte>   # la réponse du Director, au terminal du Conductor
 
 L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) :
@@ -21,12 +24,22 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     pid = 0                   le processus de son attente en cours (`wait`), 0 sinon
     renewed = "…"             la date ISO de la dernière prise, ou de la fin de la dernière attente
 
+    [monitor]                 le terminal Orca du Monitor (`monitor` le crée)
+    terminal = "term_…"
+
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
+    auto_launch = ["Task", "Bug"]    les types que Maestro lance seul ; vide ou absent : il demande toujours
 
     [limits]                  les plafonds de `ballet_launch.py` (facultatif ; ces valeurs par défaut)
     max_running = 3           Conductors vivants en même temps, tous projets confondus
     max_per_day = 10          lancements par jour (jour local)
+
+La règle de lancement automatique se décide ici, dans `decide` : un élément passé `ready` (signalé par le Monitor) est
+lancé seul quand son type est dans `auto_launch` de son projet et que le drapeau `~/.ballet/auto_launch_paused` n'existe
+pas (`pause` le pose, `resume` le retire) ; sinon Maestro demande au Director. `wait` et `recap` écrivent le verdict sous
+chaque élément `· ready` : `DECISION: launch` ou `DECISION: ask the Director (<raison>)`. Un lancement refusé par un
+plafond laisse l'élément dans `ready` : `ready` le liste tant qu'il n'a pas de Conductor et que le Monitor le voit prêt.
 
 Il n'existe jamais deux boîtes : `mailbox` ne fait rien quand le terminal noté vit encore dans Orca, et un verrou
 (`maestro.lock`) empêche deux appels de créer chacun la sienne. Chaque écriture passe par un fichier temporaire, puis
@@ -51,6 +64,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import signal
 import subprocess
 import sys
@@ -75,8 +89,11 @@ WAIT_TIMEOUT_MS = 600_000           # une attente qui expire sans message est re
 RECAP_LIMIT = 10                    # les derniers messages de l'historique relus au démarrage
 EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": ""}
 TARGET = re.compile(r"^[^\s#]+#\S+$")
-USAGE = ("usage: mailbox | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
-         "| recap --owner <token> | status | tell <project>#<item> <text>")
+PAUSE_FLAG = "auto_launch_paused"
+MONITOR_TITLE = "ballet-monitor"
+MONITOR_SCRIPT = Path(__file__).resolve().with_name("ballet_monitor.py")
+USAGE = ("usage: mailbox | monitor | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
+         "| recap --owner <token> | status | ready | pause | resume | tell <project>#<item> <text>")
 
 
 class MaestroError(Exception):
@@ -106,6 +123,28 @@ def mailbox(orca, state=None):
         return f"mailbox created: terminal {box['terminal']}, run:{box['run']}"
 
 
+def monitor(orca, state=None):
+    """Le terminal du Monitor, créé une seule fois : il lance `ballet_monitor.py run`. Si le terminal noté vit encore,
+    rien ne change ; sinon un nouveau le remplace. Une Orca injoignable lève : on ne crée jamais un second Monitor à
+    l'aveugle."""
+    with ballet_state.locked(state):
+        config = read_config(state)
+        handle = config.get("monitor", {}).get("terminal", "")
+        if handle and _terminal_alive(handle, orca):
+            return f"monitor already there: terminal {handle}"
+        receipt = json.loads(orca(["terminal", "create", "--title", MONITOR_TITLE, "--command", _monitor_command(), "--json"]))
+        handle = first_id(receipt, "term_", "orca terminal create")
+        config["monitor"] = {"terminal": handle}
+        write_config(config, state)
+        return f"monitor created: terminal {handle}"
+
+
+def _monitor_command():
+    """`python3 <clone>/scripts/ballet_monitor.py run`, avec `BALLET_HOME` quand il est posé : le Monitor lit le même dossier d'état."""
+    home = os.environ.get("BALLET_HOME")
+    return " ".join([*([f"BALLET_HOME={shlex.quote(home)}"] if home else []), "python3", shlex.quote(str(MONITOR_SCRIPT)), "run"])
+
+
 def add_project(alias, path, state=None):
     """Enregistre un projet sous son alias, par son chemin absolu ; un alias connu change de chemin."""
     if not ALIAS.match(alias):
@@ -115,7 +154,7 @@ def add_project(alias, path, state=None):
         raise MaestroError(f"no folder at {folder}")
     with ballet_state.locked(state):
         config = read_config(state)
-        config["projects"][alias] = {"path": str(folder)}
+        config["projects"].setdefault(alias, {})["path"] = str(folder)   # `auto_launch` d'un projet connu reste
         write_config(config, state)
     return f"project {alias}: {folder}"
 
@@ -142,12 +181,26 @@ def announce(step, home, orca, state=None):
         return
     subject = f"{project_of(home, config)}#{step.item.lstrip('#')} · {step.next}"
     try:
-        orca(["orchestration", "send", "--to", f"run:{run}", "--type", "status", "--priority", "high",
-              "--subject", subject, "--body", step.render()])
+        post_status(run, subject, step.render(), "high", orca)
     except Exception as error:  # l'annonce n'est qu'un plus : rien ne doit arrêter le Conductor
         step.done.append(f"Maestro not told ({subject}): {error}")
         return
     step.done.append(f"Maestro told: {subject}")
+
+
+def post_status(run, subject, body, priority, orca):
+    """Un message `status` dans la boîte : le chemin d'envoi des Conductors et du Monitor, depuis le terminal Orca de
+    l'expéditeur (`ORCA_TERMINAL_HANDLE`)."""
+    orca(["orchestration", "send", "--to", f"run:{run}", "--type", "status", "--priority", priority,
+          "--subject", subject, "--body", body])
+
+
+def mailbox_run(state=None):
+    """La Run de la boîte, où écrire ; une machine sans boîte est refusée."""
+    run = read_config(state)["mailbox"].get("run")
+    if not run:
+        raise MaestroError("no mailbox yet: run ballet_maestro.py mailbox")
+    return run
 
 
 def project_of(home, config):
@@ -181,7 +234,7 @@ def wait(owner, orca, state=None):
         ballet_conductors.note_events(messages, state)
     finally:
         _release_the_wait(owner, state)
-    return _render_messages(messages)
+    return _render_messages(messages, state)
 
 
 def recap(owner, orca, state=None):
@@ -193,18 +246,91 @@ def recap(owner, orca, state=None):
     ballet_conductors.note_events(unread, state)
     history = [message for run in _runs_of(box) for message in _history_of(run, orca)]
     _forget_previous_run(state)
-    return _render_history(_latest(history), {message.get("id") for message in unread})
+    return _render_history(_latest(history), {message.get("id") for message in unread}, state)
 
 
 def status(orca, state=None):
     """Les sessions ouvertes de chaque projet, une ligne chacune (élément, Rehearsal courante, état, terminal connu),
-    puis les Conductors du registre, avec l'état de leur terminal."""
+    puis les Conductors du registre, avec l'état de leur terminal, puis les éléments prêts qui attendent un Conductor."""
     config = read_config(state)
     registry = ballet_conductors.read(state)
     sessions = [_session_line(alias, session, registry) for alias, project in sorted(config["projects"].items())
                 for session in sessions_of(Path(project["path"]))]
     launched = _conductor_lines(registry, orca)
-    return "\n".join(sessions or ["no open session in any project"]) + ("\n\nConductors:\n" + "\n".join(launched) if launched else "")
+    waiting = _ready_lines(config, registry, state)
+    return ("\n".join(sessions or ["no open session in any project"])
+            + ("\n\nConductors:\n" + "\n".join(launched) if launched else "")
+            + ("\n\nReady, no Conductor yet:\n" + "\n".join(waiting) if waiting else ""))
+
+
+def ready(state=None):
+    """Les éléments prêts sans Conductor, dans l'ordre de la file, chacun avec la décision de la règle de lancement :
+    ceux que le Monitor voit encore `ready` et qu'aucun Conductor vivant ne joue. Un lancement refusé par un plafond y reste."""
+    lines = _ready_lines(read_config(state), ballet_conductors.read(state), state)
+    return "\n".join(lines) if lines else "no item is waiting: every ready item has its Conductor (or the Monitor has not seen any)"
+
+
+def decision(project, kind, state=None):
+    """`launch` quand le type est confié à l'auto par son projet et que rien n'est en pause ; sinon `ask the Director
+    (<raison>)`. C'est ici que cela se décide : l'agent ne fait que relayer le verdict."""
+    return _decision(project, kind, read_config(state), state)
+
+
+def pause(state=None):
+    """Pose le drapeau : rien ne part plus seul, Maestro demande toujours, jusqu'à `resume`."""
+    flag = _pause_flag(state)
+    if flag.exists():
+        return "auto launch was already paused"
+    ballet_state.write_atomically(flag, _now() + "\n")
+    return "auto launch paused: nothing is launched on its own, Maestro asks the Director every time (resume to lift it)"
+
+
+def resume(state=None):
+    """Retire le drapeau : la règle de chaque projet s'applique de nouveau."""
+    flag = _pause_flag(state)
+    if not flag.exists():
+        return "auto launch was not paused"
+    flag.unlink()
+    return "auto launch resumed: the projects' auto_launch rule applies again"
+
+
+def _decision(project, kind, config, state):
+    if project not in config["projects"]:
+        return f"ask the Director (unknown project {project})"
+    if _pause_flag(state).exists():
+        return "ask the Director (auto launch is paused)"
+    trusted = config["projects"][project].get("auto_launch", [])
+    if not _is_list_of_text(trusted):
+        return f"ask the Director ([projects.{project}] auto_launch must be a list of types)"
+    if kind.casefold() not in (entrusted.casefold() for entrusted in trusted):
+        return f"ask the Director ({kind} is not in auto_launch of {project})"
+    return "launch"
+
+
+def _is_list_of_text(value):
+    return isinstance(value, list) and all(isinstance(entry, str) for entry in value)
+
+
+def _pause_flag(state=None):
+    return ballet_state.state_dir(state) / PAUSE_FLAG
+
+
+def _ready_lines(config, registry, state):
+    """Un élément prêt par ligne : `<projet>#<N>  <type>  <priorité>  <titre>  <lien>  DECISION: …`, projets par alias,
+    chacun dans l'ordre de sa file. Un élément joué par un Conductor vivant n'y est plus."""
+    import ballet_monitor
+    lines = []
+    for alias, items in sorted(ballet_monitor.read_ready(state).items()):
+        for item in items:
+            if alias in config["projects"] and not _is_running(registry.get(f"{alias}#{item['number']}")):
+                verdict = _decision(alias, item["type"], config, state)
+                lines.append(f"{alias}#{item['number']}  {item['type']}  {item['priority'] or '-'}  {item['title']}  {item['url']}  "
+                             f"DECISION: {verdict}")
+    return lines
+
+
+def _is_running(line):
+    return bool(line) and ballet_conductors.state_of(line) == ballet_conductors.RUNNING
 
 
 def tell(target, text, orca, state=None):
@@ -365,24 +491,43 @@ def _forget_previous_run(state):
             write_config(config, state)
 
 
-def _render_messages(messages):
-    return "\n\n".join(_message_text(message) for message in messages)
+def _render_messages(messages, state):
+    config = read_config(state)
+    return "\n\n".join(_message_text(message, config, state) for message in messages)
 
 
-def _render_history(messages, unread_ids):
+def _render_history(messages, unread_ids, state):
     if not messages:
         return "the mailbox is empty"
+    config = read_config(state)
     unread = sum(1 for message in messages if message.get("id") in unread_ids)
-    shown = "\n\n".join(_message_text(message, tag="unread" if message.get("id") in unread_ids else "read")
+    shown = "\n\n".join(_message_text(message, config, state, tag="unread" if message.get("id") in unread_ids else "read")
                          for message in messages)
     return f"{len(messages)} message(s), {unread} unread until now:\n\n{shown}"
 
 
-def _message_text(message, tag=""):
+def _message_text(message, config, state, tag=""):
     sender = message.get("from") or message.get("from_handle", "?")
     head = f"[{message.get('priority', 'normal')}] {message.get('type', 'message')} from {sender}"
     when = f" · {message['created_at']}" if message.get("created_at") else ""
-    return f"{head}{when}{' · ' + tag if tag else ''}\nSubject: {message.get('subject', '')}\n{message.get('body', '')}".rstrip()
+    return (f"{head}{when}{' · ' + tag if tag else ''}\nSubject: {message.get('subject', '')}\n"
+            f"{_body_with_decisions(message, config, state)}").rstrip()
+
+
+def _body_with_decisions(message, config, state):
+    """Le corps du message ; sous chaque élément d'un `status` `· ready` du Monitor, la décision de la règle de lancement."""
+    import ballet_monitor
+    body = message.get("body", "")
+    project = ballet_monitor.project_of_ready_subject(message.get("subject", ""))
+    if message.get("type") != "status" or not project:
+        return body
+    lines = []
+    for line in body.splitlines():
+        lines.append(line)
+        item = ballet_monitor.READY_LINE.match(line)
+        if item:
+            lines.append(f"DECISION: {_decision(project, item.group('type'), config, state)}")
+    return "\n".join(lines)
 
 
 # --- les sessions d'un projet -----------------------------------------------------
@@ -420,7 +565,7 @@ def _conductor_lines(registry, orca):
     lines = []
     for key, line in sorted(registry.items()):
         terminal = _terminal_state(line["terminal"], alive)
-        if ballet_conductors.state_of(line) == ballet_conductors.FINISHED and terminal == "gone":
+        if ballet_conductors.state_of(line) in (ballet_conductors.FINISHED, ballet_conductors.GONE) and terminal == "gone":
             continue
         last = f"last: {line['event']}" if line.get("event") else "no event yet"
         lines.append("  ".join(part for part in (key, line.get("kind") or "?", ballet_conductors.state_of(line),
@@ -574,6 +719,8 @@ def main(argv, orca=None):
 def _command(arguments, orca):
     if arguments == ["mailbox"]:
         return mailbox(orca)
+    if arguments == ["monitor"]:
+        return monitor(orca)
     if arguments[:2] == ["project", "add"] and len(arguments) == 4:
         return add_project(arguments[2], arguments[3])
     if arguments == ["project", "list"]:
@@ -587,6 +734,12 @@ def _command(arguments, orca):
         return recap(arguments[2], orca)
     if arguments == ["status"]:
         return status(orca)
+    if arguments == ["ready"]:
+        return ready()
+    if arguments == ["pause"]:
+        return pause()
+    if arguments == ["resume"]:
+        return resume()
     if arguments[:1] == ["tell"] and len(arguments) >= 3:
         return tell(arguments[1], " ".join(arguments[2:]), orca)
     raise UsageError(USAGE)

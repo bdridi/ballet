@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Sets up a machine for Ballet, once (installer): checks the tools (git, python3, gh, claude, orca), reinstalls the plugin from its clone, registers the Director's projects for Maestro (`~/.ballet/maestro.toml`) and in Orca, offers `/ballet:init-project` to the projects that lack a profile, and creates Maestro's mailbox. Attended mode only for now (the Director's own machine, Orca desktop open). Use once per machine, or again to add a project or recreate a lost mailbox: every step is safe to rerun.
+description: Sets up a machine for Ballet, once (installer): checks the tools (git, python3, gh, claude, orca), reinstalls the plugin from its clone, registers the Director's projects for Maestro (`~/.ballet/maestro.toml`) and in Orca, offers `/ballet:init-project` to the projects that lack a profile, and creates Maestro's mailbox and the Monitor's terminal. Attended mode only for now (the Director's own machine, Orca desktop open). Use once per machine, or again to add a project or recreate a lost mailbox: every step is safe to rerun.
 ---
 
 # setup
@@ -62,12 +62,22 @@ It prints `mailbox created: terminal <handle>, run:<id>` or `mailbox already the
 
 From now on, each Conductor (`/ballet:rehearsal`, `/ballet:workshop --autopilot`) posts a `status` message to that mailbox when it escalates or finishes, subject `<alias>#<item> · escalate` (or `· done`).
 
-## 5. Report
+## 5. The Monitor
 
-Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca, with or without a profile), the mailbox. Then tell the Director what to do next: **open `/ballet:maestro`** in a session of their own, from anywhere. That session takes the lease (only one session reads the mailbox), tells what happened while they were away, then sleeps on the mailbox and wakes at each escalation. Then say plainly what is **not there yet**:
+```sh
+python3 <path>/scripts/ballet_maestro.py monitor
+```
 
-- `stop` and `restart` (Maestro launches Conductors on the Director's word, but cannot stop one yet);
-- the Monitor (`ballet_monitor.py`), which will watch GitHub for items turned `ready` and let Maestro launch them without being asked;
+It prints `monitor created: terminal <handle>` or `monitor already there: …`. The Monitor is a script, no LLM: an Orca terminal titled `ballet-monitor` runs `ballet_monitor.py run`, which every 3 minutes reads each project's GitHub queue and the Conductors' terminals, and writes into the mailbox an item that turned `ready` or a Conductor that is `gone`. It launches nothing. Tell the Director not to close that terminal; if they do, rerun this step. It reports into the mailbox of step 4, so run this step after it.
+
+Which items Maestro launches by itself is the Director's choice, per project, in `~/.ballet/maestro.toml`: `auto_launch = ["Task", "Bug"]` under `[projects.<alias>]` (nothing by default: Maestro asks every time). Offer to set it; edit the file only for a project and types the Director names, and only that line.
+
+## 6. Report
+
+Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca, with or without a profile), the mailbox, the Monitor. Then tell the Director what to do next: **open `/ballet:maestro`** in a session of their own, from anywhere. That session takes the lease (only one session reads the mailbox), tells what happened while they were away, then sleeps on the mailbox and wakes at each escalation. Then say plainly what is **not there yet**:
+
+- `stop` and `restart` (Maestro launches Conductors, but cannot stop one yet);
+- a Monitor that spots a Conductor that is frozen (its terminal alive, nothing said): it only sees a vanished one;
 - the headless mode (a VPS, `orca serve` under systemd, the keeper).
 
-You change nothing in the projects: only `~/.ballet/`, Orca's project list and its mailbox terminal.
+You change nothing in the projects: only `~/.ballet/`, Orca's project list, and the mailbox and Monitor terminals.

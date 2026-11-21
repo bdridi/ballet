@@ -23,7 +23,7 @@ OPEN_ISSUES = """query($owner: String!, $name: String!, $after: String) {
     issues(first: 100, states: OPEN, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title createdAt issueType { name }
+        number title url createdAt issueType { name }
         issueFieldValues(first: 20) { nodes {
           ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } }
         } }
@@ -85,6 +85,7 @@ def _item_of(issue):
         "item": f"#{issue['number']}",
         "number": issue["number"],
         "title": issue["title"],
+        "url": issue["url"],
         "type": _type_of(issue),
         "priority": _field(issue, PRIORITY_FIELD),
         "mode": _field(issue, MODE_FIELD),

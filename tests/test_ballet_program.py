@@ -11,7 +11,8 @@ import ballet_program  # noqa: E402
 def issue(number, kind="Feature", status="ready", priority="", mode="", created="2026-11-01T10:00:00Z", title=None):
     values = [("Ballet status", status), ("Priority", priority), ("Rehearsal mode", mode)]
     return {
-        "number": number, "title": title or f"Issue {number}", "createdAt": created,
+        "number": number, "title": title or f"Issue {number}", "url": f"https://github.com/acme/shop/issues/{number}",
+        "createdAt": created,
         "issueType": {"name": kind} if kind else None,
         "issueFieldValues": {"nodes": [{"name": value, "field": {"name": field}} for field, value in values if value]},
     }
@@ -54,6 +55,10 @@ class ReadyItemsTest(unittest.TestCase):
         github = FakeGitHub(page(issue(12, "Bug", priority="High", mode="autopilot", title="Le panier se vide")))
         item = ballet_program.ready_items(run=github)[0]
         self.assertEqual((item["title"], item["type"], item["priority"], item["mode"]), ("Le panier se vide", "Bug", "High", "autopilot"))
+
+    def test_donne_le_lien_de_l_issue(self):
+        item = ballet_program.ready_items(run=FakeGitHub(page(issue(12))))[0]
+        self.assertEqual(item["url"], "https://github.com/acme/shop/issues/12")
 
     def test_un_champ_non_pose_est_vide(self):
         item = ballet_program.ready_items(run=FakeGitHub(page(issue(1))))[0]

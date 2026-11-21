@@ -9,7 +9,8 @@ Une ligne par `<projet>#<élément>`, écrite par deux voies : `ballet_launch.py
     url             l'URL Remote Control de sa session ; vide quand on ne l'a pas trouvée
     started         la date du dernier lancement ; `starts`, celles des dernières 48 heures (le plafond du jour)
     seen, event     la date et le nom du dernier événement annoncé (`escalate`, `done`)
-    state           `running`, ou `finished` dès que le Conductor a annoncé `done`
+    state           `running` ; `finished` dès que le Conductor a annoncé `done` ; `gone` quand le Monitor a vu son
+                    terminal disparaître d'Orca alors qu'il tournait encore
 
 Une ligne écrite avant l'étape 3 (terminal, `seen`, `event`) reste lisible : ce qui manque se déduit.
 Toute écriture passe par un verrou, un fichier temporaire, puis un renommage.
@@ -22,8 +23,9 @@ from datetime import datetime, timedelta, timezone
 import ballet_state
 
 CONDUCTORS_NAME = "conductors.json"
-RUNNING, FINISHED = "running", "finished"
+RUNNING, FINISHED, GONE = "running", "finished", "gone"
 DONE_EVENT = "done"
+CONDUCTOR_EVENTS = ("escalate", DONE_EVENT)   # ce que dit un Conductor ; `ready` et `gone` sont ceux du Monitor
 CONDUCTOR_SUBJECT = re.compile(r"^(\S+#\S+) · (.+)$")   # `<projet>#<élément> · <événement>`
 KEEP_STARTS = timedelta(hours=48)
 
@@ -56,11 +58,12 @@ def note_url(key, url, state=None):
 
 def note_events(messages, state=None):
     """Chaque `status` de sujet `<projet>#<élément> · <événement>` dit où est son Conductor (son terminal expéditeur) et
-    ce qu'il vient d'annoncer ; `done` clôt la ligne. Un Conductor que Maestro n'a pas lancé reçoit une ligne ici."""
+    ce qu'il vient d'annoncer ; `done` clôt la ligne. Un Conductor que Maestro n'a pas lancé reçoit une ligne ici.
+    Les messages du Monitor (`ready`, `gone`) ne disent rien d'un Conductor : ils sont ignorés."""
     seen = {}
     for message in messages:
         found = CONDUCTOR_SUBJECT.match(message.get("subject", ""))
-        if message.get("type") == "status" and found and message.get("from"):
+        if message.get("type") == "status" and found and found.group(2) in CONDUCTOR_EVENTS and message.get("from"):
             seen[found.group(1)] = (message["from"], found.group(2))
     if not seen:
         return
@@ -69,6 +72,19 @@ def note_events(messages, state=None):
         for key, (terminal, event) in seen.items():
             registry[key] = _seen(registry.get(key) or _unlaunched(key), terminal, event)
         _write(registry, state)
+
+
+def mark_gone(key, terminal, state=None):
+    """Le Monitor ne retrouve plus le terminal d'un Conductor qui tournait : sa ligne passe à `gone`. Une ligne qui a
+    changé entre-temps (finie, relancée dans un autre terminal) n'est pas touchée. Rend vrai quand elle a été marquée."""
+    with ballet_state.locked(state):
+        registry = read(state)
+        line = registry.get(key)
+        if not line or state_of(line) != RUNNING or line["terminal"] != terminal:
+            return False
+        registry[key] = {**line, "state": GONE, "seen": _now(), "event": GONE}
+        _write(registry, state)
+        return True
 
 
 def state_of(line):

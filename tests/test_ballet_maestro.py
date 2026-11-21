@@ -83,8 +83,10 @@ class BalletMaestroTest(unittest.TestCase):
 
     def test_le_toml_ecrit_se_relit_a_l_identique(self):
         config = {"mailbox": {"terminal": "term_1", "run": "run_1"}, "lease": {"owner": "abc", "pid": 4242, "renewed": "2026-11-21T08:00:00+00:00"},
-                  "projects": {"antimurphy": {"path": "/p/antimurphy"}, "mon projet": {"path": "/p/\"quoted\" été\n"}},
-                  "limits": {"auto_launch": ["Task", "Bug"], "paused": False}}
+                  "monitor": {"terminal": "term_3"},
+                  "projects": {"antimurphy": {"path": "/p/antimurphy", "auto_launch": ["Task", "Bug"]},
+                               "mon projet": {"path": "/p/\"quoted\" été\n"}},
+                  "limits": {"max_running": 3}}
         ballet_maestro.write_config(config)
         self.assertEqual(self.config(), config)
 
@@ -563,6 +565,213 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertIn("is gone", str(refused.exception))
         self.assertEqual(self.orca.ran("terminal", "send"), [])
 
+
+    # --- monitor ---
+
+    def test_monitor_cree_le_terminal_du_monitor_avec_sa_commande_et_le_note(self):
+        self.assertEqual(ballet_maestro.monitor(self.orca), "monitor created: terminal term_1")
+        create = self.orca.ran("terminal", "create")[0]
+        self.assertEqual(create[create.index("--title") + 1], "ballet-monitor")
+        command = create[create.index("--command") + 1]
+        self.assertTrue(command.startswith(f"BALLET_HOME={self.state} python3 "), command)
+        self.assertTrue(command.endswith("ballet_monitor.py run"), command)
+        self.assertEqual(self.config()["monitor"], {"terminal": "term_1"})
+
+    def test_monitor_sans_ballet_home_ne_transmet_rien(self):
+        with mock.patch.dict("os.environ", clear=False) as environment:
+            environment.pop("BALLET_HOME")
+            self.assertEqual(ballet_maestro._monitor_command()[:8], "python3 ")
+
+    def test_monitor_est_idempotent_tant_que_le_terminal_vit(self):
+        ballet_maestro.monitor(self.orca)
+        self.assertEqual(ballet_maestro.monitor(self.orca), "monitor already there: terminal term_1")
+        self.assertEqual(len(self.orca.ran("terminal", "create")), 1)
+
+    def test_monitor_remplace_un_terminal_disparu(self):
+        ballet_maestro.monitor(self.orca)
+        self.orca.terminals.clear()
+        self.assertEqual(ballet_maestro.monitor(self.orca), "monitor created: terminal term_2")
+
+    def test_monitor_avec_une_orca_injoignable_ne_cree_rien(self):
+        ballet_maestro.write_config({"monitor": {"terminal": "term_1"}})
+        self.orca.unreachable = True
+        with self.assertRaises(ballet_maestro.MaestroError):
+            ballet_maestro.monitor(self.orca)
+        self.assertEqual(self.orca.ran("terminal", "create"), [])
+
+    def test_monitor_ne_touche_ni_a_la_boite_ni_aux_projets(self):
+        ballet_maestro.mailbox(self.orca)
+        ballet_maestro.add_project("antimurphy", str(self.project("antimurphy")))
+        ballet_maestro.monitor(self.orca)
+        config = self.config()
+        self.assertEqual((config["mailbox"], sorted(config["projects"])), ({"terminal": "term_1", "run": "run_1"}, ["antimurphy"]))
+
+    def test_project_add_garde_auto_launch_d_un_projet_connu(self):
+        folder = self.project("antimurphy")
+        ballet_maestro.add_project("antimurphy", str(folder))
+        self.trust("antimurphy", "Task")
+        ballet_maestro.add_project("antimurphy", str(folder))
+        self.assertEqual(self.config()["projects"]["antimurphy"]["auto_launch"], ["Task"])
+
+    # --- la règle de lancement automatique ---
+
+    def trust(self, alias, *types):
+        config = ballet_maestro.read_config()
+        config["projects"].setdefault(alias, {"path": str(self.root)})["auto_launch"] = list(types)
+        ballet_maestro.write_config(config)
+
+    def test_un_type_confie_a_l_auto_est_lance_seul(self):
+        self.trust("antimurphy", "Task", "Bug")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "launch")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Bug"), "launch")
+
+    def test_un_type_non_confie_est_demande_au_director(self):
+        self.trust("antimurphy", "Task", "Bug")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Feature"), "ask the Director (Feature is not in auto_launch of antimurphy)")
+
+    def test_par_defaut_rien_n_est_confie_a_l_auto(self):
+        ballet_maestro.add_project("antimurphy", str(self.project("antimurphy")))
+        self.assertIn("ask the Director", ballet_maestro.decision("antimurphy", "Task"))
+
+    def test_la_confiance_est_par_projet(self):
+        self.trust("antimurphy", "Task")
+        self.trust("beta")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "launch")
+        self.assertIn("ask the Director", ballet_maestro.decision("beta", "Task"))
+
+    def test_la_pause_arrete_tout_lancement_seul(self):
+        self.trust("antimurphy", "Task")
+        ballet_maestro.pause()
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "ask the Director (auto launch is paused)")
+        ballet_maestro.resume()
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "launch")
+
+    def test_un_projet_inconnu_ou_une_liste_mal_ecrite_se_demande(self):
+        self.assertEqual(ballet_maestro.decision("ghost", "Task"), "ask the Director (unknown project ghost)")
+        config = ballet_maestro.read_config()
+        config["projects"]["antimurphy"] = {"path": str(self.root), "auto_launch": "Task"}
+        ballet_maestro.write_config(config)
+        self.assertIn("auto_launch must be a list", ballet_maestro.decision("antimurphy", "Task"))
+
+    # --- pause, resume ---
+
+    def test_pause_pose_le_drapeau_dans_le_dossier_d_etat_et_resume_le_retire(self):
+        flag = self.state / "auto_launch_paused"
+        self.assertIn("paused", ballet_maestro.pause())
+        self.assertTrue(flag.is_file())
+        self.assertIn("resumed", ballet_maestro.resume())
+        self.assertFalse(flag.exists())
+
+    def test_pause_et_resume_se_rejouent_sans_erreur(self):
+        ballet_maestro.pause()
+        self.assertEqual(ballet_maestro.pause(), "auto launch was already paused")
+        ballet_maestro.resume()
+        self.assertEqual(ballet_maestro.resume(), "auto launch was not paused")
+
+    def test_pause_ne_perd_pas_l_etat_de_maestro(self):
+        self.trust("antimurphy", "Task")
+        ballet_maestro.pause()
+        self.assertEqual(self.config()["projects"]["antimurphy"]["auto_launch"], ["Task"])
+
+    # --- les messages ready de wait et de recap ---
+
+    def ready_message(self, number=12, kind="Task", subject=None, project="antimurphy"):
+        return self.message(subject=subject or f"{project}#{number} · ready", sender="term_5", priority="normal",
+                            body=f"#{number} · {kind} · High · Le panier se vide · https://github.com/acme/shop/issues/{number}")
+
+    def test_wait_ecrit_la_decision_sous_un_element_ready(self):
+        owner = self.claimed()
+        self.trust("antimurphy", "Task")
+        self.orca.batches = [[self.ready_message(12, "Task"), self.ready_message(13, "Feature")]]
+        output = ballet_maestro.wait(owner, self.orca)
+        self.assertIn("· Task · High · Le panier se vide · https://github.com/acme/shop/issues/12\nDECISION: launch", output)
+        self.assertIn("issues/13\nDECISION: ask the Director (Feature is not in auto_launch of antimurphy)", output)
+
+    def test_wait_dit_la_pause_dans_la_decision(self):
+        owner = self.claimed()
+        self.trust("antimurphy", "Task")
+        ballet_maestro.pause()
+        self.orca.batches = [[self.ready_message()]]
+        self.assertIn("DECISION: ask the Director (auto launch is paused)", ballet_maestro.wait(owner, self.orca))
+
+    def test_un_message_groupe_a_une_decision_par_element(self):
+        owner = self.claimed()
+        self.trust("antimurphy", "Bug")
+        body = "#3 · Bug · Urgent · Un bug · https://x/3\n#4 · Task · no priority · Une tâche · https://x/4"
+        self.orca.batches = [[{**self.ready_message(subject="antimurphy · ready (2 already)"), "body": body}]]
+        output = ballet_maestro.wait(owner, self.orca)
+        self.assertIn("https://x/3\nDECISION: launch\n#4", output)
+        self.assertIn("https://x/4\nDECISION: ask the Director (Task is not in auto_launch of antimurphy)", output)
+
+    def test_les_autres_messages_n_ont_pas_de_decision(self):
+        owner = self.claimed()
+        self.orca.batches = [[self.message(), self.message(subject="antimurphy#12 · gone", body="#12 · Task · x")]]
+        self.assertNotIn("DECISION", ballet_maestro.wait(owner, self.orca))
+
+    def test_recap_ecrit_aussi_la_decision_et_ne_note_pas_le_monitor_comme_un_conductor(self):
+        owner = self.claimed()
+        self.trust("antimurphy", "Task")
+        self.orca.batches = [[{**self.ready_message(), "id": "msg_9"}]]
+        self.orca.history = [self.row(1, subject="antimurphy#12 · ready", body="#12 · Task · High · T · https://x/12")]
+        self.assertIn("DECISION: launch", ballet_maestro.recap(owner, self.orca))
+        self.assertEqual(ballet_conductors.read(), {})
+
+    def test_wait_ne_note_pas_un_ready_ni_un_gone_comme_un_conductor(self):
+        owner = self.claimed()
+        self.orca.batches = [[self.ready_message(), self.message(subject="antimurphy#12 · gone", sender="term_5")]]
+        ballet_maestro.wait(owner, self.orca)
+        self.assertEqual(ballet_conductors.read(), {})
+
+    # --- ready ---
+
+    def seen_ready(self, alias, *items):
+        """Ce que le Monitor a vu prêt dans un projet, dans l'ordre de la file : (numéro, type, priorité, titre)."""
+        document = json.loads((self.state / "monitor.json").read_text(encoding="utf-8")) if (self.state / "monitor.json").exists() else {"projects": {}}
+        document["projects"][alias] = {"ready": [
+            {"item": f"#{number}", "number": number, "type": kind, "priority": priority, "title": title, "url": f"https://x/{number}"}
+            for number, kind, priority, title in items]}
+        self.state.mkdir(exist_ok=True)
+        (self.state / "monitor.json").write_text(json.dumps(document), encoding="utf-8")
+
+    def test_ready_liste_les_elements_prets_dans_l_ordre_de_la_file_avec_leur_decision(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "Urgent", "Le premier"), (3, "Feature", "", "Le second"))
+        lines = ballet_maestro.ready().splitlines()
+        self.assertEqual(lines[0], "antimurphy#7  Task  Urgent  Le premier  https://x/7  DECISION: launch")
+        self.assertEqual(lines[1], "antimurphy#3  Feature  -  Le second  https://x/3  DECISION: ask the Director (Feature is not in auto_launch of antimurphy)")
+
+    def test_ready_ne_montre_pas_un_element_qu_un_conductor_joue(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Joué"), (8, "Task", "", "Attend"))
+        ballet_conductors.record_launch("antimurphy#7", "antimurphy", "7", "rehearsal", "term_9")
+        self.assertEqual([line.split()[0] for line in ballet_maestro.ready().splitlines()], ["antimurphy#8"])
+
+    def test_ready_remontre_un_element_dont_le_conductor_a_disparu(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Revenu"))
+        ballet_conductors.record_launch("antimurphy#7", "antimurphy", "7", "rehearsal", "term_9")
+        self.assertTrue(ballet_conductors.mark_gone("antimurphy#7", "term_9"))
+        self.assertTrue(ballet_maestro.ready().startswith("antimurphy#7"))
+
+    def test_ready_sans_element_en_attente_le_dit(self):
+        self.assertIn("no item is waiting", ballet_maestro.ready())
+
+    def test_ready_ignore_un_projet_que_maestro_ne_connait_plus(self):
+        self.seen_ready("oublie", (1, "Task", "", "x"))
+        self.assertIn("no item is waiting", ballet_maestro.ready())
+
+    def test_status_montre_aussi_les_elements_prets_sans_conductor(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Le premier"))
+        self.assertIn("Ready, no Conductor yet:\nantimurphy#7  Task", ballet_maestro.status(self.orca))
+
+    def test_la_ligne_de_commande_ready_pause_resume_et_monitor(self):
+        self.assertEqual(self.run_main("monitor")[:2], (0, "monitor created: terminal term_1\n"))
+        self.assertEqual(self.run_main("pause")[0], 0)
+        self.assertTrue((self.state / "auto_launch_paused").is_file())
+        self.assertEqual(self.run_main("resume")[0], 0)
+        self.assertFalse((self.state / "auto_launch_paused").exists())
+        self.assertIn("no item is waiting", self.run_main("ready")[1])
 
     # --- ligne de commande ---
 
