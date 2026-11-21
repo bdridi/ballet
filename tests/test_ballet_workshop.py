@@ -9,6 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import ballet_maestro  # noqa: E402
 import ballet_rehearsal  # noqa: E402
 import ballet_workshop  # noqa: E402
 
@@ -145,7 +146,7 @@ class BalletWorkshopTest(unittest.TestCase):
         self.home = Path(self._tmp.name)
         (self.home / ".ballet").mkdir()
         self.profile(PROFILE)
-        environment = mock.patch.dict("os.environ", {"ORCA_CLI_COMMAND": "orca"})
+        environment = mock.patch.dict("os.environ", {"ORCA_CLI_COMMAND": "orca", "BALLET_HOME": str(self.home / "ballet-home")})
         environment.start()
         self.addCleanup(environment.stop)
         self.world = FakeWorld(str(self.home))
@@ -880,6 +881,24 @@ class BalletWorkshopTest(unittest.TestCase):
         code, out, _ = self.run_main("status", "BUG-009")
         self.assertEqual(code, 0)
         self.assertIn("NEXT: escalate no Workshop of BUG-009", out)
+
+    def test_la_fin_du_workshop_est_annoncee_a_maestro_sous_le_nom_du_dossier_sans_alias(self):
+        ballet_maestro.write_config({"mailbox": {"terminal": "term_box", "run": "run_box"}})
+        self.begin()
+        self.world.said("worker_done", report(), "msg_1")
+        _, out, _ = self.run_main("receive", "--message", "msg_1")
+        send = [command for command in self.world.ran("orca", "orchestration", "send") if "run:run_box" in command][-1]
+        self.assertEqual(send[send.index("--subject") + 1], f"{self.home.resolve().name}#BUG-004 · done")
+        self.assertIn(f"- Maestro told: {self.home.resolve().name}#BUG-004 · done", out)
+        self.assertTrue(out.splitlines()[-1].startswith("NEXT: done"))
+
+    def test_sans_maestro_toml_rien_n_est_envoye_a_maestro(self):
+        self.begin()
+        self.world.said("worker_done", report(), "msg_1")
+        _, out, _ = self.run_main("receive", "--message", "msg_1")
+        self.assertFalse([command for command in self.world.ran("orca", "orchestration", "send") if "--priority" in command])
+        self.assertNotIn("Maestro", out)
+        self.assertIn("NEXT: done", out.splitlines()[-1])
 
     def test_deux_sessions_tournent_cote_a_cote_sans_se_marcher_dessus(self):
         self.begin()

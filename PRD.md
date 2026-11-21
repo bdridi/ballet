@@ -33,6 +33,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 | **Dancer** | dev | Exécute le plan. |
 | **Critic** | validateur | Juge le travail et rend un verdict. |
 | **Conductor** | coordinateur | Fait tourner une boucle d'un projet : enchaîne les rôles, porte leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
+| **Maestro** (`/ballet:maestro`) | superviseur | Le point d'entrée unique du Director pour tous ses projets : une session qui attend sa boîte Orca, où les Conductors et le Monitor écrivent, lui rapporte, porte ses réponses et seule lance les Conductors (OPP-02). |
 
 - **Rôle** : Dramaturg, Choreographer, Dancer ou Critic. Le Conductor n'est pas un rôle : il les fait jouer.
 - **Worker** : l'instance d'agent (un CLI et un modèle) qu'Orca lance pour jouer un rôle.
@@ -46,7 +47,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
   - **`assisted`** (par défaut) : le Director est dans la boucle ; il cadre, valide le plan et reçoit les escalades ;
   - **`autopilot`** : la boucle tourne sans lui ; chaque rôle décide dans son périmètre et trace sa décision. La Rehearsal en autopilot, c'est le mode nuit.
 - **File** : les issues GitHub du projet qui attendent leur Rehearsal : type `Task`, `Bug` ou `Feature`, champ Ballet status à `ready`, dans l'ordre du champ Priority puis de l'ancienneté ; les `Slice` suivent leur feature. C'est GitHub qui la tient, par les types et les champs natifs des issues, pas un fichier local.
-- **Observateur** : un script déterministe, pas un agent, qui surveille la file et lance une session de Conductor neuve pour l'élément prêt suivant, une à la fois.
+- **Monitor** : un script déterministe, pas un agent (`ballet_monitor.py`), qui surveille la file sur GitHub et les sessions des projets, et écrit dans la boîte de Maestro l'élément passé prêt ou le Conductor mort ; il ne lance rien, c'est Maestro qui lance (OPP-01).
 
 **Le reste**
 
@@ -458,7 +459,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 ## 14. Hors périmètre de la V1
 
 - la Rehearsal en parallèle et la file de merge ;
-- un Supervisor (nom à trouver), le point d'entrée du Director pour plusieurs projets : priorités et budget entre eux, résumé du matin (OPP-02) ;
+- Maestro, le point d'entrée du Director pour plusieurs projets : priorités et budget entre eux, résumé du matin (OPP-02) ;
 - le Workshop en autopilot qui choisit seul dans le backlog, sans propositions (il choisit déjà, mais ses issues sortent `proposed`) ;
 - le tableau de bord de monitoring abouti (le journal est dans la V1 ; la Scène n'en est que le concept, voir §12) ;
 - la migration de Flownest.

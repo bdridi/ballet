@@ -10,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import ballet_maestro  # noqa: E402
 import ballet_rehearsal  # noqa: E402
 
 PROFILE = """[project]
@@ -235,7 +236,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.home = Path(self._tmp.name)
         (self.home / ".ballet").mkdir()
         (self.home / ".ballet" / "config.toml").write_text(PROFILE, encoding="utf-8")
-        environment = mock.patch.dict("os.environ", {"ORCA_CLI_COMMAND": "orca"})
+        environment = mock.patch.dict("os.environ", {"ORCA_CLI_COMMAND": "orca", "BALLET_HOME": str(self.home / "ballet-home")})
         environment.start()
         self.addCleanup(environment.stop)
         self.world = FakeWorld(home=str(self.home))
@@ -1334,6 +1335,36 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         code, lines = self.run_main("receive", "FEAT-001.2", str(path))
         self.assertEqual(code, 0)
         self.assertTrue(lines[-1].startswith("NEXT: escalate invalid message"))
+
+    # --- Maestro ---
+
+    def maestro_mailbox(self):
+        """Une boîte de Maestro, et ce home enregistré sous l'alias `antimurphy`."""
+        ballet_maestro.write_config({"mailbox": {"terminal": "term_box", "run": "run_box"},
+                                     "projects": {"antimurphy": {"path": str(self.home)}}})
+
+    def test_une_escalade_est_annoncee_a_maestro_par_le_script(self):
+        self.maestro_mailbox()
+        self.begin()
+        path = self.home / "incoming.md"
+        path.write_text("not a message\n", encoding="utf-8")
+        _, lines = self.run_main("receive", "FEAT-001.2", str(path))
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "run:run_box")
+        self.assertEqual(send[send.index("--type") + 1], "status")
+        self.assertEqual(send[send.index("--priority") + 1], "high")
+        self.assertEqual(send[send.index("--subject") + 1], "antimurphy#3 · escalate")
+        self.assertIn("NEXT: escalate invalid message", send[send.index("--body") + 1])
+        self.assertIn("- Maestro told: antimurphy#3 · escalate", lines)
+        self.assertTrue(lines[-1].startswith("NEXT: escalate"))
+
+    def test_un_pas_qui_attend_ou_une_simple_lecture_n_est_pas_annonce(self):
+        self.maestro_mailbox()
+        _, waited = self.run_main("begin", "3")
+        self.receive("not a message\n")
+        _, read = self.run_main("status", "FEAT-001.2")
+        self.assertEqual((waited[-1], read[-1][:14]), ("NEXT: wait", "NEXT: escalate"))
+        self.assertFalse([command for command in self.world.ran("orca", "orchestration", "send") if "run:run_box" in command])
 
     def test_un_usage_invalide_sort_avec_deux_sans_rien_faire(self):
         self.assertEqual(self.run_main("begin")[0], 2)

@@ -2,6 +2,19 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.33.0 — 2026-11-21 · `v0.33.0`
+
+Maestro, étape 1 : sa boîte Orca, où les Conductors écrivent leurs escalades et leurs fins, et un premier `/ballet:setup`.
+
+- Le superviseur s'appelle Maestro (`/ballet:maestro`, `ballet_maestro.py`, `~/.ballet/maestro.toml`) ; Maestro et le Monitor entrent au vocabulaire (PRD §3, `AGENTS.md`), et le spike 0001, OPP-01, OPP-02 et OPP-74 suivent.
+- `ballet_maestro.py mailbox` crée la boîte de Maestro, une seule fois : un terminal Orca vide (`maestro-mailbox`), puis une Run `run-create --from` lui. Le terminal noté vit encore : rien ne change. Il a disparu : une nouvelle boîte, l'ancienne Run gardée (`previous_run`) pour une dernière lecture. Orca injoignable : rien n'est créé. Un verrou empêche deux appels de créer chacun la sienne.
+- `ballet_maestro.py project add <alias> <chemin>` et `project list` : les projets de Maestro.
+- `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) : `[mailbox]`, `[projects.<alias>]` et la place du bail `[lease]` (pid, début), qui servira à l'étape 2. Écrit d'un coup (fichier temporaire puis renommage), par un sérialiseur TOML minimal.
+- `ballet_rehearsal.py` et `ballet_workshop.py` annoncent à Maestro chaque transition qui finit en `NEXT: escalate` (question comprise) ou `NEXT: done` : `orchestration send --to run:<id> --type status --priority high`, sujet `<projet>#<élément> · <événement>` (l'alias du projet, sinon le nom du dossier), le pas entier en corps. Une lecture (`status`, un `resume` sans rien à reprendre) n'est pas annoncée. Sans `maestro.toml` ou sans boîte, rien n'est envoyé ; un échec d'envoi n'est qu'une ligne du pas (`Maestro not told: …`).
+- Le skill `/ballet:setup`, présentiel seulement : vérifie les outils (`git`, `python3`, `gh auth status`, `claude`, `orca`), lance `reset_plugin.py` du clone, enregistre les projets (`ballet_maestro.py project add`, `orca repo add`), propose `/ballet:init-project` aux projets sans profil, crée la boîte, et dit ce qui reste à venir (la session Maestro, le Monitor, le headless). README mis à jour.
+
+**Opportunités traitées** : OPP-02 (étape 1 sur 5, reste 🆕) ; OPP-74 (premier setup, reste 🆕).
+
 ## 0.32.1 — 2026-11-20 · `v0.32.1`
 
 Le Dancer lançait la preuve complète à chaque tâche (FEAT-006 sur antimurphy : une douzaine de preuves, e2e compris, puis une de plus par le script, l'essentiel des 45 minutes).

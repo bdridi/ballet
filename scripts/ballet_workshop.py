@@ -40,6 +40,8 @@ planification à sa slice en Rehearsal : la Scène suit `BUG-004` → `#21` → 
 
 Ce que le Dramaturg décide seul (`## Decided alone`) est écrit dans l'issue, qui porte alors le libellé `ballet:decided-alone`.
 
+Comme en Rehearsal, une transition qui finit en `NEXT: escalate` ou `NEXT: done` est annoncée à Maestro (`ballet_maestro.announce`).
+
 Sans élément, `begin` choisit dans le backlog : la première ligne de *Next up* (OPP, FEAT, BUG ou TASK) qui n'a pas encore sa
 session. Ce que le Workshop choisit seul sort toujours `proposed`, quel que soit `queue_approval_skipped`.
 """
@@ -54,6 +56,7 @@ from pathlib import Path
 
 import ballet_config
 import ballet_github
+import ballet_maestro
 import ballet_orca
 import ballet_policy
 import ballet_rehearsal
@@ -546,11 +549,13 @@ def _report_field(text, name):
 
 
 def _settle(workshop, step, home):
-    """Le pas fixe le statut de la session ; l'état est sauvé et le pas journalisé."""
+    """Le pas fixe le statut de la session ; l'état est sauvé et le pas journalisé. C'est une transition de l'élément,
+    que Maestro apprend si elle escalade ou finit."""
     workshop.status = ballet_rehearsal.STATUS_OF_STEP[step.next]
     workshop.reason = step.reason
     _save(workshop, home)
     _log(home, workshop, step.next, {"reason": step.reason, "done": step.done})
+    step.item = workshop.item
     return step
 
 
@@ -691,7 +696,9 @@ def main(argv, home=".", tools=None):
     tools = tools or Tools()
     command, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
-        print(_command(command, arguments, home, tools))
+        step = _command(command, arguments, home, tools)
+        ballet_maestro.announce(step, home, tools.orca)
+        print(step.render())
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
@@ -702,17 +709,17 @@ def main(argv, home=".", tools=None):
 
 def _command(command, arguments, home, tools):
     if command == "begin" and len(arguments) == 2 and arguments[0] == "--request":
-        return begin(None, home, tools, request=arguments[1]).render()
+        return begin(None, home, tools, request=arguments[1])
     if command == "begin" and len(arguments) <= 1:
-        return begin(_item(arguments[0]) if arguments else None, home, tools).render()
+        return begin(_item(arguments[0]) if arguments else None, home, tools)
     if command in ("receive", "resume", "status"):
         item, rest = _item_and_rest(arguments, home)
         if command == "receive" and len(rest) == 2 and rest[0] in ("--message", "--dispatch"):
-            return receive_from_orca(item, rest[1], home, tools, by=rest[0][2:]).render()
+            return receive_from_orca(item, rest[1], home, tools, by=rest[0][2:])
         if command == "resume" and not rest:
-            return resume(item, home, tools).render()
+            return resume(item, home, tools)
         if command == "status" and not rest:
-            return status(item, home, tools).render()
+            return status(item, home, tools)
     raise UsageError(USAGE)
 
 

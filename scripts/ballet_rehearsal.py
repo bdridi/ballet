@@ -82,6 +82,9 @@ ou s'il est tombé en erreur, la Rehearsal escalade.
 Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
 et un autre code ≠ 0 n'est qu'une panne du script.
 
+Une transition qui finit en `NEXT: escalate` ou `NEXT: done` est annoncée à Maestro (`ballet_maestro.announce`) : un
+`status` dans sa boîte, sujet `<projet>#<élément> · <événement>`. Sans boîte, rien ; un échec n'est qu'une ligne du pas.
+
 Le journal garde, texte entier, chaque message reçu (`message`) et tout ce que le Conductor remet à un worker
 (`handoff` : `start`, `send`, `reply` ou `nudge`) : la Scène le lit.
 
@@ -102,6 +105,7 @@ from pathlib import Path
 
 import ballet_config
 import ballet_github
+import ballet_maestro
 import ballet_mutation
 import ballet_orca
 import ballet_policy
@@ -215,6 +219,7 @@ class Step:
     next: str
     reason: str = ""
     done: list = field(default_factory=list)
+    item: str = ""        # l'élément dont ce pas est une transition (annoncée à Maestro) ; vide pour une simple lecture
 
     def render(self):
         lines = [f"- {action}" for action in self.done]
@@ -513,6 +518,8 @@ def _follow_on_github(session_item, step, home, tools):
     """Le Ballet status de l'issue de la session suit chaque pas. Il n'est écrit que s'il change ; un refus de GitHub
     se dit, sans rien arrêter."""
     session = _load_session(session_item, home) if session_item and _session_path(session_item, home).is_file() else None
+    if session:
+        step.item = session.item
     if not session or not session.issue:
         return step
     status = _ballet_status_of(step, session, home)
@@ -1748,13 +1755,21 @@ def main(argv, home=".", tools=None):
     tools = tools or Tools()
     command, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
-        print(_command(command, arguments, home, tools))
+        print(_shown(_command(command, arguments, home, tools), home, tools))
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
     except (RehearsalError, ballet_github.GitHubError) as error:
         print(Step("escalate", str(error)).render())
     return 0
+
+
+def _shown(result, home, tools):
+    """Le texte à afficher ; une escalade ou la fin d'une session est d'abord annoncée à Maestro."""
+    if not isinstance(result, Step):
+        return result
+    ballet_maestro.announce(result, home, tools.orca)
+    return result.render()
 
 
 USAGE = ("usage: begin <item> | receive [<ID>] --message <msg-id> | receive [<ID>] --dispatch <ctx-id> "
@@ -1765,11 +1780,11 @@ USAGE = ("usage: begin <item> | receive [<ID>] --message <msg-id> | receive [<ID
 
 def _command(command, arguments, home, tools):
     if command == "begin" and len(arguments) == 1:
-        return begin(_item(arguments[0]), home, tools).render()
+        return begin(_item(arguments[0]), home, tools)
     if command in ("resume", "status") and len(arguments) <= 1:
         session_item = _session_named(arguments[0], home) if arguments else _only_open_session(home)
         if session_item or not arguments:
-            return _session_command(command, session_item, home, tools).render()
+            return _session_command(command, session_item, home, tools)
     if command in ("receive", "premiere", "resume", "status") and not _names_a_rehearsal(arguments):
         arguments = [_current_rehearsal(home), *arguments]
     return _rehearsal_command(command, arguments, home, tools)
@@ -1785,20 +1800,20 @@ def _session_command(command, session_item, home, tools):
 
 def _rehearsal_command(command, arguments, home, tools):
     if command == "receive" and arguments[1:] == ["--mutation"]:
-        return receive_mutation(arguments[0], home, tools).render()
+        return receive_mutation(arguments[0], home, tools)
     if command == "mutate" and len(arguments) == 1:
         mutate(arguments[0], home, tools)
         return f"mutation of {arguments[0]} done"
     if command == "receive" and len(arguments) == 3 and arguments[1] in ("--message", "--dispatch"):
-        return receive_from_orca(arguments[0], arguments[2], home, tools, by=arguments[1][2:]).render()
+        return receive_from_orca(arguments[0], arguments[2], home, tools, by=arguments[1][2:])
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):
-        return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools).render()
+        return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools)
     if command == "premiere" and len(arguments) == 1:
-        return premiere(arguments[0], home, tools).render()
+        return premiere(arguments[0], home, tools)
     if command == "resume" and len(arguments) == 1:
-        return resume(arguments[0], home, tools).render()
+        return resume(arguments[0], home, tools)
     if command == "status" and len(arguments) == 1:
-        return status(arguments[0], home, tools).render()
+        return status(arguments[0], home, tools)
     if command == "status" and arguments[1:] == ["--json"]:
         return json.dumps(asdict(_load(arguments[0], home)), indent=2)
     raise UsageError(USAGE)

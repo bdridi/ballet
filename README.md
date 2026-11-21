@@ -49,6 +49,10 @@ The first time Vibe runs in a project, it asks to trust the folder ("Trust this 
 
 To try Claude without installing: `claude --plugin-dir <path-to-ballet>`.
 
+### Set up the machine (`/ballet:setup`)
+
+Once the plugin is installed, `/ballet:setup` prepares the machine in one go, on your own machine with the Orca app open: it checks the tools, reinstalls the plugin, registers your projects (an alias and a path each, in `~/.ballet/maestro.toml`, and in Orca), offers `/ballet:init-project` to those without a profile, and creates **Maestro's mailbox** (`ballet_maestro.py mailbox`): an empty Orca terminal and its Run, created once. From then on, every Conductor posts a `status` message there when it escalates or finishes (`antimurphy#12 · escalate`). The Maestro session that reads it, the Monitor and the headless mode are still to come (OPP-02, OPP-01, OPP-74). Every step can be rerun.
+
 ## Check the installation
 
 In one of the CLIs, run:
