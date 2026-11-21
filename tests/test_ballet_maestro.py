@@ -1,5 +1,6 @@
 import io
 import json
+import shlex
 import sys
 import tempfile
 import tomllib
@@ -605,6 +606,82 @@ class BalletMaestroTest(unittest.TestCase):
         ballet_maestro.monitor(self.orca)
         config = self.config()
         self.assertEqual((config["mailbox"], sorted(config["projects"])), ({"terminal": "term_1", "run": "run_1"}, ["antimurphy"]))
+
+    # --- maestro (la session elle-même) ---
+
+    def test_maestro_cree_le_terminal_de_la_session_avec_sa_commande_et_le_note(self):
+        with mock.patch.dict("os.environ", clear=False) as environment:
+            environment.pop("BALLET_MAESTRO_COMMAND", None)
+            self.assertEqual(ballet_maestro.maestro(self.orca), "maestro created: terminal term_1")
+        create = self.orca.ran("terminal", "create")[0]
+        self.assertEqual(create[create.index("--title") + 1], "maestro")
+        self.assertEqual(create[create.index("--command") + 1],
+                         f"BALLET_HOME={self.state} claude --remote-control 'ballet maestro' /ballet:maestro")
+        self.assertEqual(self.config()["maestro"], {"terminal": "term_1"})
+
+    def test_maestro_sans_ballet_home_ne_transmet_rien(self):
+        with mock.patch.dict("os.environ", clear=False) as environment:
+            environment.pop("BALLET_HOME")
+            environment.pop("BALLET_MAESTRO_COMMAND", None)
+            self.assertEqual(ballet_maestro._maestro_command(), "claude --remote-control 'ballet maestro' /ballet:maestro")
+
+    def test_maestro_le_prompt_vient_avant_toute_option(self):
+        with mock.patch.dict("os.environ", {"BALLET_MAESTRO_COMMAND": "echo fake-maestro"}):
+            words = shlex.split(ballet_maestro._maestro_command())
+        self.assertEqual(words[1:], ["echo", "fake-maestro", "--remote-control", "ballet maestro", "/ballet:maestro"])
+
+    def test_maestro_est_idempotent_tant_que_le_terminal_vit(self):
+        ballet_maestro.maestro(self.orca)
+        self.assertEqual(ballet_maestro.maestro(self.orca), "maestro already there: terminal term_1")
+        self.assertEqual(len(self.orca.ran("terminal", "create")), 1)
+
+    def test_maestro_remplace_un_terminal_disparu(self):
+        ballet_maestro.maestro(self.orca)
+        self.orca.terminals.clear()
+        self.assertEqual(ballet_maestro.maestro(self.orca), "maestro created: terminal term_2")
+
+    def test_maestro_ne_cree_rien_quand_une_session_tient_un_bail_vivant_et_le_dit(self):
+        ballet_maestro.claim()
+        message = ballet_maestro.maestro(self.orca)
+        self.assertTrue(message.startswith("maestro not created: another Maestro session holds the lease"), message)
+        self.assertIn("claim --take-over", message)
+        self.assertEqual(self.orca.ran("terminal", "create"), [])
+        self.assertNotIn("maestro", self.config())
+
+    def test_maestro_un_bail_expire_ne_l_empeche_pas(self):
+        ballet_maestro.claim()
+        config = self.config()
+        config["lease"]["renewed"] = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat(timespec="seconds")
+        ballet_maestro.write_config(config)
+        self.assertEqual(ballet_maestro.maestro(self.orca), "maestro created: terminal term_1")
+
+    def test_maestro_avec_une_orca_injoignable_ne_cree_rien(self):
+        ballet_maestro.write_config({"maestro": {"terminal": "term_1"}})
+        self.orca.unreachable = True
+        with self.assertRaises(ballet_maestro.MaestroError):
+            ballet_maestro.maestro(self.orca)
+        self.assertEqual(self.orca.ran("terminal", "create"), [])
+
+    def test_maestro_dont_la_creation_echoue_ne_note_aucun_terminal(self):
+        self.orca.unreachable = True
+        with self.assertRaises(ballet_maestro.MaestroError):
+            ballet_maestro.maestro(self.orca)
+        self.assertNotIn("maestro", ballet_maestro.read_config())
+
+    def test_maestro_ne_touche_ni_a_la_boite_ni_au_monitor_ni_au_bail(self):
+        ballet_maestro.mailbox(self.orca)
+        ballet_maestro.monitor(self.orca)
+        before = self.config()
+        ballet_maestro.maestro(self.orca)
+        after = self.config()
+        for table in ("mailbox", "monitor", "lease", "projects"):
+            self.assertEqual(after[table], before[table], table)
+        self.assertEqual(after["maestro"], {"terminal": "term_3"})
+
+    def test_la_ligne_de_commande_maestro(self):
+        code, out, _ = self.run_main("maestro")
+        self.assertEqual((code, out), (0, "maestro created: terminal term_1\n"))
+        self.assertEqual(self.run_main("maestro")[1], "maestro already there: terminal term_1\n")
 
     def test_project_add_garde_auto_launch_d_un_projet_connu(self):
         folder = self.project("antimurphy")

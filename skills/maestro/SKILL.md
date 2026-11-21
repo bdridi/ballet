@@ -11,7 +11,7 @@ Every move goes through `ballet_maestro.py` (and `ballet_launch.py` to launch), 
 
 ## 1. Start
 
-Take the lease first. Reading the mailbox consumes its messages, so only one Maestro session may read it.
+Take the lease first. Reading the mailbox consumes its messages, so only one Maestro session may read it. (`/ballet:setup` starts a Maestro session of its own in the Orca tab `maestro`, named « ballet maestro » in the Claude app: that one takes the lease at its start. If you are another session and the lease is refused, that is probably why: say so to the Director, and take over only on their yes.)
 
 ```sh
 python3 <path>/scripts/ballet_maestro.py claim

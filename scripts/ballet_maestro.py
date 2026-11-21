@@ -2,6 +2,7 @@
 
     python3 ballet_maestro.py mailbox                        # crée la boîte de Maestro, une seule fois
     python3 ballet_maestro.py monitor                        # crée le terminal du Monitor (`ballet_monitor.py run`), une seule fois
+    python3 ballet_maestro.py maestro                        # lance la session Maestro elle-même dans son terminal Orca, une seule fois
     python3 ballet_maestro.py project add <alias> <chemin>   # enregistre un projet (ou change son chemin)
     python3 ballet_maestro.py project list                   # les projets connus
     python3 ballet_maestro.py claim [--take-over]            # prend le bail : une seule session Maestro lit la boîte
@@ -27,6 +28,9 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     [monitor]                 le terminal Orca du Monitor (`monitor` le crée)
     terminal = "term_…"
 
+    [maestro]                 le terminal Orca de la session Maestro (`maestro` le crée)
+    terminal = "term_…"
+
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
     auto_launch = ["Task", "Bug"]    les types que Maestro lance seul ; vide ou absent : il demande toujours
@@ -45,6 +49,13 @@ Les dépendances (les liens « Blocked by » de GitHub, lus par `ballet_program.
 règle `auto_launch` : un élément prêt dont un bloqueur est ouvert est `DECISION: wait (blocked by #M, open)` ; une dépendance
 douteuse (bloqueur fermé *not planned*, cycle, bloqueur illisible) est `DECISION: ask the Director (<raison>)`, même pour un
 type confié à l'auto. `ready` et `status` montrent aussi ces éléments bloqués.
+
+`maestro` lance la session Maestro elle-même, comme `monitor` lance le Monitor : un terminal Orca `maestro` où tourne
+`claude --remote-control 'ballet maestro' '/ballet:maestro'` (le prompt avant les options ; `BALLET_MAESTRO_COMMAND` remplace
+`claude`, pour essayer sans tokens ; `BALLET_HOME` est transmis s'il est posé). Il ne fait rien quand le terminal noté vit
+encore, ni quand une session Maestro tient un bail vivant (deux sessions se disputeraient la boîte : il le dit et ne crée
+rien). La session créée prend elle-même le bail (`claim`) ; la rouvrir ailleurs se heurte à ce bail, et `--take-over` ne
+se fait que sur le oui du Director.
 
 Il n'existe jamais deux boîtes : `mailbox` ne fait rien quand le terminal noté vit encore dans Orca, et un verrou
 (`maestro.lock`) empêche deux appels de créer chacun la sienne. Chaque écriture passe par un fichier temporaire, puis
@@ -98,7 +109,12 @@ TARGET = re.compile(r"^[^\s#]+#\S+$")
 PAUSE_FLAG = "auto_launch_paused"
 MONITOR_TITLE = "ballet-monitor"
 MONITOR_SCRIPT = Path(__file__).resolve().with_name("ballet_monitor.py")
-USAGE = ("usage: mailbox | monitor | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
+MAESTRO_TITLE = "maestro"
+MAESTRO_NAME = "ballet maestro"          # le nom Remote Control de la session, celui qu'on cherche dans l'app Claude
+MAESTRO_PROMPT = "/ballet:maestro"
+MAESTRO_COMMAND_VARIABLE = "BALLET_MAESTRO_COMMAND"
+DEFAULT_AGENT = "claude"
+USAGE = ("usage: mailbox | monitor | maestro | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
          "| recap --owner <token> | status | ready | pause | resume | tell <project>#<item> <text>")
 
 
@@ -149,6 +165,33 @@ def _monitor_command():
     """`python3 <clone>/scripts/ballet_monitor.py run`, avec `BALLET_HOME` quand il est posé : le Monitor lit le même dossier d'état."""
     home = os.environ.get("BALLET_HOME")
     return " ".join([*([f"BALLET_HOME={shlex.quote(home)}"] if home else []), "python3", shlex.quote(str(MONITOR_SCRIPT)), "run"])
+
+
+def maestro(orca, state=None):
+    """La session Maestro, lancée une seule fois dans son terminal Orca. Si le terminal noté vit encore, ou si une session
+    Maestro tient un bail vivant, rien n'est créé (deux sessions se disputeraient la boîte) ; sinon un nouveau terminal
+    la lance et le remplace. Une Orca injoignable lève : on ne crée jamais une seconde session à l'aveugle."""
+    with ballet_state.locked(state):
+        config = read_config(state)
+        handle = config.get("maestro", {}).get("terminal", "")
+        if handle and _terminal_alive(handle, orca):
+            return f"maestro already there: terminal {handle}"
+        if _lease_alive(config["lease"]):
+            return f"maestro not created: {_lease_held_message(config['lease'])}"
+        receipt = json.loads(orca(["terminal", "create", "--title", MAESTRO_TITLE, "--command", _maestro_command(), "--json"]))
+        handle = first_id(receipt, "term_", "orca terminal create")
+        config["maestro"] = {"terminal": handle}
+        write_config(config, state)
+        return f"maestro created: terminal {handle}"
+
+
+def _maestro_command():
+    """`<agent> --remote-control 'ballet maestro' '/ballet:maestro'` : le prompt avant les options, comme pour un Conductor ;
+    avec `BALLET_HOME` quand il est posé : la session lit le même dossier d'état."""
+    agent = shlex.split(os.environ.get(MAESTRO_COMMAND_VARIABLE) or DEFAULT_AGENT)
+    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT])
+    home = os.environ.get("BALLET_HOME")
+    return f"BALLET_HOME={shlex.quote(home)} {command}" if home else command
 
 
 def add_project(alias, path, state=None):
@@ -757,6 +800,8 @@ def _command(arguments, orca):
         return mailbox(orca)
     if arguments == ["monitor"]:
         return monitor(orca)
+    if arguments == ["maestro"]:
+        return maestro(orca)
     if arguments[:2] == ["project", "add"] and len(arguments) == 4:
         return add_project(arguments[2], arguments[3])
     if arguments == ["project", "list"]:

@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Sets up a machine for Ballet, once (installer): checks the tools (git, python3, gh, claude, orca), reinstalls the plugin from its clone, registers the Director's projects for Maestro (`~/.ballet/maestro.toml`) and in Orca, offers `/ballet:init-project` to the projects that lack a profile, and creates Maestro's mailbox and the Monitor's terminal. Attended mode only for now (the Director's own machine, Orca desktop open). Use once per machine, or again to add a project or recreate a lost mailbox: every step is safe to rerun.
+description: Sets up a machine for Ballet, once (installer): checks the tools (git, python3, gh, claude, orca), reinstalls the plugin from its clone, registers the Director's projects for Maestro (`~/.ballet/maestro.toml`) and in Orca, offers `/ballet:init-project` to the projects that lack a profile, creates Maestro's mailbox and the Monitor's terminal, and starts the Maestro session itself in its own terminal. Attended mode only for now (the Director's own machine, Orca desktop open). Use once per machine, or again to add a project or recreate a lost mailbox: every step is safe to rerun.
 ---
 
 # setup
@@ -72,12 +72,20 @@ It prints `monitor created: terminal <handle>` or `monitor already there: …`. 
 
 Which items Maestro launches by itself is the Director's choice, per project, in `~/.ballet/maestro.toml`: `auto_launch = ["Task", "Bug"]` under `[projects.<alias>]` (nothing by default: Maestro asks every time). Offer to set it; edit the file only for a project and types the Director names, and only that line.
 
-## 6. Report
+## 6. Maestro itself
 
-Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca, with or without a profile), the mailbox, the Monitor. Then tell the Director what to do next: **open `/ballet:maestro`** in a session of their own, from anywhere. That session takes the lease (only one session reads the mailbox), tells what happened while they were away, then sleeps on the mailbox and wakes at each escalation. Then say plainly what is **not there yet**:
+```sh
+python3 <path>/scripts/ballet_maestro.py maestro
+```
+
+It prints `maestro created: terminal <handle>` or `maestro already there: …`. An Orca terminal titled `maestro` runs `claude --remote-control 'ballet maestro' '/ballet:maestro'`: a real Claude session, which takes the lease on the mailbox and sleeps on it, reachable from the Claude app (Mac or phone) under the name **ballet maestro** (Remote Control). Run this step after the mailbox and the Monitor. It creates nothing when its terminal is alive, **and nothing either when a Maestro session already holds a live lease** (it says so: two sessions would fight over the mailbox). Relay that message; never `claim --take-over` yourself, that is the Director's yes to give. Run it only on a machine where `claude` is installed and logged in (step 1 checked it).
+
+## 7. Report
+
+Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca, with or without a profile), the mailbox, the Monitor, Maestro. Then tell the Director where Maestro is: **it runs in the Orca tab `maestro`, and it is reachable in the Claude app under the name « ballet maestro »** (Remote Control, on the Mac as on a phone). It took the lease, tells what happened while they were away, then sleeps on the mailbox and wakes at each escalation. **They must not close that tab.** Opening `/ballet:maestro` somewhere else runs into the lease, and `--take-over` is only for when they say yes (the session in the tab then stops being Maestro). If step 6 said a session already held the lease, report that instead: no second Maestro was started. Then say plainly what is **not there yet**:
 
 - `stop` and `restart` (Maestro launches Conductors, but cannot stop one yet);
 - a Monitor that spots a Conductor that is frozen (its terminal alive, nothing said): it only sees a vanished one;
 - the headless mode (a VPS, `orca serve` under systemd, the keeper).
 
-You change nothing in the projects: only `~/.ballet/`, Orca's project list, and the mailbox and Monitor terminals.
+You change nothing in the projects: only `~/.ballet/`, Orca's project list, and the mailbox, Monitor and Maestro terminals.
