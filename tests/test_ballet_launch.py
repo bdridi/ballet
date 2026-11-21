@@ -51,6 +51,7 @@ class FakeOrca:
         self.screen = ""                 # ce que `terminal read` montre
         self.unreadable = False          # `terminal read` échoue
         self.unreachable = False
+        self.unknown_folder = False      # le dossier n'est pas un espace de travail Orca
 
     def __call__(self, arguments):
         self.commands.append(arguments)
@@ -58,6 +59,8 @@ class FakeOrca:
             raise ballet_maestro.MaestroError("This terminal could not connect to Orca.")
         if arguments[:2] == ["terminal", "list"]:
             return json.dumps({"ok": True, "result": {"terminals": [{"handle": handle} for handle in self.terminals]}})
+        if arguments[:2] == ["terminal", "create"] and self.unknown_folder:
+            raise ballet_maestro.MaestroError('{"ok": false, "error": {"code": "selector_not_found"}}')
         if arguments[:2] == ["terminal", "create"]:
             self.created += 1
             self.terminals.append(f"term_{self.created}")
@@ -280,6 +283,12 @@ class BalletLaunchTest(unittest.TestCase):
     def test_une_orca_injoignable_ne_lance_rien(self):
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
+            self.rehearsal()
+        self.assertFalse((self.state / "conductors.json").exists())
+
+    def test_un_dossier_inconnu_d_orca_est_refuse_en_disant_comment_l_ajouter(self):
+        self.orca.unknown_folder = True
+        with self.assertRaisesRegex(LaunchError, "orca repo add --path"):
             self.rehearsal()
         self.assertFalse((self.state / "conductors.json").exists())
 

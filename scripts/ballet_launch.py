@@ -195,8 +195,15 @@ def _workshop_item(text, home):
 
 
 def _open_terminal(launch, orca):
-    receipt = json.loads(orca(["terminal", "create", "--worktree", f"path:{launch.home}", "--title", launch.key,
-                               "--command", _conductor_command(launch), "--json"]))
+    """Le terminal du Conductor, dans le dossier du projet ; un dossier qu'Orca ne connaît pas est refusé clairement."""
+    try:
+        receipt = json.loads(orca(["terminal", "create", "--worktree", f"path:{launch.home}", "--title", launch.key,
+                                   "--command", _conductor_command(launch), "--json"]))
+    except MaestroError as error:
+        if "selector_not_found" in str(error):
+            raise LaunchError(f"Orca does not know the folder {launch.home}: add it with `orca repo add --path {launch.home}` "
+                              "(or rerun /ballet:setup)") from error
+        raise
     return ballet_maestro.first_id(receipt, "term_", "orca terminal create")
 
 
