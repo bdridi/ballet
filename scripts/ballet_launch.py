@@ -5,10 +5,11 @@
 
 Maestro seul l'appelle (sur la demande du Director, plus tard sur celle du Monitor) : c'est le seul lanceur de Ballet.
 
-Le Conductor est `claude --remote-control '<projet>#<élément>' '<prompt>' --allowedTools 'Bash(python3:*)'`, lancé par
+Le Conductor est `claude --remote-control '<projet>#<élément>' '<prompt>' --allowedTools 'Bash(python3:*)' 'Edit(.ballet/run/**)'`, lancé par
 `orca terminal create --worktree path:<projet> --command …`. Le prompt vient avant les options : `--allowedTools` prend
 tout ce qui la suit pour ses valeurs. Un Conductor ne lance que les scripts de Ballet (`python3`) : `gh`, `git` et `orca`
-sont appelés par ces scripts, jamais par l'agent. `BALLET_CONDUCTOR_COMMAND` remplace `claude` (un autre agent, ou une
+sont appelés par ces scripts, jamais par l'agent. Il n'écrit qu'un fichier, le message Ballet du Director
+(`.ballet/run/inbox.md`) : `Edit(.ballet/run/**)` le laisse faire sans demande de permission, quel que soit le mode. `BALLET_CONDUCTOR_COMMAND` remplace `claude` (un autre agent, ou une
 commande inoffensive pour essayer sans tokens) ; les arguments restent les mêmes.
 
 Avant tout lancement, quatre garde-fous, chacun avec son refus : le projet est connu de `maestro.toml` ; l'élément n'a pas
@@ -39,7 +40,7 @@ from ballet_maestro import MaestroError
 
 COMMAND_VARIABLE = "BALLET_CONDUCTOR_COMMAND"
 DEFAULT_AGENT = "claude"
-ALLOWED_TOOLS = ("Bash(python3:*)",)
+ALLOWED_TOOLS = ("Bash(python3:*)", "Edit(.ballet/run/**)")
 DEFAULT_LIMITS = {"max_running": 3, "max_per_day": 10}
 LAUNCH_LOCK = "launch.lock"
 REMOTE_CONTROL_URL = re.compile(r"https://claude\.ai/code/\S+")

@@ -134,7 +134,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.rehearsal("#12")
         words = shlex.split(self.option(self.create_command(), "--command"))
         self.assertEqual(words, ["claude", "--remote-control", "antimurphy#12", "/ballet:rehearsal #12",
-                                 "--allowedTools", "Bash(python3:*)"])
+                                 "--allowedTools", "Bash(python3:*)", "Edit(.ballet/run/**)"])
         self.assertLess(words.index("/ballet:rehearsal #12"), words.index("--allowedTools"))
 
     def test_la_commande_se_tape_telle_quelle_dans_un_shell(self):
@@ -182,7 +182,7 @@ class BalletLaunchTest(unittest.TestCase):
             self.rehearsal("#12")
         words = shlex.split(self.option(self.create_command(), "--command"))
         self.assertEqual(words, ["sh", "-c", "echo hi; exec cat", "--remote-control", "antimurphy#12",
-                                 "/ballet:rehearsal #12", "--allowedTools", "Bash(python3:*)"])
+                                 "/ballet:rehearsal #12", "--allowedTools", "Bash(python3:*)", "Edit(.ballet/run/**)"])
 
     # --- les garde-fous ---
 
