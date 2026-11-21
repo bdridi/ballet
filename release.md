@@ -2,6 +2,21 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.34.0 — 2026-11-21 · `v0.34.0`
+
+Maestro, étape 2 : la session `/ballet:maestro`, et la garantie qu'une seule session lit la boîte.
+
+- Le bail de lecture, dans `maestro.toml` : `[lease]` devient `owner` (un jeton aléatoire), `pid` (l'attente en cours, 0 sinon) et `renewed` (date ISO). Un bail est vivant si son `pid` tourne (un `ps` vérifie que c'est bien une attente de Maestro, pas un pid repris), ou s'il a été renouvelé il y a moins de 10 minutes. Un ancien `[lease]` (`pid`, `since`) se relit sans erreur.
+- `ballet_maestro.py claim` : refuse quand une autre session tient un bail vivant (le message propose `--take-over`), sinon écrit et affiche un jeton. `claim --take-over` arrête l'attente de l'ancien propriétaire (`SIGTERM`, qui arrête aussi son `orca check`) puis prend le bail. Tout sous le verrou existant.
+- `wait --owner <jeton>` : refuse (`this session is not Maestro anymore: …`) un jeton qui ne tient pas le bail, ou une seconde attente du même jeton ; note son pid, lit `orca orchestration check --wait` (en consommant, jamais `--peek` ; une attente qui expire repart), remet `pid = 0` et renouvelle `renewed` même en cas de panne, sans toucher à un bail repris entre-temps. Il affiche sujet, priorité, expéditeur et corps, et note dans `~/.ballet/conductors.json` (écriture atomique) le terminal expéditeur de chaque `status` `<projet>#<élément> · <événement>`, avec la date et le dernier événement.
+- `recap` : le non-lu et les 10 derniers messages de l'historique (`orchestration inbox --full`, filtré sur la Run de la boîte), la Run `previous_run` d'une boîte recréée comprise, qu'on oublie ensuite. Ne consomme rien.
+- `status` : une ligne par session ouverte de chaque projet (élément, Rehearsal courante, état, terminal connu), lue avec les fonctions de `ballet_rehearsal.py` (`session-*.json`) et `ballet_workshop.py` (`workshop-*.json`) ; rien n'est créé dans un projet.
+- `tell <projet>#<élément> <texte>` : `orca terminal send --text "Director answers: <texte>" --enter` vers le terminal du registre ; un élément inconnu, une cible mal écrite ou un terminal disparu sont refusés. Le Conductor écrit lui-même le message Ballet et lance `receive`.
+- Le skill `/ballet:maestro` : `claim` au démarrage (le bail pris est signalé, `--take-over` seulement sur le oui du Director), `recap` et `status`, un résumé « While you were away: … » (ou « Nothing new »), puis `wait` en arrière-plan, une seule à la fois, rapportée à chaque réveil (motif, liens, ce qu'il faut décider) ; `status` et `tell` à la demande du Director, avec l'avertissement que la réponse part au terminal du Conductor ; `launch` et `stop` annoncés comme à venir. Il n'interroge jamais GitHub.
+- `/ballet:setup` : sa dernière étape dit d'ouvrir `/ballet:maestro`. README mis à jour.
+
+**Opportunités traitées** : OPP-02 (étape 2 sur 5, reste 🆕).
+
 ## 0.33.0 — 2026-11-21 · `v0.33.0`
 
 Maestro, étape 1 : sa boîte Orca, où les Conductors écrivent leurs escalades et leurs fins, et un premier `/ballet:setup`.
