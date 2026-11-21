@@ -1,7 +1,9 @@
 """Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues et les PR.
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
-    python3 ballet_github.py publish <brouillon.md> <type> <statut>   # crée l'issue (Feature, Bug ou Task) à son statut, affiche son numéro
+    python3 ballet_github.py publish <brouillon.md> <type> <statut>   # crée l'issue (Feature, Bug ou Task) à son statut, affiche son numéro, et ses liens « blocked by »
+    python3 ballet_github.py block   <issue> --by <issue>        # pose un lien : la première issue est bloquée par la seconde (GitHub « Blocked by »)
+    python3 ballet_github.py unblock <issue> --by <issue>        # retire ce lien
     python3 ballet_github.py decided-alone <issue>               # marque l'issue `ballet:decided-alone` : le Dramaturg a tranché sans le Director
     python3 ballet_github.py plan    <issue> <plan.md>           # écrit la section ## Plan de l'issue
     python3 ballet_github.py slice   <parente> <brouillon.md>    # crée l'issue d'une slice (type Slice), liée à sa parente
@@ -25,6 +27,13 @@ Le titre d'une issue est le premier titre `# …` de son brouillon ; le corps, t
 `in-rehearsal`, `plan-review`, `escalated`, `done`) : c'est ce qui la met dans la file. Il ajoute une section `## Plan`
 vide si le brouillon n'en a pas, pour que le Choreographer l'écrive. `slice` crée une issue de type `Slice`, sans statut :
 elle suit sa feature. Type et champ viennent de `init-project` ; absents, l'opération le dit.
+Les dépendances entre éléments sont les liens natifs de GitHub. Un brouillon qui porte une ligne `Depends on: FEAT-002, BUG-004`
+(ou `- **Depends on**: …`, comme les specs et le gabarit `issue.md`) fait poser par `publish` un lien « blocked by » vers l'issue de
+chaque dépendance déjà publiée (l'issue dont le titre commence par `FEAT-002 · `). Une dépendance qui n'est pas publiée mais dont
+l'espace specs parle (`features/FEAT-002-*.md`, ou une ligne de `backlog.md`) est notée : son lien est posé quand elle-même est
+publiée, par les issues ouvertes qui la citent. Une dépendance que personne ne connaît, ou un élément qui dépend de lui-même,
+refuse la publication avant de rien créer. `block` et `unblock` corrigent les liens d'issues déjà publiées (refus : une issue
+bloquée par elle-même, un cycle direct). Un lien déjà posé n'est pas reposé.
 Un message (review, commentaire) suit `templates/message.md` : en-tête JSON sur la première ligne, publié en entier.
 `review` poste chaque point qui commence par `fichier:ligne` (ou `fichier:début-fin`), sur une ligne du diff,
 en commentaire sur cette ligne ; le corps de la review garde le verdict, la preuve et les autres points.
@@ -51,8 +60,10 @@ import re
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
+import ballet_config
 from ballet_message import VERDICT_LINE, MessageError, read_message
 
 PLAN_HEADING = "## Plan"
@@ -83,6 +94,18 @@ SET_STATUS = """mutation($issue: ID!, $field: ID!, $option: ID!) {
   setIssueFieldValue(input: {issueId: $issue, issueFields: [{fieldId: $field, singleSelectOptionId: $option}]}) { issue { id } }
 }"""
 PARENT_LINE = re.compile(r"^Part of #(\d+)\s*$", re.MULTILINE)
+DEPENDS_LINE = re.compile(r"^[ \t]*(?:[-*][ \t]+)?\**Depends on\**[ \t]*:\**[ \t]*(.*)$", re.MULTILINE)
+ITEM_ID = re.compile(r"\b(?:FEAT|BUG|TASK)-\d+\b")
+TITLE_ID = re.compile(r"^((?:FEAT|BUG|TASK)-\d+) · ")
+ALL_ISSUES_LIMIT = "1000"
+ISSUE_PAIR = """query($owner: String!, $name: String!, $issue: Int!, $blocker: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $issue) { id blockedBy(first: 100) { nodes { number } } }
+    blocker: issue(number: $blocker) { id blockedBy(first: 100) { nodes { number } } }
+  }
+}"""
+ADD_BLOCKED_BY = "mutation($issue: ID!, $blocker: ID!) { addBlockedBy(input: {issueId: $issue, blockingIssueId: $blocker}) { issue { number } } }"
+REMOVE_BLOCKED_BY = "mutation($issue: ID!, $blocker: ID!) { removeBlockedBy(input: {issueId: $issue, blockingIssueId: $blocker}) { issue { number } } }"
 BASE_BRANCH = "main"
 REHEARSAL_BRANCH = re.compile(r"rehearsal/(FEAT|BUG|TASK)-\d{3}(\.\d+)?")
 WORKSHOP_BRANCH = re.compile(r"workshop/((OPP|FEAT|BUG|TASK)-\d+|[a-z0-9]+(-[a-z0-9]+)*)")   # une ligne du backlog, ou le slug d'une demande
@@ -121,18 +144,52 @@ def read_issue(number, run=None):
     return _issue_body(number, run or _run_gh)
 
 
-def publish_issue(draft_path, issue_type, status, run=None):
+def publish_issue(draft_path, issue_type, status, run=None, specs=None):
     """Crée l'issue de son type et de son statut : c'est ce qui la met dans la file. Renvoie son numéro."""
+    return publish_issue_with_links(draft_path, issue_type, status, run, specs)[0]
+
+
+def publish_issue_with_links(draft_path, issue_type, status, run=None, specs=None):
+    """Crée l'issue, puis pose ses liens « blocked by » (ligne `Depends on:` du brouillon) : renvoie son numéro et les notes sur
+    ses liens. Une dépendance inconnue refuse la publication avant de rien créer ; `specs` est l'espace specs où chercher une
+    dépendance pas encore publiée (par défaut celui du projet courant)."""
     run = run or _run_gh
     _require_among(issue_type, PUBLISHED_TYPES, "issue type")
     _require_among(status, BALLET_STATUSES, "Ballet status")
     title, body = _title_and_body(_read_draft(draft_path))
+    links = _plan_links(title, body, run, specs)
     number = _create_issue(title, _with_plan_section(body), run, issue_type)
     try:
         set_status(number, status, run)
     except GitHubError as error:
         raise GitHubError(f"issue #{number} was created, but its {STATUS_FIELD} is not '{status}': {error}")
-    return number
+    return number, _set_links(number, links, run)
+
+
+def block_issue(number, blocker, run=None):
+    """Pose le lien « Blocked by » : `number` ne part que quand `blocker` est fermée."""
+    run = run or _run_gh
+    issue, by = _issue_number(number), _issue_number(blocker)
+    if issue == by:
+        raise GitHubError(f"#{issue} cannot be blocked by itself")
+    ids, blocked_by = _read_pair(issue, by, run)
+    if by in blocked_by[issue]:
+        return f"#{issue} is already blocked by #{by}"
+    if issue in blocked_by[by]:
+        raise GitHubError(f"#{by} is already blocked by #{issue}: that would make a dependency cycle")
+    _graphql(["-f", f"query={ADD_BLOCKED_BY}", "-f", f"issue={ids[issue]}", "-f", f"blocker={ids[by]}"], run)
+    return f"#{issue} is now blocked by #{by}"
+
+
+def unblock_issue(number, blocker, run=None):
+    """Retire le lien « Blocked by » posé entre les deux issues."""
+    run = run or _run_gh
+    issue, by = _issue_number(number), _issue_number(blocker)
+    ids, blocked_by = _read_pair(issue, by, run)
+    if by not in blocked_by[issue]:
+        return f"#{issue} was not blocked by #{by}"
+    _graphql(["-f", f"query={REMOVE_BLOCKED_BY}", "-f", f"issue={ids[issue]}", "-f", f"blocker={ids[by]}"], run)
+    return f"#{issue} is no longer blocked by #{by}"
 
 
 def mark_decided_alone(number, run=None):
@@ -360,7 +417,9 @@ def main(argv):
 def _dispatch(operation, arguments):
     operations = {
         "read": (read_issue, 1),
-        "publish": (publish_issue, 3),
+        "publish": (_publish_and_say, 3),
+        "block": (_block_by, 3),
+        "unblock": (_unblock_by, 3),
         "decided-alone": (mark_decided_alone, 1),
         "plan": (write_plan, 2),
         "slice": (publish_slice, 2),
@@ -384,6 +443,25 @@ def _dispatch(operation, arguments):
     if len(arguments) != arity:
         raise GitHubError(f"{operation} expects {arity} argument(s)")
     return function(*arguments)
+
+
+def _publish_and_say(draft_path, issue_type, status):
+    number, notes = publish_issue_with_links(draft_path, issue_type, status)
+    return "\n".join([number, *(f"note: {note}" for note in notes)])
+
+
+def _block_by(issue, flag, blocker):
+    return block_issue(issue, _after_by(flag, blocker))
+
+
+def _unblock_by(issue, flag, blocker):
+    return unblock_issue(issue, _after_by(flag, blocker))
+
+
+def _after_by(flag, blocker):
+    if flag != "--by":
+        raise GitHubError("usage: block|unblock <issue> --by <issue>")
+    return blocker
 
 
 def _close_and_say(issue_number, pr_number):
@@ -485,6 +563,119 @@ def _status_ids(number, status, run):
     if status not in options:
         raise GitHubError(f"the '{STATUS_FIELD}' field has no option '{status}'")
     return answer["repository"]["issue"]["id"], fields[STATUS_FIELD]["id"], options[status]
+
+
+# --- les liens de dépendance --------------------------------------------------
+
+
+@dataclass
+class Links:
+    """Les liens que la publication d'une issue pose : vers ses dépendances publiées, et depuis les issues ouvertes qui la citent."""
+    blocked_by: dict   # id de la dépendance → son numéro d'issue
+    pending: list      # les ids des dépendances pas encore publiées
+    waiting: list      # les numéros des issues ouvertes qui citent celle-ci
+    own_id: str
+
+
+def _plan_links(title, body, run, specs):
+    """Lecture seule, avant de créer : refuse une dépendance inconnue ; sans id ni dépendance, GitHub n'est pas interrogé."""
+    own, wanted = _id_of_title(title), _depends_on(body)
+    if not own and not wanted:
+        return Links({}, [], [], own)
+    issues = _all_issues(run)
+    published = _published_ids(issues)
+    _refuse_unknown_dependencies(wanted, own, published, specs)
+    return Links({found: published[found] for found in wanted if found in published},
+                 [found for found in wanted if found not in published], _waiting_for(own, issues), own)
+
+
+def _set_links(number, links, run):
+    """Les notes d'une publication : un lien posé, ou la raison de ne pas l'avoir posé ; un lien raté ne défait pas l'issue créée."""
+    notes = [_link_note(number, blocker, found, run) for found, blocker in links.blocked_by.items()]
+    notes += [f"{found} is not published yet: #{number} will be linked to it when it is" for found in links.pending]
+    notes += [_link_note(waiting, number, links.own_id, run) for waiting in links.waiting]
+    return notes
+
+
+def _link_note(blocked, blocker, blocker_id, run):
+    try:
+        return f"{block_issue(blocked, blocker, run)} ({blocker_id})"
+    except GitHubError as error:
+        return f"could not link #{blocked} to #{blocker} ({blocker_id}): {error}; retry with `block {blocked} --by {blocker}`"
+
+
+def _depends_on(body):
+    """Les éléments de la ligne `Depends on:` du brouillon, sans doublon ; vide sans cette ligne (ou sans identifiant dedans)."""
+    found = DEPENDS_LINE.search(body)
+    return list(dict.fromkeys(ITEM_ID.findall(found.group(1)))) if found else []
+
+
+def _id_of_title(title):
+    found = TITLE_ID.match(title)
+    return found.group(1) if found else ""
+
+
+def _all_issues(run):
+    """Toutes les issues du repo, ouvertes ou fermées : numéro, titre, corps, état (une lecture, sans recherche : l'index a du retard)."""
+    return json.loads(run(["issue", "list", "--state", "all", "--limit", ALL_ISSUES_LIMIT, "--json", "number,title,body,state"]))
+
+
+def _published_ids(issues):
+    """id d'élément (`FEAT-002`) → numéro de son issue, la plus ancienne si le titre est en double."""
+    published = {}
+    for issue in sorted(issues, key=lambda found: found["number"], reverse=True):
+        item = _id_of_title(issue["title"])
+        if item:
+            published[item] = str(issue["number"])
+    return published
+
+
+def _waiting_for(own, issues):
+    """Les numéros des issues ouvertes qui citent cet élément dans leur `Depends on:` : leur lien vers lui est posé maintenant
+    qu'il existe."""
+    if not own:
+        return []
+    return [str(issue["number"]) for issue in issues if issue["state"] == "OPEN" and own in _depends_on(issue["body"] or "")]
+
+
+def _refuse_unknown_dependencies(wanted, own, published, specs):
+    for dependency in wanted:
+        if dependency == own:
+            raise GitHubError(f"{dependency} cannot depend on itself")
+        if dependency not in published and not _in_specs(dependency, specs):
+            raise GitHubError(f"unknown dependency {dependency}: no issue is titled '{dependency} · …' and the specs do not mention it "
+                              f"(fix the `Depends on:` line, or write the dependency in the specs first)")
+
+
+def _in_specs(item, specs):
+    """L'espace specs parle de cet élément : un fichier `features/<ID>-*.md`, ou une mention dans `backlog.md`."""
+    folder = Path(specs) if specs else _project_specs()
+    if not folder or not folder.is_dir():
+        return False
+    if any((folder / "features").glob(f"{item}-*.md")):
+        return True
+    backlog = folder / "backlog.md"
+    return backlog.is_file() and re.search(rf"\b{re.escape(item)}\b", backlog.read_text(encoding="utf-8")) is not None
+
+
+def _project_specs():
+    try:
+        configured = ballet_config.effective_config(".")["project"].get("specs")
+    except (ballet_config.ConfigError, OSError, KeyError):
+        return None
+    return Path(configured) if configured else None
+
+
+def _read_pair(issue, blocker, run):
+    """Les identifiants GraphQL des deux issues, et les numéros qui bloquent chacune."""
+    answer = _graphql(["-f", f"query={ISSUE_PAIR}", "-F", "owner={owner}", "-F", "name={repo}", "-F", f"issue={issue}",
+                       "-F", f"blocker={blocker}"], run)["data"]["repository"]
+    found = {issue: answer["issue"], blocker: answer["blocker"]}
+    for number, node in found.items():
+        if not node:
+            raise GitHubError(f"issue #{number} not found")
+    return ({number: node["id"] for number, node in found.items()},
+            {number: [str(blocking["number"]) for blocking in node["blockedBy"]["nodes"]] for number, node in found.items()})
 
 
 def _graphql(arguments, run):

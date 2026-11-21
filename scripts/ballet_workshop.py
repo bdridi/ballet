@@ -419,7 +419,7 @@ def _finish(workshop, step, config, home, tools):
         if found:
             return _refused_by_policy(workshop, found, step, home, tools)
         step.done += _specs_to_main(workshop, tools)
-    step.done.append(_publish_issue(workshop, report, config, home, tools))
+    step.done += _publish_issue(workshop, report, config, home, tools)
     step.done += _mark_decided_alone(workshop, report, tools)
     step.done += _publish_exchanges(workshop, home, tools)
     tools.orca(["worktree", "rm", "--worktree", f"path:{workshop.worktree}", "--delete-branch"])
@@ -474,18 +474,21 @@ def _open_specs_pull_request(workshop, tools):
 
 def _publish_issue(workshop, report, config, home, tools):
     """L'issue du Workshop, publiée par le script : `proposed`, ou `ready` pour un type que le Director a dispensé de son oui
-    (jamais pour un élément que le Workshop a choisi seul)."""
+    (jamais pour un élément que le Workshop a choisi seul). Ses liens « blocked by » (ligne `Depends on:` du brouillon) sont posés
+    par la publication ; les dépendances se cherchent dans les specs du worktree du Dramaturg. Rend la ligne de l'étape, puis
+    une ligne par lien."""
     if workshop.issue:
-        return f"issue #{workshop.issue} already published as {workshop.ballet_status}"
+        return [f"issue #{workshop.issue} already published as {workshop.ballet_status}"]
     skipped = config["workshop"]["queue_approval_skipped"]
     workshop.ballet_status = READY if report.issue_type in skipped and not workshop.picked else PROPOSED
     draft = _folder(workshop, home) / "issue.md"
     draft.write_text(_issue_text(report), encoding="utf-8")
-    workshop.issue = ballet_github.publish_issue(draft, report.issue_type, workshop.ballet_status, run=tools.gh)
+    specs = Path(workshop.worktree) / config["project"]["specs"]
+    workshop.issue, notes = ballet_github.publish_issue_with_links(draft, report.issue_type, workshop.ballet_status, run=tools.gh, specs=specs)
     _log(home, workshop, "published", {"item": workshop.framed or workshop.item, "issue": workshop.issue, "type": report.issue_type,
                                        "status": workshop.ballet_status, "picked": workshop.picked,
                                        "decided_alone": len(report.decided), "exchanges": len(workshop.exchanges)})
-    return f"issue #{workshop.issue} published as {report.issue_type}, Ballet status {workshop.ballet_status}"
+    return [f"issue #{workshop.issue} published as {report.issue_type}, Ballet status {workshop.ballet_status}", *notes]
 
 
 def _issue_text(report):

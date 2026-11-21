@@ -17,10 +17,16 @@ import ballet_program  # noqa: E402
 from test_ballet_maestro import FakeOrca  # noqa: E402
 
 
-def item(number, kind="Task", priority="High", title=None):
+def blocker(number):
+    """Un bloqueur ouvert, tel que `ballet_program.ready_items` le rend."""
+    return {"item": f"#{number}", "number": number, "repo": "acme/shop", "url": f"https://github.com/acme/shop/issues/{number}"}
+
+
+def item(number, kind="Task", priority="High", title=None, blocked_by=(), doubt=""):
     """Un élément prêt, tel que `ballet_program.ready_items` le rend."""
     return {"item": f"#{number}", "number": number, "title": title or f"Élément {number}", "type": kind, "priority": priority,
-            "mode": "", "created_at": "2026-11-01T10:00:00Z", "url": f"https://github.com/acme/shop/issues/{number}"}
+            "mode": "", "created_at": "2026-11-01T10:00:00Z", "url": f"https://github.com/acme/shop/issues/{number}",
+            "blocked_by": [blocker(found) for found in blocked_by], "launchable": not blocked_by, "doubt": doubt}
 
 
 class FakeQueue:
@@ -76,6 +82,109 @@ class BalletMonitorTest(unittest.TestCase):
         ballet_conductors.record_launch(key, project, number, "rehearsal", terminal)
 
     # --- un élément passé ready ---
+
+    # --- les dépendances : seul un élément lançable réveille Maestro ---
+
+    def test_un_element_pret_mais_bloque_reste_muet(self):
+        self.queue.queues["antimurphy"] = []
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2, blocked_by=[1])]
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(self.sent(), [])
+
+    def test_le_premier_tour_ne_groupe_que_les_elements_lancables(self):
+        self.queue.queues["antimurphy"] = [item(1), item(2, blocked_by=[1]), item(3, "Bug")]
+        self.assertEqual(self.turn().told, ["antimurphy · ready (2 already)"])
+        body = self.sent()[0][2]
+        self.assertIn("#1 · ", body)
+        self.assertIn("#3 · ", body)
+        self.assertNotIn("#2 · ", body)
+
+    def test_le_premier_tour_d_un_projet_dont_tout_est_bloque_ne_dit_rien(self):
+        self.queue.queues["antimurphy"] = [item(2, blocked_by=[1])]
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_element_bloque_est_signale_une_seule_fois_quand_son_dernier_bloqueur_se_ferme(self):
+        self.queue.queues["antimurphy"] = [item(1), item(2, blocked_by=[1])]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2)]
+        self.assertEqual(self.turn().told, ["antimurphy#2 · ready"])
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(self.subjects()[1:], ["antimurphy#2 · ready"])
+
+    def test_le_message_du_deblocage_dit_quel_bloqueur_s_est_ferme(self):
+        self.queue.queues["antimurphy"] = [item(2, "Feature", "High", "Payer", blocked_by=[1])]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2, "Feature", "High", "Payer")]
+        self.turn()
+        self.assertEqual(self.sent(), [("antimurphy#2 · ready", "normal",
+                                        "#2 · Feature · High · Payer · https://github.com/acme/shop/issues/2\nunblocked: #1 closed")])
+
+    def test_un_element_encore_bloque_par_un_autre_bloqueur_reste_muet(self):
+        self.queue.queues["antimurphy"] = [item(3, blocked_by=[1, 2])]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(3, blocked_by=[2])]
+        self.assertEqual(self.turn().told, [])
+        self.queue.queues["antimurphy"] = [item(3)]
+        self.assertEqual(self.turn().told, ["antimurphy#3 · ready"])
+        self.assertTrue(self.sent()[0][2].endswith("unblocked: #2 closed"))
+
+    def test_plusieurs_bloqueurs_fermes_d_un_coup_sont_tous_nommes(self):
+        self.queue.queues["antimurphy"] = [item(3, blocked_by=[1, 2])]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(3)]
+        self.turn()
+        self.assertTrue(self.sent()[0][2].endswith("unblocked: #1, #2 closed"))
+
+    def test_un_element_qui_se_rebloque_puis_se_debloque_est_signale_de_nouveau(self):
+        self.queue.queues["antimurphy"] = [item(2)]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2, blocked_by=[1])]
+        self.assertEqual(self.turn().told, [])
+        self.queue.queues["antimurphy"] = [item(2)]
+        self.assertEqual(self.turn().told, ["antimurphy#2 · ready"])
+
+    def test_un_element_deja_lancable_n_est_pas_resignale_quand_un_bloqueur_s_ajoute_puis_reste(self):
+        self.queue.queues["antimurphy"] = [item(2)]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2, blocked_by=[1])]
+        self.turn()
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_doute_de_dependance_reveille_maestro_et_le_dit(self):
+        self.queue.queues["antimurphy"] = []
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2, doubt="dependency cycle: #2 → #3 → #2", blocked_by=[3])]
+        self.assertEqual(self.turn().told, ["antimurphy#2 · ready"])
+        self.assertTrue(self.sent()[0][2].endswith("\ndependency: dependency cycle: #2 → #3 → #2"))
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_bloqueur_ferme_not_planned_signale_l_element_avec_le_doute(self):
+        self.queue.queues["antimurphy"] = [item(2, blocked_by=[1])]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2, doubt="blocker #1 was closed as not planned, not delivered")]
+        self.assertEqual(self.turn().told, ["antimurphy#2 · ready"])
+        self.assertIn("dependency: blocker #1 was closed as not planned", self.sent()[0][2])
+        self.assertNotIn("unblocked", self.sent()[0][2])
+
+    def test_les_elements_bloques_sont_retenus_pour_ready_avec_leurs_bloqueurs(self):
+        self.queue.queues["antimurphy"] = [item(1), item(2, blocked_by=[1])]
+        self.turn()
+        kept = ballet_monitor.read_ready()["antimurphy"]
+        self.assertEqual([found["item"] for found in kept], ["#1", "#2"])
+        self.assertEqual([found["item"] for found in kept[1]["blocked_by"]], ["#1"])
+
+    def test_la_decision_sous_le_message_du_deblocage_est_celle_de_la_regle(self):
+        self.queue.queues["antimurphy"] = [item(2, blocked_by=[1])]
+        self.turn()
+        self.queue.queues["antimurphy"] = [item(2)]
+        self.turn()
+        config = ballet_maestro.read_config()
+        config["projects"]["antimurphy"]["auto_launch"] = ["Task"]
+        ballet_maestro.write_config(config)
+        message = {"type": "status", "subject": "antimurphy#2 · ready", "body": self.sent()[0][2]}
+        self.assertEqual(ballet_maestro._body_with_decisions(message, config, None).splitlines()[1:],
+                         ["DECISION: launch", "unblocked: #1 closed"])
 
     def test_un_element_nouvellement_pret_est_signale_une_seule_fois(self):
         self.queue.queues["antimurphy"] = []

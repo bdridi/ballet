@@ -754,6 +754,60 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(lines[0], "antimurphy#7  Task  Urgent  Le premier  https://x/7  DECISION: launch")
         self.assertEqual(lines[1], "antimurphy#3  Feature  -  Le second  https://x/3  DECISION: ask the Director (Feature is not in auto_launch of antimurphy)")
 
+    def seen_with_dependencies(self, alias, number, blocked_by=(), doubt=""):
+        """Ce que le Monitor a vu des dépendances d'un élément déjà noté prêt."""
+        document = json.loads((self.state / "monitor.json").read_text(encoding="utf-8"))
+        for item in document["projects"][alias]["ready"]:
+            if item["number"] == number:
+                item["blocked_by"] = [{"item": f"#{found}", "number": found, "repo": "acme/shop", "url": f"https://x/{found}"} for found in blocked_by]
+                item["doubt"] = doubt
+        (self.state / "monitor.json").write_text(json.dumps(document), encoding="utf-8")
+
+    def test_ready_montre_un_element_bloque_avec_wait_meme_pour_un_type_confie_a_l_auto(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"), (8, "Task", "", "Libre"))
+        self.seen_with_dependencies("antimurphy", 7, blocked_by=(3, 5))
+        lines = ballet_maestro.ready().splitlines()
+        self.assertEqual(lines[0], "antimurphy#7  Task  -  Bloqué  https://x/7  DECISION: wait (blocked by #3, #5, open)")
+        self.assertTrue(lines[1].endswith("DECISION: launch"))
+
+    def test_un_bloqueur_d_un_autre_repo_est_nomme_avec_son_repo_dans_wait(self):
+        self.trust("antimurphy")
+        self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"))
+        document = json.loads((self.state / "monitor.json").read_text(encoding="utf-8"))
+        document["projects"]["antimurphy"]["ready"][0]["blocked_by"] = [{"item": "acme/api#5", "number": 5, "repo": "acme/api", "url": "https://x/5"}]
+        (self.state / "monitor.json").write_text(json.dumps(document), encoding="utf-8")
+        self.assertIn("DECISION: wait (blocked by acme/api#5, open)", ballet_maestro.ready())
+
+    def test_un_doute_de_dependance_demande_au_director_meme_pour_un_type_confie_a_l_auto(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Douteux"))
+        self.seen_with_dependencies("antimurphy", 7, doubt="blocker #3 was closed as not planned, not delivered")
+        self.assertTrue(ballet_maestro.ready().endswith(
+            "DECISION: ask the Director (blocker #3 was closed as not planned, not delivered)"))
+
+    def test_un_cycle_demande_au_director_et_non_wait(self):
+        self.trust("antimurphy")
+        self.seen_ready("antimurphy", (7, "Task", "", "En cycle"))
+        self.seen_with_dependencies("antimurphy", 7, blocked_by=(8,), doubt="dependency cycle: #7 → #8 → #7")
+        self.assertTrue(ballet_maestro.ready().endswith("DECISION: ask the Director (dependency cycle: #7 → #8 → #7)"))
+
+    def test_status_montre_aussi_les_elements_bloques(self):
+        self.trust("antimurphy")
+        self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"))
+        self.seen_with_dependencies("antimurphy", 7, blocked_by=(3,))
+        self.assertIn("Ready, no Conductor yet:\nantimurphy#7  Task  -  Bloqué  https://x/7  DECISION: wait (blocked by #3, open)",
+                      ballet_maestro.status(self.orca))
+
+    def test_la_decision_sous_un_message_ready_suit_l_etat_que_le_monitor_a_garde(self):
+        owner = self.claimed()
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (12, "Task", "High", "Le panier se vide"))
+        self.orca.batches = [[self.ready_message()], [self.ready_message()]]
+        self.assertIn("DECISION: launch", ballet_maestro.wait(owner, self.orca))
+        self.seen_with_dependencies("antimurphy", 12, blocked_by=(3,))
+        self.assertIn("DECISION: wait (blocked by #3, open)", ballet_maestro.wait(owner, self.orca))
+
     def test_ready_ne_montre_pas_un_element_qu_un_conductor_joue(self):
         self.trust("antimurphy", "Task")
         self.seen_ready("antimurphy", (7, "Task", "", "Joué"), (8, "Task", "", "Attend"))

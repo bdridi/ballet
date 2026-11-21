@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import ballet_conductors  # noqa: E402
 import ballet_launch  # noqa: E402
 import ballet_maestro  # noqa: E402
+import ballet_program  # noqa: E402
 from ballet_launch import LaunchError  # noqa: E402
 from ballet_rehearsal import Rehearsal, Session  # noqa: E402
 
@@ -86,6 +87,21 @@ class BalletLaunchTest(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.orca = FakeOrca()
         self.home = self.project("antimurphy")
+        self.dependencies = {}                  # numéro d'issue → ce que GitHub dit de ses dépendances (rien par défaut)
+        self.unreadable_github = False
+        reader = mock.patch("ballet_program.dependencies_of", side_effect=self.read_dependencies)
+        self.reader = reader.start()
+        self.addCleanup(reader.stop)
+
+    def read_dependencies(self, number, home):
+        if self.unreadable_github:
+            raise ballet_program.ProgramError("gh did not answer")
+        return self.dependencies.get(str(number), {"blocked_by": [], "doubt": ""})
+
+    def blocked_by(self, number, *blockers):
+        self.dependencies[str(number)] = {"blocked_by": [{"item": f"#{found}", "number": found, "repo": "acme/shop",
+                                                            "url": f"https://github.com/acme/shop/issues/{found}"} for found in blockers],
+                                          "doubt": ""}
 
     def project(self, name):
         folder = self.root / name
@@ -409,6 +425,93 @@ class BalletLaunchTest(unittest.TestCase):
         self.assertEqual(ballet_maestro.tell("antimurphy#12", "go on", self.orca), "told antimurphy#12 (terminal term_1)")
         send = self.orca.ran("terminal", "send")[0]
         self.assertEqual(self.option(send, "--text"), "Director answers: go on")
+
+    # --- les dépendances : un bloqueur ouvert refuse le lancement ---
+
+    def test_un_element_dont_un_bloqueur_est_ouvert_est_refuse_et_le_bloqueur_est_nomme(self):
+        self.blocked_by(12, 3)
+        with self.assertRaisesRegex(LaunchError, r"antimurphy#12 is blocked by #3 \(https://github.com/acme/shop/issues/3\), still open"):
+            self.rehearsal("#12")
+        self.assertEqual((self.orca.ran("terminal", "create"), self.conductors()), ([], {}))
+
+    def test_tous_les_bloqueurs_ouverts_sont_nommes(self):
+        self.blocked_by(12, 3, 5)
+        with self.assertRaisesRegex(LaunchError, r"blocked by #3 .*, #5 "):
+            self.rehearsal("12")
+
+    def test_un_bloqueur_d_un_autre_repo_est_nomme_avec_son_repo(self):
+        self.dependencies["12"] = {"blocked_by": [{"item": "acme/api#5", "number": 5, "repo": "acme/api", "url": "https://github.com/acme/api/issues/5"}],
+                                   "doubt": ""}
+        with self.assertRaisesRegex(LaunchError, "blocked by acme/api#5"):
+            self.rehearsal("#12")
+
+    def test_le_refus_vaut_meme_quand_le_director_a_demande_ce_lancement(self):
+        self.blocked_by(12, 3)
+        code, out, err = self.run_main("rehearsal", "antimurphy", "#12")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("launch: antimurphy#12 is blocked by #3", err)
+        self.assertIn("--ignore-blockers", err)
+
+    def test_ignore_blockers_passe_outre_et_ne_lit_meme_pas_github(self):
+        self.blocked_by(12, 3)
+        ballet_launch.launch_rehearsal("antimurphy", "#12", self.orca, url_wait=0, ignore_blockers=True)
+        self.assertEqual(len(self.orca.ran("terminal", "create")), 1)
+        self.reader.assert_not_called()
+
+    def test_ignore_blockers_en_ligne_de_commande(self):
+        self.blocked_by(12, 3)
+        with mock.patch.object(ballet_launch, "_find_remote_control_url", return_value=""):
+            code, out, err = self.run_main("rehearsal", "antimurphy", "#12", "--ignore-blockers")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("launched the rehearsal Conductor of antimurphy#12", out)
+
+    def test_ignore_blockers_ne_vaut_que_pour_un_rehearsal(self):
+        code, _, err = self.run_main("workshop", "antimurphy", "BUG-004", "--ignore-blockers")
+        self.assertEqual(code, 2)
+        self.assertIn("usage:", err)
+
+    def test_un_element_sans_bloqueur_ouvert_part(self):
+        self.rehearsal("#12")
+        self.reader.assert_called_once_with("12", self.home)
+
+    def test_un_element_dont_les_bloqueurs_sont_fermes_part(self):
+        self.dependencies["12"] = {"blocked_by": [], "doubt": ""}
+        self.assertIn("launched the rehearsal Conductor of antimurphy#12", self.rehearsal("#12"))
+
+    def test_un_doute_sans_bloqueur_ouvert_ne_refuse_pas_le_lancement_que_le_director_demande(self):
+        self.dependencies["12"] = {"blocked_by": [], "doubt": "blocker #3 was closed as not planned, not delivered"}
+        self.assertIn("launched", self.rehearsal("#12"))
+
+    def test_un_cycle_refuse_le_lancement(self):
+        self.blocked_by(12, 13)
+        self.dependencies["12"]["doubt"] = "dependency cycle: #12 → #13 → #12"
+        with self.assertRaisesRegex(LaunchError, "is blocked by #13"):
+            self.rehearsal("#12")
+
+    def test_une_feature_sans_issue_n_a_pas_de_lien_a_lire(self):
+        self.rehearsal("FEAT-002")
+        self.reader.assert_not_called()
+
+    def test_un_workshop_ne_lit_pas_les_dependances(self):
+        self.workshop("BUG-004")
+        self.reader.assert_not_called()
+
+    def test_github_injoignable_refuse_au_lieu_de_lancer_a_l_aveugle(self):
+        self.unreadable_github = True
+        with self.assertRaisesRegex(LaunchError, r"cannot read the blockers of antimurphy#12 \(gh did not answer\)"):
+            self.rehearsal("#12")
+        self.assertEqual(self.orca.ran("terminal", "create"), [])
+
+    def test_github_injoignable_n_empeche_pas_un_lancement_avec_ignore_blockers(self):
+        self.unreadable_github = True
+        ballet_launch.launch_rehearsal("antimurphy", "#12", self.orca, url_wait=0, ignore_blockers=True)
+        self.assertEqual(len(self.orca.ran("terminal", "create")), 1)
+
+    def test_les_autres_garde_fous_passent_avant_la_lecture_de_github(self):
+        self.limits(max_running=0)
+        with self.assertRaisesRegex(LaunchError, "limit is 0"):
+            self.rehearsal("#12")
+        self.reader.assert_not_called()
 
     # --- la ligne de commande ---
 

@@ -51,6 +51,8 @@ class FakeWorld:
         self.label_failures = 0                 # `gh issue edit` (le libellé) échoue ces fois-ci
         self.comment_failures = 0               # `gh issue comment` échoue ces fois-ci…
         self.comment_after = 0                  # …après ce nombre de commentaires réussis
+        self.issues = []                        # les issues déjà dans le repo, comme `gh issue list` les rend
+        self.links = []                         # les liens « blocked by » posés : (issue bloquée, bloqueur)
 
     def __call__(self, argv):
         self.commands.append(argv)
@@ -76,6 +78,15 @@ class FakeWorld:
                 self.issue_failures -= 1
                 raise ballet_rehearsal.RehearsalError("gh failed")
             return "https://github.com/o/r/issues/21\n"
+        if arguments[:2] == ["issue", "list"]:
+            return json.dumps(self.issues)
+        if arguments[:2] == ["api", "graphql"] and any("blocker: issue" in argument for argument in arguments):
+            number = {name: next(argument for argument in arguments if argument.startswith(f"{name}=")).split("=")[1] for name in ("issue", "blocker")}
+            return json.dumps({"data": {"repository": {name: {"id": f"ID-{found}", "blockedBy": {"nodes": []}} for name, found in number.items()}}})
+        if arguments[:2] == ["api", "graphql"] and any("addBlockedBy" in argument for argument in arguments):
+            self.links.append(tuple(next(argument for argument in arguments if argument.startswith(f"{name}=ID-")).split("=ID-")[1]
+                                    for name in ("issue", "blocker")))
+            return "{}"
         if arguments[:2] == ["issue", "comment"]:
             if self.comment_failures and self.comment_after == 0:
                 self.comment_failures -= 1
@@ -282,6 +293,21 @@ class BalletWorkshopTest(unittest.TestCase):
         self.reports(report("Feature", "# FEAT-007 · Sign in\n\n## Context\n\nWhy.\n"))
         self.assertEqual(self.world.statuses, ["ready"])
         self.assertEqual(self.state()["ballet_status"], "ready")
+
+    def test_la_ligne_depends_on_du_brouillon_pose_le_lien_blocked_by_et_le_dit(self):
+        self.world.issues = [{"number": 7, "title": "FEAT-002 · Cart", "body": "", "state": "OPEN"}]
+        self.begin()
+        step = self.reports(report("Feature", "# FEAT-007 · Sign in\n\n- **Depends on**: FEAT-002\n\n## Context\n\nWhy.\n"))
+        self.assertEqual(step.next, "done")
+        self.assertEqual(self.world.links, [("21", "7")])
+        self.assertIn("#21 is now blocked by #7 (FEAT-002)", step.render())
+
+    def test_une_dependance_inconnue_arrete_le_workshop_avant_de_creer_l_issue(self):
+        self.begin()
+        step = self.reports(report("Feature", "# FEAT-007 · Sign in\n\n- **Depends on**: FEAT-099\n\n## Context\n\nWhy.\n"))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("unknown dependency FEAT-099", step.render())
+        self.assertFalse(self.world.ran("gh", "issue", "create"))
 
     def test_le_type_du_rapport_donne_le_type_de_l_issue(self):
         self.begin()

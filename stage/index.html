@@ -354,11 +354,18 @@ function sessionCard(v){
   </a>`;
 }
 
+/* Un élément prêt qui attend ses bloqueurs (liens « Blocked by » de GitHub), ou dont la dépendance est douteuse. */
+function dependencyNote(p){
+  if (p.doubt) return `<div class="card-title">⚠ ${esc(p.doubt)}</div>`;
+  if ((p.blocked_by || []).length) return `<div class="card-title">bloqué par ${p.blocked_by.map(b => esc(b.item)).join(', ')}</div>`;
+  return '';
+}
+
 /* Programme : ce qui est prêt sur GitHub, par priorité puis ancienneté. */
 function programBlock(project, program){
   const rows = program.map(p => `<div class="card-link ghost" title="${esc(p.title)}">
     <div class="card-row">${tag(p.type)}<b class="mono">${esc(p.item)}</b>${p.priority ? `<span style="margin-left:auto">${tag(p.priority)}</span>` : ''}</div>
-    <div class="card-title">${esc(cleanTitle(p.title))}</div></div>`).join('');
+    <div class="card-title">${esc(cleanTitle(p.title))}</div>${dependencyNote(p)}</div>`).join('');
   const error = project.queue_error ? `<div class="stopped">Programme indisponible : ${esc(project.queue_error)}</div>` : '';
   const empty = project.queue_error ? '' : '<p class="side-empty">Aucun élément prêt.</p>';
   return sideBlock(project, 'program', 'Programme', program.length, error + (rows || empty));

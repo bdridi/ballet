@@ -3,6 +3,7 @@
 - **Type**: feature | slice | bug | task
 - **Source**: FEAT-NNN · covers C1, C2 — for a slice, also `Part of #<parent>` — or BUG-NNN, TASK-NNN (`backlog.md`)
 - **Repos**: <names of the profile's repos the issue touches>
+- **Depends on**: FEAT-NNN, BUG-NNN (optional, copied from the feature: the publish script links this issue "Blocked by" each one)
 
 <!-- GitHub issue, through the GitHub script. The Dramaturg publishes a feature, bug or task issue (type and Ballet status set,
      no plan: the script adds an empty `## Plan`); the Choreographer writes the plan on it, and creates the slice issues.

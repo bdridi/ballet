@@ -41,6 +41,11 @@ pas (`pause` le pose, `resume` le retire) ; sinon Maestro demande au Director. `
 chaque élément `· ready` : `DECISION: launch` ou `DECISION: ask the Director (<raison>)`. Un lancement refusé par un
 plafond laisse l'élément dans `ready` : `ready` le liste tant qu'il n'a pas de Conductor et que le Monitor le voit prêt.
 
+Les dépendances (les liens « Blocked by » de GitHub, lus par `ballet_program.py` et gardés par le Monitor) passent avant la
+règle `auto_launch` : un élément prêt dont un bloqueur est ouvert est `DECISION: wait (blocked by #M, open)` ; une dépendance
+douteuse (bloqueur fermé *not planned*, cycle, bloqueur illisible) est `DECISION: ask the Director (<raison>)`, même pour un
+type confié à l'auto. `ready` et `status` montrent aussi ces éléments bloqués.
+
 Il n'existe jamais deux boîtes : `mailbox` ne fait rien quand le terminal noté vit encore dans Orca, et un verrou
 (`maestro.lock`) empêche deux appels de créer chacun la sienne. Chaque écriture passe par un fichier temporaire, puis
 un renommage.
@@ -74,6 +79,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import ballet_conductors
+import ballet_program
 import ballet_state
 
 CONFIG_NAME = "maestro.toml"
@@ -298,6 +304,9 @@ def resume(state=None):
 def _decision(project, kind, config, state, number=None):
     if project not in config["projects"]:
         return f"ask the Director (unknown project {project})"
+    dependencies = _dependency_decision(project, number, state)
+    if dependencies:
+        return dependencies
     if _pause_flag(state).exists():
         return "ask the Director (auto launch is paused)"
     trusted = config["projects"][project].get("auto_launch", [])
@@ -308,6 +317,24 @@ def _decision(project, kind, config, state, number=None):
     if number is not None and _conductor_gone(f"{project}#{number}", state):
         return "ask the Director (its last Conductor is gone: relaunching on its own could loop)"
     return "launch"
+
+
+def _dependency_decision(project, number, state):
+    """`wait (blocked by #M, open)` ou `ask the Director (<doute>)` d'après ce que le Monitor a vu de l'élément ; vide sinon."""
+    kept = _kept_item(project, number, state)
+    if ballet_program.waits(kept):
+        return "wait (blocked by " + ", ".join(blocker["item"] for blocker in kept["blocked_by"]) + ", open)"
+    if kept.get("doubt"):
+        return f"ask the Director ({kept['doubt']})"
+    return ""
+
+
+def _kept_item(project, number, state):
+    """L'élément tel que le dernier tour du Monitor l'a vu ; vide quand le Monitor ne l'a pas vu (ou sans numéro)."""
+    if number is None:
+        return {}
+    import ballet_monitor
+    return next((item for item in ballet_monitor.read_ready(state).get(project, []) if str(item["number"]) == str(number)), {})
 
 
 def _conductor_gone(key, state):

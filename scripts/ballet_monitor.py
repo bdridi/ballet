@@ -6,13 +6,17 @@
 Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boîte de Maestro, depuis son terminal Orca
 (`ORCA_TERMINAL_HANDLE`, comme les Conductors), et Maestro décide. Deux choses seulement :
 
-- **Un élément passé `ready`.** Pour chaque projet de `maestro.toml`, la file GitHub est lue par `ballet_program.py` (les
-  `Feature`, `Bug` et `Task` au champ `Ballet status` `ready`). Chaque élément nouvellement prêt devient un `status`,
-  sujet `<projet>#<N> · ready`, corps `#<N> · <type> · <priorité> · <titre> · <lien>`. Au premier tour d'un projet, les
-  éléments déjà prêts sont groupés en un seul message (sujet `<projet> · ready (<n> already)`, une ligne par élément).
-  Les éléments prêts de chaque projet sont gardés dans `~/.ballet/monitor.json` (`BALLET_HOME` pour un autre dossier,
-  écriture atomique sous verrou) : un élément encore prêt au tour suivant n'est pas signalé deux fois ; un élément qui
-  quitte `ready` puis y revient l'est de nouveau. C'est aussi ce que lit `ballet_maestro.py ready`.
+- **Un élément qui devient lançable.** Pour chaque projet de `maestro.toml`, la file GitHub est lue par `ballet_program.py` (les
+  `Feature`, `Bug` et `Task` au champ `Ballet status` `ready`, avec leurs bloqueurs ouverts : les liens « Blocked by » de
+  GitHub). Un élément prêt mais qui attend un bloqueur ouvert est muet : il ne réveille pas Maestro. Chaque élément qui
+  devient lançable (prêt et sans bloqueur ouvert, ou prêt avec une dépendance douteuse que seul le Director tranche) devient
+  un `status`, sujet `<projet>#<N> · ready`, corps `#<N> · <type> · <priorité> · <titre> · <lien>` ; quand son dernier
+  bloqueur vient de se fermer, une ligne `unblocked: #M closed` suit, et `dependency: <doute>` quand elle est douteuse. Au
+  premier tour d'un projet, les éléments déjà lançables sont groupés en un seul message (sujet
+  `<projet> · ready (<n> already)`, une ligne par élément). Les éléments prêts de chaque projet, bloqués compris, sont
+  gardés avec leurs bloqueurs dans `~/.ballet/monitor.json` (`BALLET_HOME` pour un autre dossier, écriture atomique sous
+  verrou) : un élément encore lançable au tour suivant n'est pas signalé deux fois ; un élément qui quitte `ready` (ou
+  se rebloque) puis redevient lançable l'est de nouveau. C'est aussi ce que lit `ballet_maestro.py ready`.
 - **Un Conductor disparu.** Une ligne `running` du registre dont le terminal n'existe plus dans Orca devient un `status`
   `<projet>#<élément> · gone`, priorité `high`, et la ligne passe à `gone`, une seule fois. Un Conductor figé (terminal
   vivant, rien d'envoyé) n'est pas vu ici : c'est une autre opportunité.
@@ -39,7 +43,7 @@ from ballet_maestro import MaestroError
 STATE_NAME = "monitor.json"
 LOCK_NAME = "monitor.lock"
 DEFAULT_INTERVAL = 180
-KEPT = ("item", "number", "type", "title", "priority", "url")   # ce que le Monitor retient d'un élément prêt
+KEPT = ("item", "number", "type", "title", "priority", "url", "blocked_by", "doubt")   # ce que le Monitor retient d'un élément prêt
 READY_LINE = re.compile(r"^#(?P<number>\d+) · (?P<type>\w+) · ")
 READY_SUBJECT = re.compile(r"^([^\s#]+)(?:#\S+)? · ready\b")
 USAGE = "usage: once | run [--interval <seconds>]"
@@ -99,34 +103,53 @@ def _projects(state):
 
 
 def _watch_ready(alias, home, orca, queue, state, report):
-    """Signale ce qui est nouvellement prêt, puis retient la file telle qu'elle est : ce qui en est sorti pourra revenir."""
+    """Signale ce qui est devenu lançable, puis retient la file telle qu'elle est : ce qui en est sorti, ou s'est rebloqué,
+    pourra revenir. Un élément prêt mais bloqué est retenu sans rien dire."""
     items = [_kept(item) for item in queue(home)]
     known = read_ready(state).get(alias)
     if known is None:
-        _tell_first_turn(alias, items, orca, state, report)
+        _tell_first_turn(alias, _launchable(items), orca, state, report)
     else:
-        for item in _newly_ready(items, known):
-            _tell_ready(alias, item, orca, state, report)
-            known = [*known, item]
+        for item in _newly_launchable(items, known):
+            _tell_ready(alias, item, _line_before(item, known), orca, state, report)
+            known = [*[other for other in known if other["item"] != item["item"]], item]
             _save_ready(alias, known, state)
     _save_ready(alias, items, state)
 
 
 def _tell_first_turn(alias, items, orca, state, report):
-    """Au premier tour d'un projet : un seul message pour tous les éléments déjà prêts, pour ne pas inonder la boîte."""
+    """Au premier tour d'un projet : un seul message pour tous les éléments déjà lançables, pour ne pas inonder la boîte."""
     if not items:
         return
     subject = f"{alias} · ready ({len(items)} already)"
     _send(subject, "\n".join(_ready_line(item) for item in items), "normal", orca, state, report)
 
 
-def _tell_ready(alias, item, orca, state, report):
-    _send(f"{alias}#{item['number']} · ready", _ready_line(item), "normal", orca, state, report)
+def _tell_ready(alias, item, before, orca, state, report):
+    _send(f"{alias}#{item['number']} · ready", _ready_body(item, before), "normal", orca, state, report)
 
 
-def _newly_ready(items, known):
-    already = {item["item"] for item in known}
-    return [item for item in items if item["item"] not in already]
+def _launchable(items):
+    """Ce qui mérite un réveil : tout sauf ce qui attend un bloqueur ouvert."""
+    return [item for item in items if not ballet_program.waits(item)]
+
+
+def _newly_launchable(items, known):
+    already = {item["item"] for item in _launchable(known)}
+    return [item for item in _launchable(items) if item["item"] not in already]
+
+
+def _line_before(item, known):
+    """L'élément tel que le tour précédent le connaissait ; rien s'il n'était pas prêt."""
+    return next((other for other in known if other["item"] == item["item"]), None)
+
+
+def _ready_body(item, before):
+    """La ligne de l'élément, puis ce qui a changé pour ses dépendances : un doute, ou les bloqueurs qui viennent de se fermer."""
+    if item.get("doubt"):
+        return f"{_ready_line(item)}\ndependency: {item['doubt']}"
+    freed = [blocker["item"] for blocker in (before or {}).get("blocked_by", []) if blocker not in item.get("blocked_by", [])]
+    return f"{_ready_line(item)}\nunblocked: {', '.join(freed)} closed" if freed else _ready_line(item)
 
 
 def _ready_line(item):

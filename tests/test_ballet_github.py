@@ -104,8 +104,22 @@ def status_answer(fields=None):
     return json.dumps({"data": {"repository": {"issue": {"id": "ISSUE-42"}}, "repositoryOwner": {"issueFields": {"nodes": nodes}}}})
 
 
+def created_by(gh):
+    """L'appel qui a créé l'issue : la publication lit d'abord les issues du repo quand le brouillon a un identifiant."""
+    return next(call for call in gh.calls if call[:2] == ["issue", "create"])
+
+
+def status_mutation(gh):
+    return next(call for call in gh.calls if any("setIssueFieldValue" in argument for argument in call))
+
+
 class FakeGh:
     def __init__(self, body=ISSUE_BODY, pull_request=PULL_REQUEST, timeline=(), fields=None):
+        self.issues = []          # les issues du repo, telles que `gh issue list` les rend
+        self.blocked_by = {}      # numéro → numéros qui le bloquent déjà
+        self.links = []           # (bloquée, bloqueur) posés par addBlockedBy ; (…, "-") retirés par removeBlockedBy
+        self.missing = set()      # des numéros d'issue que GitHub ne connaît pas
+        self.link_failure = ""    # le message d'erreur d'addBlockedBy / removeBlockedBy
         self.fields = fields
         self.mutation_reply = "{}"
         self.body = body
@@ -120,6 +134,12 @@ class FakeGh:
             return json.dumps({"body": self.body, "title": "FEAT-001.1 · Walking skeleton"})
         if arguments[:2] == ["issue", "create"]:
             return "https://github.com/o/r/issues/42\n"
+        if arguments[:2] == ["issue", "list"] and "--state" in arguments and "number,title,body,state" in arguments:
+            return json.dumps(self.issues)
+        if arguments[:2] == ["api", "graphql"] and any("blocker: issue" in a for a in arguments):
+            return self.pair_answer(arguments)
+        if arguments[:2] == ["api", "graphql"] and any("BlockedBy(input" in a for a in arguments):
+            return self.change_link(arguments)
         if arguments[:2] == ["api", "graphql"] and any(a.startswith("query=query") for a in arguments):
             return status_answer(self.fields)
         if arguments[:2] == ["api", "graphql"]:
@@ -144,6 +164,21 @@ class FakeGh:
         if arguments[:2] == ["issue", "edit"]:
             self.body = arguments[arguments.index("--body") + 1]
         return ""
+
+    def pair_answer(self, arguments):
+        issue, blocker = (next(a for a in arguments if a.startswith(f"{name}=")).split("=")[1] for name in ("issue", "blocker"))
+        node = lambda found: {"id": f"ID-{found}", "blockedBy": {"nodes": [{"number": int(n)} for n in self.blocked_by.get(found, [])]}}
+        known = lambda found: found not in self.missing
+        return json.dumps({"data": {"repository": {"issue": node(issue) if known(issue) else None,
+                                                   "blocker": node(blocker) if known(blocker) else None}}})
+
+    def change_link(self, arguments):
+        query = next(a for a in arguments if a.startswith("query="))
+        issue, blocker = (next(a for a in arguments if a.startswith(f"{name}=")).split("=")[1][3:] for name in ("issue", "blocker"))
+        if self.link_failure:
+            return json.dumps({"errors": [{"message": self.link_failure}]})
+        self.links.append((issue, blocker) if "addBlockedBy" in query else (issue, blocker, "-"))
+        return "{}"
 
     def labels(self):
         on_the_pr = set()
@@ -177,20 +212,20 @@ class BalletGitHubTest(unittest.TestCase):
         gh = FakeGh()
         draft = self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n")
         self.assertEqual(ballet_github.publish_issue(draft, "Feature", "ready", run=gh), "42")
-        create = gh.calls[0]
+        create = created_by(gh)
         self.assertEqual(create[create.index("--title") + 1], "FEAT-001 · Sign in")
         self.assertTrue(create[create.index("--body") + 1].startswith("## Context"))
 
     def test_publie_l_issue_a_son_type_natif(self):
         gh = FakeGh()
         ballet_github.publish_issue(self.file("d.md", "# BUG-002 · Lost basket\n\n## Context\n\nWhy.\n"), "Bug", "ready", run=gh)
-        create = gh.calls[0]
+        create = created_by(gh)
         self.assertEqual(create[create.index("--type") + 1], "Bug")
 
     def test_pose_le_statut_ballet_de_l_issue_publiee(self):
         gh = FakeGh()
         ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n"), "Feature", "proposed", run=gh)
-        mutation = gh.calls[-1]
+        mutation = status_mutation(gh)
         self.assertIn("issue=ISSUE-42", mutation)
         self.assertIn("field=FIELD-Ballet status", mutation)
         self.assertIn("option=OPT-proposed", mutation)
@@ -198,20 +233,20 @@ class BalletGitHubTest(unittest.TestCase):
     def test_ajoute_une_section_plan_vide_quand_le_brouillon_n_en_a_pas(self):
         gh = FakeGh()
         ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n"), "Feature", "ready", run=gh)
-        body = gh.calls[0][gh.calls[0].index("--body") + 1]
+        body = created_by(gh)[created_by(gh).index("--body") + 1]
         self.assertIn("## Plan\n\n_The Choreographer writes the plan here._", body)
 
     def test_garde_la_section_plan_d_un_brouillon_qui_en_a_une(self):
         gh = FakeGh()
         ballet_github.publish_issue(self.file("d.md", "# BUG-002 · x\n\n## Plan\n\n- a → b.\n"), "Bug", "ready", run=gh)
-        body = gh.calls[0][gh.calls[0].index("--body") + 1]
+        body = created_by(gh)[created_by(gh).index("--body") + 1]
         self.assertEqual(body.count("## Plan"), 1)
         self.assertNotIn("Choreographer writes", body)
 
     def test_le_plan_se_range_ensuite_dans_la_section_publiee(self):
         gh = FakeGh()
         ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\n## Context\n\nWhy.\n"), "Feature", "ready", run=gh)
-        gh.body = gh.calls[0][gh.calls[0].index("--body") + 1]
+        gh.body = created_by(gh)[created_by(gh).index("--body") + 1]
         ballet_github.write_plan("42", self.file("p.md", "## Plan\n\n### Decisions\n\n- a → b.\n"), run=gh)
         self.assertIn("- a → b.", gh.body)
         self.assertNotIn("Choreographer writes", gh.body)
@@ -715,6 +750,139 @@ class VerdictsAndThreadsTest(unittest.TestCase):
     def test_un_rapport_sans_section_fixed_ne_resout_rien(self):
         gh = FakeThreadsGh([critic_review(11, 1, "REJECTED", 1, "2026-11-16T10:00:00Z")], threads=[thread("T1", 11, "**Blocking 1** — x")])
         self.assertEqual(ballet_github.resolve_fixed("43", self.report("- Outcome: done"), run=gh), ([], []))
+
+
+def stored_issue(number, title, body="", state="OPEN"):
+    return {"number": number, "title": title, "body": body, "state": state}
+
+
+class BalletGitHubDependenciesTest(unittest.TestCase):
+    """Les dépendances entre éléments : les liens « Blocked by » de GitHub, posés à la publication ou à la main."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+        self.specs = self.dir / "specs"
+        (self.specs / "features").mkdir(parents=True)
+        self.gh = FakeGh()
+
+    def draft(self, title, depends=None):
+        line = f"- **Depends on**: {depends}\n" if depends else ""
+        path = self.dir / "draft.md"
+        path.write_text(f"# {title}\n\n- **Type**: feature\n{line}\n## Context\n\nWhy.\n", encoding="utf-8")
+        return path
+
+    def publish(self, title, depends=None, issue_type="Feature"):
+        return ballet_github.publish_issue_with_links(self.draft(title, depends), issue_type, "ready", run=self.gh, specs=self.specs)
+
+    def test_la_publication_pose_un_lien_vers_l_issue_de_chaque_dependance_publiee(self):
+        self.gh.issues = [stored_issue(7, "FEAT-002 · Cart"), stored_issue(8, "BUG-004 · Stock", state="CLOSED")]
+        number, notes = self.publish("FEAT-003 · Pay", "FEAT-002, BUG-004")
+        self.assertEqual((number, self.gh.links), ("42", [("42", "7"), ("42", "8")]))
+        self.assertEqual(notes, ["#42 is now blocked by #7 (FEAT-002)", "#42 is now blocked by #8 (BUG-004)"])
+
+    def test_lit_la_ligne_depends_on_sans_mise_en_forme_et_sans_doublon(self):
+        self.gh.issues = [stored_issue(7, "FEAT-002 · Cart")]
+        path = self.dir / "plain.md"
+        path.write_text("# FEAT-003 · Pay\n\nDepends on: FEAT-002, FEAT-002 (the cart)\n\n## Context\n\nWhy.\n", encoding="utf-8")
+        ballet_github.publish_issue(path, "Feature", "ready", run=self.gh, specs=self.specs)
+        self.assertEqual(self.gh.links, [("42", "7")])
+
+    def test_une_dependance_pas_encore_publiee_mais_ecrite_dans_les_specs_est_notee_sans_lien(self):
+        (self.specs / "features" / "FEAT-002-cart.md").write_text("# FEAT-002 — Cart\n", encoding="utf-8")
+        number, notes = self.publish("FEAT-003 · Pay", "FEAT-002")
+        self.assertEqual((number, self.gh.links), ("42", []))
+        self.assertEqual(notes, ["FEAT-002 is not published yet: #42 will be linked to it when it is"])
+
+    def test_une_ligne_du_backlog_suffit_a_connaitre_une_dependance(self):
+        (self.specs / "backlog.md").write_text("## Next up\n\n1. **BUG-004** · Stock goes negative\n", encoding="utf-8")
+        self.assertEqual(self.publish("FEAT-003 · Pay", "BUG-004")[1], ["BUG-004 is not published yet: #42 will be linked to it when it is"])
+
+    def test_quand_la_dependance_est_publiee_les_issues_ouvertes_qui_la_citent_lui_sont_liees(self):
+        self.gh.issues = [stored_issue(9, "FEAT-003 · Pay", "- **Depends on**: FEAT-002\n"),
+                          stored_issue(10, "FEAT-004 · Ship", "- **Depends on**: FEAT-002, FEAT-003\n"),
+                          stored_issue(11, "FEAT-005 · Old", "Depends on: FEAT-002", state="CLOSED"),
+                          stored_issue(12, "FEAT-006 · Other", "Depends on: FEAT-009\n")]
+        number, notes = self.publish("FEAT-002 · Cart")
+        self.assertEqual(self.gh.links, [("9", "42"), ("10", "42")])
+        self.assertEqual(notes, ["#9 is now blocked by #42 (FEAT-002)", "#10 is now blocked by #42 (FEAT-002)"])
+
+    def test_une_dependance_inconnue_refuse_la_publication_sans_rien_creer(self):
+        self.gh.issues = [stored_issue(7, "FEAT-002 · Cart")]
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown dependency FEAT-099"):
+            self.publish("FEAT-003 · Pay", "FEAT-002, FEAT-099")
+        self.assertEqual([call for call in self.gh.calls if call[:2] == ["issue", "create"]], [])
+
+    def test_un_element_ne_peut_pas_dependre_de_lui_meme(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "FEAT-003 cannot depend on itself"):
+            self.publish("FEAT-003 · Pay", "FEAT-003")
+        self.assertEqual([call for call in self.gh.calls if call[:2] == ["issue", "create"]], [])
+
+    def test_un_brouillon_sans_identifiant_ni_dependance_ne_lit_pas_les_issues(self):
+        self.publish("A request with no id")
+        self.assertEqual([call for call in self.gh.calls if call[:2] == ["issue", "list"]], [])
+
+    def test_un_brouillon_sans_dependance_ne_pose_aucun_lien(self):
+        self.gh.issues = [stored_issue(7, "FEAT-002 · Cart")]
+        self.assertEqual(self.publish("FEAT-003 · Pay"), ("42", []))
+        self.assertEqual(self.gh.links, [])
+
+    def test_un_lien_qui_echoue_ne_defait_pas_l_issue_creee_et_dit_comment_le_poser(self):
+        self.gh.issues = [stored_issue(7, "FEAT-002 · Cart")]
+        self.gh.link_failure = "Resource not accessible"
+        number, notes = self.publish("FEAT-003 · Pay", "FEAT-002")
+        self.assertEqual(number, "42")
+        self.assertRegex(notes[0], r"could not link #42 to #7 \(FEAT-002\): Resource not accessible; retry with `block 42 --by 7`")
+
+    def test_une_dependance_en_double_prend_l_issue_la_plus_ancienne(self):
+        self.gh.issues = [stored_issue(20, "FEAT-002 · Cart again"), stored_issue(7, "FEAT-002 · Cart")]
+        self.publish("FEAT-003 · Pay", "FEAT-002")
+        self.assertEqual(self.gh.links, [("42", "7")])
+
+    # --- block et unblock ---
+
+    def test_block_pose_le_lien_blocked_by(self):
+        self.assertEqual(ballet_github.block_issue("5", "#3", run=self.gh), "#5 is now blocked by #3")
+        self.assertEqual(self.gh.links, [("5", "3")])
+
+    def test_block_ne_repose_pas_un_lien_deja_la(self):
+        self.gh.blocked_by = {"5": ["3"]}
+        self.assertEqual(ballet_github.block_issue("5", "3", run=self.gh), "#5 is already blocked by #3")
+        self.assertEqual(self.gh.links, [])
+
+    def test_block_refuse_une_issue_bloquee_par_elle_meme_et_un_cycle_direct(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "cannot be blocked by itself"):
+            ballet_github.block_issue("5", "5", run=self.gh)
+        self.gh.blocked_by = {"3": ["5"]}
+        with self.assertRaisesRegex(ballet_github.GitHubError, "#3 is already blocked by #5: that would make a dependency cycle"):
+            ballet_github.block_issue("5", "3", run=self.gh)
+        self.assertEqual(self.gh.links, [])
+
+    def test_block_refuse_une_issue_inconnue(self):
+        self.gh.missing = {"99"}
+        with self.assertRaisesRegex(ballet_github.GitHubError, "issue #99 not found"):
+            ballet_github.block_issue("5", "99", run=self.gh)
+
+    def test_unblock_retire_le_lien(self):
+        self.gh.blocked_by = {"5": ["3"]}
+        self.assertEqual(ballet_github.unblock_issue("5", "3", run=self.gh), "#5 is no longer blocked by #3")
+        self.assertEqual(self.gh.links, [("5", "3", "-")])
+
+    def test_unblock_d_un_lien_absent_ne_change_rien(self):
+        self.assertEqual(ballet_github.unblock_issue("5", "3", run=self.gh), "#5 was not blocked by #3")
+        self.assertEqual(self.gh.links, [])
+
+    def test_block_en_ligne_de_commande_veut_by(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "usage: block|unblock <issue> --by <issue>"):
+            ballet_github._dispatch("block", ["5", "3", "4"])
+
+    def test_la_requete_de_lecture_demande_les_deux_issues_et_leurs_bloqueurs(self):
+        ballet_github.block_issue("5", "3", run=self.gh)
+        query = next(argument for call in self.gh.calls for argument in call if "blocker: issue" in argument)
+        self.assertIn("blockedBy(first: 100)", query)
+        mutation = next(argument for call in self.gh.calls for argument in call if "addBlockedBy" in argument)
+        self.assertIn("issueId: $issue, blockingIssueId: $blocker", mutation)
 
 
 if __name__ == "__main__":

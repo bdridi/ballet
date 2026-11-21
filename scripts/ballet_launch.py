@@ -1,6 +1,6 @@
 """Le lancement des Conductors par Maestro (OPP-02, étape 3) : un terminal Orca dans le projet, où tourne Claude.
 
-    python3 ballet_launch.py rehearsal <projet> <élément>       # `#12`, `12` ou `FEAT-002`
+    python3 ballet_launch.py rehearsal <projet> <élément> [--ignore-blockers]   # `#12`, `12` ou `FEAT-002`
     python3 ballet_launch.py workshop <projet> [<élément>]      # un Workshop autopilot : `BUG-004`, ou la première ligne de *Next up*
 
 Maestro seul l'appelle (sur la demande du Director, ou quand sa règle `auto_launch` le décide pour un élément que le Monitor
@@ -13,10 +13,13 @@ sont appelés par ces scripts, jamais par l'agent. Il n'écrit qu'un fichier, le
 (`.ballet/run/inbox.md`) : `Edit(.ballet/run/**)` le laisse faire sans demande de permission, quel que soit le mode. `BALLET_CONDUCTOR_COMMAND` remplace `claude` (un autre agent, ou une
 commande inoffensive pour essayer sans tokens) ; les arguments restent les mêmes.
 
-Avant tout lancement, quatre garde-fous, chacun avec son refus : le projet est connu de `maestro.toml` ; l'élément n'a pas
+Avant tout lancement, cinq garde-fous, chacun avec son refus : le projet est connu de `maestro.toml` ; l'élément n'a pas
 déjà un Conductor vivant (dans le registre, ou en session ouverte dans le projet) ; le plafond de Conductors simultanés
-n'est pas atteint ; le plafond de lancements du jour non plus. Les plafonds sont ceux de la table `[limits]` de
-`maestro.toml` (`max_running`, `max_per_day`).
+n'est pas atteint ; le plafond de lancements du jour non plus ; aucun bloqueur de l'issue n'est ouvert (les liens
+« Blocked by » de GitHub, lus par `ballet_program.dependencies_of` : un élément ne part que si tous ses bloqueurs sont
+fermés, même sur la demande du Director). `--ignore-blockers` passe outre, sur le oui explicite du Director seulement ;
+il ne s'applique qu'à un élément-issue (`#12`) : `FEAT-002`, sans issue, n'a pas de lien à lire. Les plafonds sont ceux
+de la table `[limits]` de `maestro.toml` (`max_running`, `max_per_day`).
 
 Le lancement écrit sa ligne dans le registre (`ballet_conductors.py`) : projet, élément, genre, terminal, début. L'URL
 Remote Control de la session s'y ajoute si on la lit dans le terminal dans les secondes qui suivent ; sinon elle reste vide.
@@ -34,6 +37,7 @@ from pathlib import Path
 
 import ballet_conductors
 import ballet_maestro
+import ballet_program
 import ballet_rehearsal
 import ballet_state
 import ballet_workshop
@@ -47,7 +51,7 @@ LAUNCH_LOCK = "launch.lock"
 REMOTE_CONTROL_URL = re.compile(r"https://claude\.ai/code/\S+")
 URL_WAIT_SECONDS = 8
 URL_POLL_SECONDS = 1
-USAGE = "usage: rehearsal <project> <item> | workshop <project> [<item>]"
+USAGE = "usage: rehearsal <project> <item> [--ignore-blockers] | workshop <project> [<item>]"
 
 
 class LaunchError(Exception):
@@ -66,6 +70,7 @@ class Launch:
     item: str
     kind: str
     prompt: str
+    ignore_blockers: bool = False
 
     @property
     def key(self):
@@ -75,11 +80,13 @@ class Launch:
 # --- les commandes ------------------------------------------------------------
 
 
-def launch_rehearsal(project, item, orca, state=None, url_wait=URL_WAIT_SECONDS):
-    """Lance le Conductor de `/ballet:rehearsal` sur un élément : `#12`, `12` ou `FEAT-002`."""
+def launch_rehearsal(project, item, orca, state=None, url_wait=URL_WAIT_SECONDS, ignore_blockers=False):
+    """Lance le Conductor de `/ballet:rehearsal` sur un élément : `#12`, `12` ou `FEAT-002`. Un bloqueur ouvert le refuse,
+    sauf `ignore_blockers` (le oui explicite du Director)."""
     home = _known_project(project, state)
     key_item, prompt_item = _rehearsal_item(item)
-    return _launch(Launch(project, home, key_item, "rehearsal", f"/ballet:rehearsal {prompt_item}"), orca, state, url_wait)
+    launch = Launch(project, home, key_item, "rehearsal", f"/ballet:rehearsal {prompt_item}", ignore_blockers)
+    return _launch(launch, orca, state, url_wait)
 
 
 def launch_workshop(project, item, orca, state=None, url_wait=URL_WAIT_SECONDS):
@@ -114,6 +121,7 @@ def _check_guardrails(launch, orca, state):
     _refuse_if_session_open(launch)
     _refuse_if_too_many_running(registry, alive, config)
     _refuse_if_too_many_today(registry, config)
+    _refuse_if_blocked(launch)
 
 
 def _known_project(project, state):
@@ -154,6 +162,21 @@ def _refuse_if_too_many_today(registry, config):
     today = ballet_conductors.launches_today(registry)
     if today >= limit:
         raise LaunchError(f"{today} launch(es) today already: the limit is {limit} ([limits] max_per_day in {ballet_maestro.CONFIG_NAME})")
+
+
+def _refuse_if_blocked(launch):
+    """Un bloqueur ouvert refuse l'élément, et le nomme. GitHub injoignable : on ne lance pas à l'aveugle."""
+    if launch.ignore_blockers or launch.kind != "rehearsal" or not launch.item.isdigit():
+        return
+    try:
+        blocked_by = ballet_program.dependencies_of(launch.item, launch.home)["blocked_by"]
+    except ballet_program.ProgramError as error:
+        raise LaunchError(f"cannot read the blockers of {launch.key} ({error}): "
+                          "launch it with --ignore-blockers only on the Director's explicit word") from error
+    if blocked_by:
+        names = ", ".join(f"{blocker['item']} ({blocker['url']})" for blocker in blocked_by)
+        raise LaunchError(f"{launch.key} is blocked by {names}, still open: it starts when they are closed "
+                          "(--ignore-blockers overrides, only on the Director's explicit word)")
 
 
 def _is_running(line, alive):
@@ -257,8 +280,12 @@ def main(argv, orca=None):
 
 
 def _command(arguments, orca):
+    ignore_blockers = "--ignore-blockers" in arguments
+    arguments = [argument for argument in arguments if argument != "--ignore-blockers"]
     if arguments[:1] == ["rehearsal"] and len(arguments) == 3:
-        return launch_rehearsal(arguments[1], arguments[2], orca)
+        return launch_rehearsal(arguments[1], arguments[2], orca, ignore_blockers=ignore_blockers)
+    if ignore_blockers:
+        raise UsageError(USAGE)
     if arguments[:1] == ["workshop"] and len(arguments) in (2, 3):
         return launch_workshop(arguments[1], arguments[2] if len(arguments) == 3 else "", orca)
     raise UsageError(USAGE)

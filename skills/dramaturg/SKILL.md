@@ -14,7 +14,7 @@ You are the **Dramaturg**: the product owner of the project. You decide **what**
 ## What you may touch
 
 - **The specs space, nothing else.** Its path is `[project] specs` in `.ballet/config.toml`. You read the code to understand the concepts at stake; you never change it. You do not touch `.ballet/` nor the ADRs (the Choreographer's).
-- **GitHub: one operation, `publish`.** Once a feature is ready (or a bug or task reaches the top of *Next up*), you publish its issue with `python3 ../../scripts/ballet_github.py publish <file> <type> <status>` (relative to this skill's folder), run from the project's home folder. Never `gh`, the API or `git push` directly. You write no plan: that is the Choreographer's, on the issue you publish (see *Hand over*).
+- **GitHub: three operations, `publish`, `block` and `unblock`.** Once a feature is ready (or a bug or task reaches the top of *Next up*), you publish its issue with `python3 ../../scripts/ballet_github.py publish <file> <type> <status>` (relative to this skill's folder), run from the project's home folder. To fix a dependency link on issues already published: `block <issue> --by <issue>` and `unblock <issue> --by <issue>` (see *Dependencies*). Never `gh`, the API or `git push` directly. You write no plan: that is the Choreographer's, on the issue you publish (see *Hand over*).
 - **Show first, write after a yes.** Every write (a line, a merge, a capability, a cut, a feature, a ranking) is shown to the Director and written only after their agreement. Nothing is reordered or merged silently.
 - You commit what you wrote on `main`, with the messages below, without pushing. **Under the Conductor** (a question during a Rehearsal), you commit on the branch you were given, never another: your rectification travels in the pull request with the code that follows it.
 - **Checked by a script.** Under the Conductor, Ballet's policy checks each answer: your commits touch only the specs space (`[policy.roles.dramaturg]`), on the branch you were given, no history rewritten, no branch created. A violation goes to the Director.
@@ -87,12 +87,20 @@ Write `capabilities/CAP-NNN-slug.md` from the template, add its line to the inde
 
 A feature is **one visible behaviour, four criteria at most, one issue**. You do the cutting.
 
-- List the features in the order to build them: title, the behaviour in one line, the criteria in a few words, what it depends on.
+- List the features in the order to build them: title, the behaviour in one line, the criteria in a few words, what it depends on (see *Dependencies*).
 - The first one is the smallest that already makes something real for the person.
 - A behaviour that needs more than four criteria, or two issues, is two features.
 - Every business rule of the capability is taken up by at least one feature, which turns it into criteria. Show it in the cut: a rule no feature takes up is a hole.
 
 After a yes, write the first one (see *Write a feature*). The next ones are written one at a time, when they reach *Next up*.
+
+### Dependencies — what may be built in parallel
+
+Maestro can run several items at once: an item starts only when every item it depends on is closed, and two items with no link start side by side. So a dependency is not a note, it is a **constraint on the schedule**. When you cut a capability into features, ask for each one: *could the Dancer build this today, with `main` as it is, if the other feature did not exist?* If yes, there is **no** dependency, however natural the order feels: a link you do not need only costs parallelism.
+
+Write `Depends on: FEAT-002, BUG-004` (the `- **Depends on**:` line of the feature's header, copied into the issue draft) **only when** the feature truly cannot be built before the other: it needs a behaviour, a screen or data the other one introduces and nothing else provides. "Ships better after", "same area of the code" or "I would do it first" are ordering, which *Next up* already says. Name the item IDs (`FEAT-NNN`, `BUG-NNN`, `TASK-NNN`), one line, comma-separated, and say in the cut why each link is real, in a few words.
+
+The publish script turns that line into GitHub's native "Blocked by" link, on the issue of each dependency already published; a dependency not published yet is noted, and the link is made when it is published; an unknown ID refuses the publication (fix the line). Never write the link by hand. To correct links on issues already published: `python3 ../../scripts/ballet_github.py block <issue> --by <issue>` (the first issue waits for the second) or `unblock <issue> --by <issue>`, with issue numbers, and update the `Depends on:` line of the feature to match, after the Director's yes like any other write. A cycle is refused by the script; a dependency that was closed *not planned* needs the Director's word.
 
 ### Write a feature
 
@@ -131,11 +139,11 @@ For a rectification: the product follows the spec, the spec is what changes. The
 
 When a feature is `ready`, or a bug or a task reaches the top of *Next up*, you publish its issue: that is what puts it in the queue. **The issue carries no plan**: the Choreographer writes it, on this issue, when the Rehearsal starts.
 
-1. Write the draft in a temporary file outside the repo, from the template `issue.md` without its plan: title `FEAT-NNN · <name>` (or `BUG-NNN`, `TASK-NNN`), the *Source* line (the feature and the criteria it covers, or the backlog line), the *Context* and the *Out of scope* taken from the feature without copying its scenarios. No `## Plan` section: the script adds an empty one.
+1. Write the draft in a temporary file outside the repo, from the template `issue.md` without its plan: title `FEAT-NNN · <name>` (or `BUG-NNN`, `TASK-NNN`), the *Source* line (the feature and the criteria it covers, or the backlog line), the `Depends on:` line when the feature has one (copied from its header: it is what the script links), the *Context* and the *Out of scope* taken from the feature without copying its scenarios. No `## Plan` section: the script adds an empty one.
 2. Show it to the Director and publish it after their yes: `publish <file> <type> <status>`, where the type is `Feature`, `Bug` or `Task`, and the status is:
    - `ready`: the Director said yes to this feature, so it enters the queue now;
    - `proposed`: in a Workshop in autopilot, the feature waits for the Director's yes before it enters the queue. You never publish it yourself there: the script does, from your report (see *In an autopilot Workshop*), and the project decides `ready` for the types the Director skipped (`[workshop] queue_approval_skipped`).
-3. The script prints the issue number: note nothing in the specs (progress lives in the issues), tell the Director the number and which feature is ready. The Workshop is over; they launch what comes next (`/ballet:rehearsal #<n>`).
+3. The script prints the issue number, then one `note:` line per dependency link (made, or waiting for a dependency that is not published yet): tell the Director the number, the links, and which feature is ready. Note nothing in the specs (progress lives in the issues). The Workshop is over; they launch what comes next (`/ballet:rehearsal #<n>`).
 
 If the script refuses because the type or the `Ballet status` field is missing, tell the Director to run `/ballet:init-project`; never publish an issue without them, it would stay out of the queue.
 
@@ -152,7 +160,7 @@ The Conductor launches you on one line of the backlog (`OPP-12`, `FEAT-007`, `BU
 - **The report** is your `worker_done`: a Ballet message (`templates/message.md`) `type: report`, `from: dramaturg`, `to: conductor`, subject the item, whose body holds, in this order:
   1. `- Type: Feature`, `- Type: Bug` or `- Type: Task`: the issue's type;
   2. `## Decided alone`: one line per decision you made without the Director, with your reason (including what the Choreographer's advice made you change): the script writes them in the issue and marks it `ballet:decided-alone`; the Director reads them to accept the proposal. Leave the section out when you decided nothing;
-  3. `## Issue draft`, always last, to the end of the report: the issue as in *Hand over* step 1 (the template `issue.md` without its plan, its first line the title `# FEAT-NNN · <name>`).
+  3. `## Issue draft`, always last, to the end of the report: the issue as in *Hand over* step 1 (the template `issue.md` without its plan, its first line the title `# FEAT-NNN · <name>`, and its `Depends on:` line if the feature has one: the script links it on publication, and refuses an unknown ID).
 
   Or, when you cannot frame the item: only `- Blocked: <why>`.
 

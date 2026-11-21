@@ -3,7 +3,7 @@
 - **Status**: draft | ready
 - **Capability**: CAP-NNN
 - **Answers**: OPP-NNN (optional)
-- **Depends on**: FEAT-NNN (optional)
+- **Depends on**: FEAT-NNN, BUG-NNN (optional: only a feature that truly cannot be built before another; the issue's native "Blocked by" link is made from this line)
 
 ## Problem
 
