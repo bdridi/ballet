@@ -55,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import ballet_config
+import ballet_frictions
 import ballet_github
 import ballet_maestro
 import ballet_orca
@@ -127,6 +128,7 @@ class Workshop:
     advisor_dispatch: str = ""                  # le dispatch Orca du worker Choreographer
     advisor_checkpoint: str = ""                # `HEAD` du worktree quand le Choreographer a reçu la main
     received: list = field(default_factory=list)  # les ids des messages Orca déjà traités : `receive --run` ne les rejoue pas
+    frictions: dict = field(default_factory=dict)   # à sa fin : {seconds, frictions} (`ballet_frictions`), aussi au journal
     advisor_refs: list = field(default_factory=list)
     advice: str = ""                            # sa dernière réponse
     exchanges: list = field(default_factory=list)   # les questions et réponses, messages entiers, dans l'ordre
@@ -580,8 +582,26 @@ def _settle(workshop, step, home):
     workshop.reason = step.reason
     _save(workshop, home)
     _log(home, workshop, step.next, {"reason": step.reason, "done": step.done})
+    if step.next == "done":
+        _record_frictions(workshop, home)
+        step.done.append(ballet_frictions.line(f"Workshop {workshop.item}", workshop.frictions))
     step.item = workshop.item
     return step
+
+
+def _record_frictions(workshop, home):
+    """À la fin du Workshop, ses frictions : dans son état et au journal (clé `workshop`)."""
+    workshop.frictions = ballet_frictions.of_workshop(asdict(workshop), _journal_of(workshop.item, home))
+    _save(workshop, home)
+    _log(home, workshop, "frictions", workshop.frictions)
+
+
+def _journal_of(item, home):
+    path = _run_dir(home) / "journal.jsonl"
+    if not path.is_file():
+        return []
+    entries = (json.loads(text) for text in path.read_text(encoding="utf-8").splitlines() if text.strip())
+    return [entry for entry in entries if entry.get("workshop") == item]
 
 
 def _over(workshop):

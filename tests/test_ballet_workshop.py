@@ -484,6 +484,14 @@ class BalletWorkshopTest(unittest.TestCase):
 
     # --- le merge, la publication et la reprise ---
 
+    def test_la_fin_du_workshop_donne_ses_frictions_et_les_garde(self):
+        self.begin()
+        step = self.reports()
+        self.assertEqual(step.next, "done")
+        self.assertTrue(step.done[-1].startswith("frictions of Workshop BUG-004 ("))
+        self.assertTrue(step.done[-1].endswith("): none"))
+        self.assertEqual(self.journal("frictions")[0]["detail"], self.state()["frictions"])
+
     def test_les_specs_sont_mergees_sans_lire_ni_attendre_la_ci(self):
         self.begin()
         step = self.reports()

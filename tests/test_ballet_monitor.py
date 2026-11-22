@@ -332,6 +332,63 @@ class BalletMonitorTest(unittest.TestCase):
         self.assertEqual((line["state"], ballet_conductors.state_of(line)), ("gone", "gone"))
         self.assertNotEqual(ballet_conductors.state_of(line), ballet_conductors.RUNNING)
 
+    # --- un Conductor fini resté ouvert ---
+
+    def finished_conductor(self, minutes_ago=30, key="antimurphy#12", terminal="term_9", kind="rehearsal"):
+        """Un Conductor lancé (par Maestro si `kind`), fini il y a `minutes_ago` minutes, son terminal encore vivant."""
+        from datetime import datetime, timedelta, timezone
+        ballet_conductors.record_launch(key, "antimurphy", key.split("#")[1], kind, terminal)
+        ballet_conductors.note_events([{"type": "status", "from": terminal, "subject": f"{key} · done"}])
+        registry = ballet_conductors.read()
+        registry[key]["seen"] = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+        ballet_conductors._write(registry, None)
+        self.orca.terminals.append(terminal)
+
+    def close_after(self, minutes):
+        config = ballet_maestro.read_config()
+        config["conductors"] = {"close_finished_after_minutes": minutes}
+        ballet_maestro.write_config(config)
+
+    def test_un_conductor_fini_reste_ouvert_au_dela_du_delai_est_signale_une_fois(self):
+        self.finished_conductor(minutes_ago=30)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · finished"])
+        subject, priority, body = self.sent()[-1]
+        self.assertIn("terminal term_9 is still open after 10 min", body)
+        self.assertIn("ballet_launch.py close antimurphy#12", body)
+        self.assertEqual(self.turn().told, [])
+        self.assertTrue(ballet_conductors.read()["antimurphy#12"]["finished_told"])
+
+    def test_un_conductor_fini_avant_le_delai_n_est_pas_signale(self):
+        self.finished_conductor(minutes_ago=3)
+        self.assertEqual(self.turn().told, [])
+
+    def test_le_delai_vient_de_la_config(self):
+        self.finished_conductor(minutes_ago=3)
+        self.close_after(2)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · finished"])
+
+    def test_un_delai_de_zero_ne_signale_jamais(self):
+        self.finished_conductor(minutes_ago=600)
+        self.close_after(0)
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_delai_invalide_est_une_erreur_du_tour_qui_n_arrete_pas_le_reste(self):
+        self.finished_conductor(minutes_ago=30)
+        self.running_conductor("antimurphy#13", "term_7")
+        self.close_after("soon")
+        report = self.turn()
+        self.assertEqual(report.told, ["antimurphy#13 · gone"])
+        self.assertIn("close_finished_after_minutes", report.errors[0])
+
+    def test_un_conductor_que_maestro_n_a_pas_lance_n_est_pas_signale(self):
+        self.finished_conductor(minutes_ago=30, kind="")
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_conductor_fini_dont_le_terminal_est_ferme_n_est_pas_signale(self):
+        self.finished_conductor(minutes_ago=30)
+        self.orca.terminals.remove("term_9")
+        self.assertEqual(self.turn().told, [])
+
     def test_un_conductor_disparu_n_est_signale_qu_une_fois(self):
         self.running_conductor()
         self.turn()

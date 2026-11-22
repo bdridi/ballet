@@ -47,7 +47,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
   - **`assisted`** (par défaut) : le Director est dans la boucle ; il cadre, valide le plan et reçoit les escalades ;
   - **`autopilot`** : la boucle tourne sans lui ; chaque rôle décide dans son périmètre et trace sa décision. La Rehearsal en autopilot, c'est le mode nuit.
 - **File** : les issues GitHub du projet qui attendent leur Rehearsal : type `Task`, `Bug` ou `Feature`, champ Ballet status à `ready`, dans l'ordre du champ Priority puis de l'ancienneté ; les `Slice` suivent leur feature. C'est GitHub qui la tient, par les types et les champs natifs des issues, pas un fichier local.
-- **Monitor** : un script déterministe, pas un agent (`ballet_monitor.py`), qui surveille la file sur GitHub et les terminaux des Conductors, et écrit dans la boîte de Maestro l'élément passé prêt ou le Conductor disparu ; il ne lance rien, c'est Maestro qui lance (OPP-01).
+- **Monitor** : un script déterministe, pas un agent (`ballet_monitor.py`), qui surveille la file sur GitHub et les terminaux des Conductors, et écrit dans la boîte de Maestro l'élément passé prêt, le Conductor disparu, ou le Conductor fini resté ouvert au-delà de `[conductors] close_finished_after_minutes` (`maestro.toml`, 10 min par défaut) ; il ne lance ni ne ferme rien, c'est Maestro qui lance et qui ferme (`ballet_launch.py close`) (OPP-01).
 
 **Le reste**
 

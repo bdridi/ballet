@@ -1237,6 +1237,13 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertEqual(step.done, ["proof red, nothing pushed: dancer asked to fix it (1/2)"])
         self.assertFalse(self.world.ran("gh", "pr", "merge"))
 
+    def test_une_rehearsal_rejetee_puis_approuvee_garde_le_refus_dans_ses_frictions(self):
+        self.to_the_critic()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.receive(message("dancer", "conductor", "report", "- Fixed.", round_=2))
+        self.critic_says("APPROVED")
+        self.assertEqual([friction["text"] for friction in self.state()["frictions"]["frictions"]], ["1 Critic rejection"])
+
     def test_approuve_sans_note_merge_directement(self):
         self.to_the_critic()
         self.assertEqual(self.critic_says("APPROVED").next, "done")
@@ -1583,6 +1590,17 @@ class SessionTest(unittest.TestCase):
         self.world.fields = {"3": {"type": "Bug"}, "4": {"type": "Task"}}
         self.assertEqual(self.run_main("begin", "#3")[1][-1], "NEXT: wait")
         self.assertEqual(self.run_main("begin", "#4")[1][-1], "NEXT: wait")
+
+    def test_la_fin_de_la_session_donne_les_frictions_de_chaque_rehearsal_et_les_garde(self):
+        self.run_main("begin", "#3")
+        lines = self.approve("FEAT-001.2")[1]
+        friction_line = next(line for line in lines if line.startswith("- frictions of FEAT-001.2 ("))
+        self.assertTrue(friction_line.endswith("): none"))
+        state = self.state()
+        self.assertEqual(state["frictions"]["frictions"], [])
+        self.assertEqual(self.session()["frictions"], {"FEAT-001.2": state["frictions"]})
+        journal = [json.loads(line) for line in (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()]
+        self.assertEqual([entry["detail"] for entry in journal if entry["event"] == "frictions"], [state["frictions"]])
 
     def test_un_mode_inconnu_est_refuse(self):
         self.world.fields = {"3": {"mode": "night"}}

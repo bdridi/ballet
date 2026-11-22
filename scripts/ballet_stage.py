@@ -72,7 +72,7 @@ def project_homes(folder):
 def _project(home):
     run = Path(home) / RUN_DIR
     states, journal, program, profile = _states(run), _journal(run), _program(home), _profile(home)
-    sessions = _sessions(run)
+    sessions, finished = _sessions(run), _finished_sessions(run)
     return {
         "name": Path(home).resolve().name,
         "home": str(Path(home).resolve()),
@@ -80,7 +80,7 @@ def _project(home):
         "limits": _limits(profile),
         "titles": _titles(home, states),
         "rehearsals": states,
-        "queue": _queue(program, sessions, states, journal),
+        "queue": _queue(program, sessions, finished, states, journal),
         "queue_titles": {**{item["item"]: item["title"] for item in program["items"]}, **_session_titles(home, sessions)},
         "queue_error": program["error"],
         "journal": journal,
@@ -105,14 +105,15 @@ def _titles(home, states):
     return {rehearsal: _issue_title(home, issue) for rehearsal, issue in issues.items() if issue}
 
 
-def _queue(program, sessions, states, journal):
+def _queue(program, sessions, finished, states, journal):
     """Ce que la page affiche : les sessions de Conductor ouvertes, le programme de GitHub sans les éléments qu'une
-    session a déjà pris, et ce qui a déjà été joué."""
+    session a déjà pris, ce qui a déjà été joué, et les sessions finies avec leurs frictions."""
     taken = {item for session in sessions for item in session["items"] + [entry["item"] for entry in session["played"]]}
     return {
         "sessions": sessions,
         "program": [item for item in program["items"] if item["item"] not in taken],
         "played": _played(journal, states),
+        "finished_sessions": finished,
     }
 
 
@@ -130,6 +131,14 @@ def _sessions(run):
     return [_session(saved) for saved in found if saved and saved.get("item") and saved.get("status", "open") == "open"]
 
 
+def _finished_sessions(run):
+    """Les sessions de Conductor finies, la plus récente d'abord (par la date de leur fichier), avec les frictions de
+    chacune de leurs Rehearsals."""
+    paths = sorted(run.glob(f"{SESSION_PREFIX}*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    found = (_json(path) for path in paths)
+    return [_session(saved) for saved in found if saved and saved.get("item") and saved.get("status") == "done"]
+
+
 def _session(saved):
     return {
         "item": saved["item"],
@@ -137,6 +146,7 @@ def _session(saved):
         "current": saved.get("current", ""),
         "items": list(saved.get("items", [])),
         "played": list(saved.get("played", [])),
+        "frictions": dict(saved.get("frictions", {})),
     }
 
 

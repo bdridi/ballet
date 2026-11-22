@@ -39,6 +39,10 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     max_running = 3           Conductors vivants en même temps, tous projets confondus
     max_per_day = 10          lancements par jour (jour local)
 
+    [conductors]              (facultatif ; cette valeur par défaut)
+    close_finished_after_minutes = 10   un Conductor fini dont le terminal reste ouvert au-delà : le Monitor le signale
+                                        (`<projet>#<élément> · finished`) et Maestro le ferme ; 0 : jamais
+
 La règle de lancement automatique se décide ici, dans `decide` : un élément passé `ready` (signalé par le Monitor) est
 lancé seul quand son type est dans `auto_launch` de son projet et que le drapeau `~/.ballet/auto_launch_paused` n'existe
 pas (`pause` le pose, `resume` le retire) ; sinon Maestro demande au Director. `wait` et `recap` écrivent le verdict sous
@@ -49,6 +53,10 @@ Les dépendances (les liens « Blocked by » de GitHub, lus par `ballet_program.
 règle `auto_launch` : un élément prêt dont un bloqueur est ouvert est `DECISION: wait (blocked by #M, open)` ; une dépendance
 douteuse (bloqueur fermé *not planned*, cycle, bloqueur illisible) est `DECISION: ask the Director (<raison>)`, même pour un
 type confié à l'auto. `ready` et `status` montrent aussi ces éléments bloqués.
+
+Sous chaque `status` `<projet>#<élément> · finished` du Monitor, `wait` et `recap` écrivent `DECISION: close` (Maestro
+ferme le terminal par `ballet_launch.py close`, puis le dit) ou `DECISION: ask the Director (<raison>)` quand la ligne du
+registre a changé depuis (relancé, autre terminal, déjà fermé).
 
 `maestro` lance la session Maestro elle-même, comme `monitor` lance le Monitor : un terminal Orca `maestro` où tourne
 `claude --remote-control 'ballet maestro' '/ballet:maestro'` (le prompt avant les options ; `BALLET_MAESTRO_COMMAND` remplace
@@ -98,6 +106,9 @@ LOCK_NAME = "maestro.lock"
 MAILBOX_TITLE = "maestro-mailbox"
 MAILBOX_OBJECTIVE = "Maestro's mailbox: the Conductors and the Monitor write here, Maestro reads"
 ANNOUNCED = ("escalate", "done")
+DEFAULT_CLOSE_MINUTES = 10
+FINISHED_SUBJECT = re.compile(r"^(\S+#\S+) · finished$")   # le Monitor : un Conductor fini, terminal encore ouvert
+TERMINAL_IN_BODY = re.compile(r"\bterminal (term_\S+?)[,.\s]")
 ALIAS = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 HEADER = "# Maestro (OPP-02), written by ballet_maestro.py: edit it while no Maestro command runs.\n"
@@ -308,7 +319,7 @@ def status(orca, state=None):
     launched = _conductor_lines(registry, orca)
     waiting = _ready_lines(config, registry, state)
     return ("\n".join(sessions or ["no open session in any project"])
-            + ("\n\nConductors:\n" + "\n".join(launched) if launched else "")
+            + (f"\n\nConductors ({_closing_rule(config)}):\n" + "\n".join(launched) if launched else "")
             + ("\n\nReady, no Conductor yet:\n" + "\n".join(waiting) if waiting else ""))
 
 
@@ -344,10 +355,10 @@ def resume(state=None):
     return "auto launch resumed: the projects' auto_launch rule applies again"
 
 
-def _decision(project, kind, config, state, number=None):
+def _decision(project, kind, config, state, number=None, seen=None):
     if project not in config["projects"]:
         return f"ask the Director (unknown project {project})"
-    dependencies = _dependency_decision(project, number, state)
+    dependencies = _dependency_decision(project, number, state, seen)
     if dependencies:
         return dependencies
     if _pause_flag(state).exists():
@@ -362,9 +373,10 @@ def _decision(project, kind, config, state, number=None):
     return "launch"
 
 
-def _dependency_decision(project, number, state):
-    """`wait (blocked by #M, open)` ou `ask the Director (<doute>)` d'après ce que le Monitor a vu de l'élément ; vide sinon."""
-    kept = _kept_item(project, number, state)
+def _dependency_decision(project, number, state, seen=None):
+    """`wait (blocked by #M, open)` ou `ask the Director (<doute>)` d'après ce que le Monitor a vu de l'élément (ou ce
+    que `ready` vient de relire) ; vide sinon."""
+    kept = seen if seen is not None else _kept_item(project, number, state)
     if ballet_program.waits(kept):
         return "wait (blocked by " + ", ".join(blocker["item"] for blocker in kept["blocked_by"]) + ", open)"
     if kept.get("doubt"):
@@ -400,12 +412,40 @@ def _ready_lines(config, registry, state):
     import ballet_monitor
     lines = []
     for alias, items in sorted(ballet_monitor.read_ready(state).items()):
+        if alias in config["projects"]:
+            items = _with_live_blockers(items, config["projects"][alias])
         for item in items:
             if alias in config["projects"] and not _is_running(registry.get(f"{alias}#{item['number']}")):
-                verdict = _decision(alias, item["type"], config, state, item["number"])
+                verdict = _decision(alias, item["type"], config, state, item["number"], seen=item)
                 lines.append(f"{alias}#{item['number']}  {item['type']}  {item['priority'] or '-'}  {item['title']}  {item['url']}  "
                              f"DECISION: {verdict}")
     return lines
+
+
+def _with_live_blockers(items, project):
+    """Les bloqueurs relus sur GitHub quand un élément attend : le dernier tour du Monitor peut dater de quelques
+    minutes, et un `done` vient peut-être de fermer le bloqueur. Une lecture par projet, seulement s'il a un élément
+    bloqué ; GitHub injoignable, la vue du Monitor reste."""
+    if not any(ballet_program.waits(item) for item in items):
+        return items
+    live = _live_ready(project["path"])
+    if live is None:
+        return items
+    found = {str(item["number"]): item for item in live}
+    return [{**item, **_dependencies_of(found.get(str(item["number"])))} if ballet_program.waits(item) else item for item in items]
+
+
+def _dependencies_of(live_item):
+    if not live_item:
+        return {}
+    return {key: live_item[key] for key in ("blocked_by", "launchable", "doubt") if key in live_item}
+
+
+def _live_ready(project_dir):
+    try:
+        return ballet_program.ready_items(project_dir)
+    except ballet_program.ProgramError:
+        return None
 
 
 def _is_running(line):
@@ -594,9 +634,13 @@ def _message_text(message, config, state, tag=""):
 
 
 def _body_with_decisions(message, config, state):
-    """Le corps du message ; sous chaque élément d'un `status` `· ready` du Monitor, la décision de la règle de lancement."""
+    """Le corps du message ; sous chaque élément d'un `status` `· ready` du Monitor, la décision de la règle de lancement ;
+    sous un `· finished`, celle de fermer le Conductor."""
     import ballet_monitor
     body = message.get("body", "")
+    finished = FINISHED_SUBJECT.match(message.get("subject", ""))
+    if message.get("type") == "status" and finished:
+        return f"{body}\nDECISION: {close_decision(finished.group(1), _terminal_named(body), state)}"
     project = ballet_monitor.project_of_ready_subject(message.get("subject", ""))
     if message.get("type") != "status" or not project:
         return body
@@ -607,6 +651,35 @@ def _body_with_decisions(message, config, state):
         if item:
             lines.append(f"DECISION: {_decision(project, item.group('type'), config, state, item.group('number'))}")
     return "\n".join(lines)
+
+
+def close_decision(key, terminal, state=None):
+    """`close` quand le Conductor signalé est toujours fini, lancé par Maestro, dans le même terminal ; sinon
+    `ask the Director (<raison>)`. C'est ici que cela se décide : l'agent ne fait que relayer le verdict."""
+    line = ballet_conductors.read(state).get(key)
+    if not line:
+        return f"ask the Director ({key} is not in the registry anymore)"
+    current = ballet_conductors.state_of(line)
+    if current != ballet_conductors.FINISHED:
+        return f"ask the Director ({key} is {current} now, not finished)"
+    if not line.get("kind"):
+        return f"ask the Director (Maestro did not launch {key}: its terminal is the Director's)"
+    if line["terminal"] != terminal:
+        return f"ask the Director ({key} now runs in {line['terminal']}, not {terminal})"
+    return "close"
+
+
+def close_delay_minutes(config):
+    """`[conductors] close_finished_after_minutes` : un entier, 0 ou plus ; 10 sans la clé."""
+    value = config.get("conductors", {}).get("close_finished_after_minutes", DEFAULT_CLOSE_MINUTES)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise MaestroError(f"[conductors] close_finished_after_minutes in {CONFIG_NAME} must be a whole number, 0 or more, not {value!r}")
+    return value
+
+
+def _terminal_named(body):
+    found = TERMINAL_IN_BODY.search(body)
+    return found.group(1) if found else ""
 
 
 # --- les sessions d'un projet -----------------------------------------------------
@@ -644,12 +717,20 @@ def _conductor_lines(registry, orca):
     lines = []
     for key, line in sorted(registry.items()):
         terminal = _terminal_state(line["terminal"], alive)
-        if ballet_conductors.state_of(line) in (ballet_conductors.FINISHED, ballet_conductors.GONE) and terminal == "gone":
+        if ballet_conductors.state_of(line) in (ballet_conductors.FINISHED, ballet_conductors.GONE, ballet_conductors.CLOSED) and terminal == "gone":
             continue
         last = f"last: {line['event']}" if line.get("event") else "no event yet"
         lines.append("  ".join(part for part in (key, line.get("kind") or "?", ballet_conductors.state_of(line),
                                                   f"{line['terminal']} ({terminal})", last, line.get("url", "")) if part))
     return lines
+
+
+def _closing_rule(config):
+    try:
+        minutes = close_delay_minutes(config)
+    except MaestroError as error:
+        return str(error)
+    return f"finished ones closed after {minutes} min" if minutes else "finished ones never closed"
 
 
 def _live_terminals_or_none(orca):

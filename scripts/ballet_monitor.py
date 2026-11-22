@@ -4,7 +4,7 @@
     python3 ballet_monitor.py run [--interval <s>]   # en boucle, 180 s par défaut : dans son propre terminal Orca
 
 Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boîte de Maestro, depuis son terminal Orca
-(`ORCA_TERMINAL_HANDLE`, comme les Conductors), et Maestro décide. Deux choses seulement :
+(`ORCA_TERMINAL_HANDLE`, comme les Conductors), et Maestro décide. Trois choses seulement :
 
 - **Un élément qui devient lançable.** Pour chaque projet de `maestro.toml`, la file GitHub est lue par `ballet_program.py` (les
   `Feature`, `Bug` et `Task` au champ `Ballet status` `ready`, avec leurs bloqueurs ouverts : les liens « Blocked by » de
@@ -20,6 +20,10 @@ Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boît
 - **Un Conductor disparu.** Une ligne `running` du registre dont le terminal n'existe plus dans Orca devient un `status`
   `<projet>#<élément> · gone`, priorité `high`, et la ligne passe à `gone`, une seule fois. Un Conductor figé (terminal
   vivant, rien d'envoyé) n'est pas vu ici : c'est une autre opportunité.
+- **Un Conductor fini resté ouvert.** Une ligne `finished` du registre, d'un Conductor que Maestro a lancé, dont le
+  terminal vit encore au-delà de `[conductors] close_finished_after_minutes` (10 par défaut, 0 : jamais) devient un
+  `status` `<projet>#<élément> · finished`, une seule fois (`finished_told` dans le registre). Le Monitor ne ferme rien :
+  Maestro le fait (`ballet_launch.py close`), sur la décision du script (`DECISION: close`).
 
 Un envoi qui échoue n'est pas noté comme fait : le tour suivant le refait. `gh` ou Orca injoignable est une ligne d'erreur
 du tour, jamais une panne de `run`.
@@ -69,6 +73,7 @@ def once(orca, queue=ballet_program.ready_items, state=None):
     for alias, home in _projects(state):
         _attempt(report, alias, lambda: _watch_ready(alias, home, orca, queue, state, report))
     _attempt(report, "Conductors", lambda: _watch_gone(orca, state, report))
+    _attempt(report, "finished Conductors", lambda: _watch_finished(orca, state, report))
     return report
 
 
@@ -187,6 +192,28 @@ def _tell_gone(key, line, orca, state, report):
             f"last event {line.get('event') or 'none'}). Relaunch it only on the Director's word.")
     _send(f"{key} · gone", body, "high", orca, state, report)
     ballet_conductors.mark_gone(key, line["terminal"], state)
+
+
+# --- un Conductor fini resté ouvert ----------------------------------------------
+
+
+def _watch_finished(orca, state, report):
+    """Chaque Conductor lancé par Maestro, fini depuis plus que le délai, dont le terminal vit encore : signalé, une fois."""
+    delay = ballet_maestro.close_delay_minutes(ballet_maestro.read_config(state))
+    registry = ballet_conductors.read(state)
+    if not delay or not any(ballet_conductors.state_of(line) == ballet_conductors.FINISHED for line in registry.values()):
+        return
+    alive = ballet_maestro.live_terminals(orca)
+    for key, line in sorted(ballet_conductors.finished_open(registry, delay, alive).items()):
+        _attempt(report, key, lambda: _tell_finished(key, line, delay, orca, state, report))
+
+
+def _tell_finished(key, line, delay, orca, state, report):
+    url = f" Remote Control {line['url']}." if line.get("url") else ""
+    body = (f"The {line.get('kind')} Conductor of {key} finished at {line.get('seen')} and its terminal {line['terminal']} "
+            f"is still open after {delay} min.{url} Close it with: ballet_launch.py close {key}")
+    _send(f"{key} · finished", body, "normal", orca, state, report)
+    ballet_conductors.note_finished_told(key, line["terminal"], state)
 
 
 # --- la boîte ------------------------------------------------------------------

@@ -72,6 +72,8 @@ It prints `monitor created: terminal <handle>` or `monitor already there: …`. 
 
 Which items Maestro launches by itself is the Director's choice, per project, in `~/.ballet/maestro.toml`: `auto_launch = ["Task", "Bug"]` under `[projects.<alias>]` (nothing by default: Maestro asks every time). Offer to set it; edit the file only for a project and types the Director names, and only that line.
 
+A Conductor that finished stays open in its terminal until Maestro closes it: the Monitor reports it after `close_finished_after_minutes` under `[conductors]` in `~/.ballet/maestro.toml` (10 by default; 0 never closes one). Mention it; change it only on the Director's word.
+
 ## 6. Maestro itself
 
 ```sh

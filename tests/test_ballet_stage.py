@@ -82,7 +82,7 @@ class BalletStageTest(unittest.TestCase):
                       played=[{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}])
         project = ballet_stage.snapshot([self.home])["projects"][0]
         self.assertEqual(project["queue"]["sessions"], [{"item": "FEAT-004", "mode": "assisted", "current": "FEAT-004.1",
-                          "items": ["#35", "#36"], "played": [{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}]}])
+                          "items": ["#35", "#36"], "played": [{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}], "frictions": {}}])
         self.assertEqual(project["queue_titles"]["#35"], "FEAT-001.2 · Issue 35")
 
     def test_le_titre_de_l_issue_confiee_a_une_session_est_donne(self):
@@ -93,6 +93,16 @@ class BalletStageTest(unittest.TestCase):
     def test_une_session_finie_n_est_plus_ouverte(self):
         self._session(item="#12", status="done", items=[], current="", played=[{"item": "#12", "rehearsal": "FEAT-001.2"}])
         self.assertEqual(self._queue()["sessions"], [])
+
+    def test_une_session_finie_est_donnee_avec_les_frictions_de_ses_rehearsals(self):
+        frictions = {"FEAT-001.2": {"seconds": 2520, "frictions": [{"kind": "red_proofs", "count": 1, "text": "1 red proof"}]}}
+        self._session(item="#12", status="done", items=[], current="", played=[{"item": "#12", "rehearsal": "FEAT-001.2"}], frictions=frictions)
+        finished = self._queue()["finished_sessions"]
+        self.assertEqual([(session["item"], session["frictions"]) for session in finished], [("#12", frictions)])
+
+    def test_une_session_ouverte_n_est_pas_finie(self):
+        self._session(mode="assisted", items=["#35"], current="FEAT-004.1", played=[])
+        self.assertEqual(self._queue()["finished_sessions"], [])
 
     def test_une_session_en_pause_reste_ouverte(self):
         self._session(mode="assisted", items=["#35"], current="", played=[{"item": "#32", "rehearsal": "FEAT-004.1"}])

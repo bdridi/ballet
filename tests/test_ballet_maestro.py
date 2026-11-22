@@ -71,6 +71,15 @@ class BalletMaestroTest(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.orca = FakeOrca()
+        self.live = None            # ce que GitHub rend quand `ready` relit les bloqueurs ; None : injoignable
+        self.live_reads = []
+        live = mock.patch.object(ballet_maestro, "_live_ready", side_effect=self.read_live)
+        live.start()
+        self.addCleanup(live.stop)
+
+    def read_live(self, project_dir):
+        self.live_reads.append(project_dir)
+        return self.live
 
     def config(self):
         return tomllib.loads((self.state / "maestro.toml").read_text(encoding="utf-8"))
@@ -884,6 +893,57 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertIn("DECISION: launch", ballet_maestro.wait(owner, self.orca))
         self.seen_with_dependencies("antimurphy", 12, blocked_by=(3,))
         self.assertIn("DECISION: wait (blocked by #3, open)", ballet_maestro.wait(owner, self.orca))
+
+    def test_ready_relit_les_bloqueurs_sur_github_qu_un_done_vient_de_fermer(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"))
+        self.seen_with_dependencies("antimurphy", 7, blocked_by=(3,))
+        self.live = [{"number": 7, "blocked_by": [], "launchable": True, "doubt": ""}]
+        self.assertTrue(ballet_maestro.ready().endswith("DECISION: launch"))
+        self.assertEqual(len(self.live_reads), 1)
+
+    def test_ready_garde_la_vue_du_monitor_quand_github_ne_repond_pas(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"))
+        self.seen_with_dependencies("antimurphy", 7, blocked_by=(3,))
+        self.assertTrue(ballet_maestro.ready().endswith("DECISION: wait (blocked by #3, open)"))
+
+    def test_ready_ne_relit_rien_sans_element_bloque(self):
+        self.trust("antimurphy", "Task")
+        self.seen_ready("antimurphy", (7, "Task", "", "Libre"))
+        ballet_maestro.ready()
+        self.assertEqual(self.live_reads, [])
+
+    def finished_message(self, key="antimurphy#12", terminal="term_9"):
+        return {"type": "status", "subject": f"{key} · finished", "from": "term_monitor",
+                "body": f"The rehearsal Conductor of {key} finished at x and its terminal {terminal} is still open after 10 min. "
+                        f"Close it with: ballet_launch.py close {key}"}
+
+    def test_un_conductor_fini_signale_se_ferme_quand_rien_n_a_change(self):
+        owner = self.claimed()
+        ballet_conductors.record_launch("antimurphy#12", "antimurphy", "12", "rehearsal", "term_9")
+        ballet_conductors.note_events([{"type": "status", "from": "term_9", "subject": "antimurphy#12 · done"}])
+        self.orca.batches = [[self.finished_message()]]
+        self.assertIn("ballet_launch.py close antimurphy#12\nDECISION: close", ballet_maestro.wait(owner, self.orca))
+
+    def test_un_conductor_relance_depuis_n_est_pas_ferme_sans_le_director(self):
+        ballet_conductors.record_launch("antimurphy#12", "antimurphy", "12", "rehearsal", "term_9")
+        self.assertEqual(ballet_maestro.close_decision("antimurphy#12", "term_9"),
+                         "ask the Director (antimurphy#12 is running now, not finished)")
+        ballet_conductors.note_events([{"type": "status", "from": "term_4", "subject": "antimurphy#12 · done"}])
+        self.assertEqual(ballet_maestro.close_decision("antimurphy#12", "term_9"),
+                         "ask the Director (antimurphy#12 now runs in term_4, not term_9)")
+
+    def test_un_conductor_que_maestro_n_a_pas_lance_n_est_pas_ferme_sans_le_director(self):
+        ballet_conductors.note_events([{"type": "status", "from": "term_9", "subject": "antimurphy#12 · done"}])
+        self.assertTrue(ballet_maestro.close_decision("antimurphy#12", "term_9").startswith("ask the Director (Maestro did not launch"))
+
+    def test_le_delai_de_fermeture_est_un_entier_positif_ou_nul(self):
+        self.assertEqual(ballet_maestro.close_delay_minutes({}), 10)
+        self.assertEqual(ballet_maestro.close_delay_minutes({"conductors": {"close_finished_after_minutes": 0}}), 0)
+        for wrong in (-1, "10", True, 2.5):
+            with self.subTest(value=wrong), self.assertRaises(ballet_maestro.MaestroError):
+                ballet_maestro.close_delay_minutes({"conductors": {"close_finished_after_minutes": wrong}})
 
     def test_ready_ne_montre_pas_un_element_qu_un_conductor_joue(self):
         self.trust("antimurphy", "Task")

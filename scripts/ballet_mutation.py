@@ -41,6 +41,8 @@ SURVIVORS_IN_EVENT = 50   # les survivants au journal ; la liste entière est da
 OUTPUT_LINES = 60         # la fin de la sortie, quand le rapport ne dit rien des survivants
 MANUAL_DIR = Path(".ballet") / "run" / "manual"
 DEFAULT_PATHS = {"cargo-mutants": ["*.rs"]}   # sans `paths`, ce que le format de rapport sait muter
+NO_MUTANT_SIGNS = {"cargo-mutants": ("No mutants to filter", "No mutants found")}   # l'outil n'avait rien à muter
+NO_MUTANT = "no mutant in the diff"
 
 
 @dataclass
@@ -73,7 +75,7 @@ class Outcome:
     head: str
     log: str
     details: str
-    report: object            # le rapport normalisé (dict), ou "missing", ou "unreadable: …"
+    report: object            # le rapport normalisé (dict), ou "missing", "no mutant in the diff", "unreadable: …"
 
     def lists_survivors(self):
         return isinstance(self.report, dict) and bool(self.report["survivors"])
@@ -84,7 +86,7 @@ class Outcome:
         return isinstance(report, dict) and report["killed"] + report["survived"] == 0 and report["invalid"] > 0
 
     def report_status(self):
-        """`read` pour un rapport lu ; sinon sa raison (`missing`, `unreadable: …`)."""
+        """`read` pour un rapport lu ; sinon sa raison (`missing`, `no mutant in the diff`, `unreadable: …`)."""
         return "read" if isinstance(self.report, dict) else self.report
 
     def survivors_text(self):
@@ -151,6 +153,8 @@ def mutate(tool, scope, worktree, folder, label, timeout, head, run_command):
     exit_code, timed_out = run_command(expand(tool.command, diff_path, scope), worktree, timeout, log_path)
     seconds = round(time.monotonic() - started)
     report = read_report(report_path, tool.report_format)
+    if report == "missing" and exit_code == 0 and _said_no_mutant(log_path, tool.report_format):
+        report = NO_MUTANT
     _keep_native_report(report_path, folder / f"{label}-report{report_path.suffix}")
     outcome = Outcome(tool.name, exit_code == 0 and not timed_out, timed_out, exit_code, seconds, head,
                       str(log_path), str(details_path), report)
@@ -182,6 +186,13 @@ def read_report(path, report_format):
         return READERS[report_format](json.loads(Path(path).read_text(encoding="utf-8")))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
         return f"unreadable: {type(error).__name__}: {error}"
+
+
+def _said_no_mutant(log_path, report_format):
+    """Un outil vert qui n'écrit pas de rapport parce que le diff ne lui donnait rien à muter (que des tests, par
+    exemple) : il le dit dans sa sortie."""
+    log = "\n".join(_log_lines(log_path))
+    return any(sign in log for sign in NO_MUTANT_SIGNS.get(report_format, ()))
 
 
 def run_command_with_timeout(command, cwd, timeout, log_path):

@@ -10,7 +10,9 @@ Une ligne par `<projet>#<élément>`, écrite par deux voies : `ballet_launch.py
     started         la date du dernier lancement ; `starts`, celles des dernières 48 heures (le plafond du jour)
     seen, event     la date et le nom du dernier événement annoncé (`escalate`, `done`)
     state           `running` ; `finished` dès que le Conductor a annoncé `done` ; `gone` quand le Monitor a vu son
-                    terminal disparaître d'Orca alors qu'il tournait encore
+                    terminal disparaître d'Orca alors qu'il tournait encore ; `closed` quand Maestro a fermé le terminal
+                    d'un Conductor fini (`ballet_launch.py close`)
+    finished_told   vrai quand le Monitor a signalé à Maestro ce Conductor fini dont le terminal restait ouvert
 
 Une ligne écrite avant l'étape 3 (terminal, `seen`, `event`) reste lisible : ce qui manque se déduit.
 Toute écriture passe par un verrou, un fichier temporaire, puis un renommage.
@@ -23,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 import ballet_state
 
 CONDUCTORS_NAME = "conductors.json"
-RUNNING, FINISHED, GONE = "running", "finished", "gone"
+RUNNING, FINISHED, GONE, CLOSED = "running", "finished", "gone", "closed"
 DONE_EVENT = "done"
 CONDUCTOR_EVENTS = ("escalate", DONE_EVENT)   # ce que dit un Conductor ; `ready` et `gone` sont ceux du Monitor
 CONDUCTOR_SUBJECT = re.compile(r"^(\S+#\S+) · (.+)$")   # `<projet>#<élément> · <événement>`
@@ -87,6 +89,37 @@ def mark_gone(key, terminal, state=None):
         return True
 
 
+def finished_open(registry, delay_minutes, alive):
+    """Les Conductors lancés par Maestro, finis depuis plus de `delay_minutes`, dont le terminal vit encore et que le
+    Monitor n'a pas encore signalés : `<projet>#<élément>` → sa ligne."""
+    limit = datetime.now(timezone.utc) - timedelta(minutes=delay_minutes)
+    return {key: line for key, line in registry.items()
+            if state_of(line) == FINISHED and line.get("kind") and not line.get("finished_told")
+            and line.get("seen") and datetime.fromisoformat(line["seen"]) <= limit and line["terminal"] in alive}
+
+
+def note_finished_told(key, terminal, state=None):
+    """Le Monitor a signalé ce Conductor fini : il ne le refait pas. Une ligne qui a changé entre-temps n'est pas touchée."""
+    with ballet_state.locked(state):
+        registry = read(state)
+        line = registry.get(key)
+        if line and state_of(line) == FINISHED and line["terminal"] == terminal:
+            registry[key] = {**line, "finished_told": True}
+            _write(registry, state)
+
+
+def mark_closed(key, terminal, state=None):
+    """Maestro a fermé le terminal d'un Conductor fini : sa ligne passe à `closed`. Rend vrai quand elle a été marquée."""
+    with ballet_state.locked(state):
+        registry = read(state)
+        line = registry.get(key)
+        if not line or state_of(line) != FINISHED or line["terminal"] != terminal:
+            return False
+        registry[key] = {**line, "state": CLOSED, "seen": _now(), "event": CLOSED}
+        _write(registry, state)
+        return True
+
+
 def state_of(line):
     """`running` ou `finished` ; une ligne d'avant l'état se lit sur son dernier événement."""
     return line.get("state") or (FINISHED if line.get("event") == DONE_EVENT else RUNNING)
@@ -99,7 +132,7 @@ def launches_today(registry):
 
 
 def _seen(line, terminal, event):
-    return {**line, "terminal": terminal, "seen": _now(), "event": event,
+    return {**line, "terminal": terminal, "seen": _now(), "event": event, "finished_told": False,
             "state": FINISHED if event == DONE_EVENT else RUNNING}
 
 

@@ -121,6 +121,9 @@
   .phase.skip span, .phase.todo span { color:var(--muted); font-weight:500; }
 
   .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
+  .friction { padding:8px 0; border-top:1px solid var(--line); }
+  .friction:first-of-type { border-top:0; }
+  .friction .steps { margin:4px 0 0; }
   .metric { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; box-shadow:var(--shadow); }
   .metric small { color:var(--muted); font-size:12px; display:block; }
   .metric b { font-size:18px; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
@@ -301,7 +304,7 @@ function renderList(){
     const queue = project.queue || {sessions:[], program:[]};
     return `<div class="project">
       <div class="project-head"><h2>${esc(project.name)}</h2></div>
-      ${runningBlock(project, all, live, sessions(project, all))}${programBlock(project, queue.program || [])}${finishedBlock(project, past)}
+      ${runningBlock(project, all, live, sessions(project, all))}${programBlock(project, queue.program || [])}${finishedBlock(project, past, finishedSessions(project, all))}
     </div>`;
   }).join('');
 }
@@ -315,17 +318,30 @@ const playing = (all, id) => all.find(r => r.state.id === id || r.planning?.id =
 
 /* Les sessions de Conductor ouvertes d'un projet (il peut y en avoir plusieurs), chacune avec sa Rehearsal en cours. */
 function sessions(project, all){
-  return (project.queue?.sessions || []).map(session => {
-    const entries = sessionEntries(project, session, true), current = playing(all, session.current) || null;
-    const first = playing(all, session.played?.[0]?.rehearsal);
-    return {
-      key:`${project.name}/session:${session.item}`, project, session, entries, current, all,
-      title:cleanTitle(project.queue_titles?.[session.item]) || first?.title || '',
-      done:entries.filter(e => e.kind === 'played' && e.state?.status === 'done').length, total:entries.length,
-      status:current?.state.status === 'escalated' ? 'escalated' : 'open',
-    };
-  });
+  return (project.queue?.sessions || []).map(session => sessionView(project, session, all, false));
 }
+
+/* Les sessions finies : leurs Rehearsals jouées et leurs frictions restent à voir. */
+function finishedSessions(project, all){
+  return (project.queue?.finished_sessions || []).map(session => sessionView(project, session, all, true));
+}
+
+function sessionView(project, session, all, finished){
+  const entries = sessionEntries(project, session, true), current = finished ? null : playing(all, session.current) || null;
+  const first = playing(all, session.played?.[0]?.rehearsal);
+  return {
+    key:`${project.name}/session:${session.item}`, project, session, entries, current, all, finished,
+    title:cleanTitle(project.queue_titles?.[session.item]) || first?.title || '',
+    done:entries.filter(e => e.kind === 'played' && e.state?.status === 'done').length, total:entries.length,
+    status:finished ? 'done' : current?.state.status === 'escalated' ? 'escalated' : 'open',
+  };
+}
+
+const allSessions = (project, all) => [...sessions(project, all), ...finishedSessions(project, all)];
+
+/* Les frictions d'une Rehearsal finie, gardées dans son état. */
+const frictionsOf = r => r?.state.frictions?.frictions || [];
+const frictionCount = n => n ? `${n} friction${n > 1 ? 's' : ''}` : 'aucune friction';
 
 const link = key => '#' + encodeURIComponent(key);
 
@@ -347,10 +363,14 @@ function runningBlock(project, all, live, running){
 
 function sessionCard(v){
   const s = v.session, inside = v.entries.some(e => playing(v.all, e.id)?.key === picked);
+  const frictions = v.entries.reduce((sum, e) => sum + frictionsOf(playing(v.all, e.id)).length, 0);
+  const meta = v.finished
+    ? `<span>${v.done} Rehearsal${v.done > 1 ? 's' : ''}</span><span>${frictionCount(frictions)}</span>`
+    : `<span>${v.done} / ${v.total} slices jouées</span>${v.current?.current ? role(v.current.current) : ''}<span>${esc(ago(v.current?.last))}</span>`;
   return `<a href="${link(v.key)}" class="card-link ${v.key === picked || inside ? 'picked' : ''}">
     <div class="card-row"><b>${esc(s.item)}</b>${modeTag(s.mode)}<span style="margin-left:auto">${pill(v.status)}</span></div>
     <div class="card-title">${esc(v.title)}</div>
-    <div class="card-meta"><span>${v.done} / ${v.total} slices jouées</span>${v.current?.current ? role(v.current.current) : ''}<span>${esc(ago(v.current?.last))}</span></div>
+    <div class="card-meta">${meta}</div>
   </a>`;
 }
 
@@ -371,8 +391,11 @@ function programBlock(project, program){
   return sideBlock(project, 'program', 'Programme', program.length, error + (rows || empty));
 }
 
-function finishedBlock(project, past){
-  return sideBlock(project, 'finished', 'Terminées', past.length, past.map(card).join('') || '<p class="side-empty">Aucune Rehearsal terminée.</p>');
+function finishedBlock(project, past, finished){
+  const sessionCards = finished.length ? `<div class="group-label">Sessions</div>${finished.map(sessionCard).join('')}` : '';
+  const rehearsalCards = past.length ? `${finished.length ? '<div class="group-label">Rehearsals</div>' : ''}${past.map(card).join('')}` : '';
+  return sideBlock(project, 'finished', 'Terminées', finished.length + past.length,
+    sessionCards + rehearsalCards || '<p class="side-empty">Aucune Rehearsal terminée.</p>');
 }
 
 function card(r){
@@ -380,7 +403,7 @@ function card(r){
   return `<a href="#${esc(r.key)}" class="card-link ${r.key === picked ? 'picked' : ''}">
     <div class="card-row"><b>${esc(s.id)}</b>${pill(s.status)}${r.current ? `<span style="margin-left:auto">${role(r.current)}</span>` : ''}</div>
     <div class="card-title">${esc(r.title || (s.issue ? '#' + s.issue : ''))}</div>
-    <div class="card-meta">${s.issue ? `<span>#${esc(s.issue)}</span>` : ''}${s.pull_request ? `<span>PR #${esc(s.pull_request)}</span>` : ''}<span>${esc(ago(r.last))}</span></div>
+    <div class="card-meta">${s.issue ? `<span>#${esc(s.issue)}</span>` : ''}${s.pull_request ? `<span>PR #${esc(s.pull_request)}</span>` : ''}${s.frictions?.frictions ? `<span>${frictionCount(frictionsOf(r).length)}</span>` : ''}<span>${esc(ago(r.last))}</span></div>
   </a>`;
 }
 
@@ -388,13 +411,13 @@ function card(r){
 
 function renderDetail(){
   const projects = data.projects, r = projects.flatMap(rehearsals).find(r => r.key === picked);
-  const v = r ? null : projects.flatMap(p => sessions(p, rehearsals(p))).find(v => v.key === picked);
+  const v = r ? null : projects.flatMap(p => allSessions(p, rehearsals(p))).find(v => v.key === picked);
   const box = $('#detail');
   if (!r && !v){ box.innerHTML = '<p class="empty">Choisis une Rehearsal.</p>'; return; }
   /* Ce qu'on ouvre se lit d'en haut ; en bas du fil, on suit ce qui arrive. */
   const key = (r || v).key, fresh = shown !== key, atBottom = box.scrollTop > 0 && box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   const scroll = box.scrollTop;
-  box.innerHTML = `<div class="wrap">${r ? `${hero(r)}${callout(r)}${stepper(r)}${metrics(r)}${cast(r)}${queueBlock(r)}${thread(r)}` : sessionPage(v)}</div>`;
+  box.innerHTML = `<div class="wrap">${r ? `${hero(r)}${callout(r)}${stepper(r)}${metrics(r)}${frictionsBlock([r])}${cast(r)}${queueBlock(r)}${thread(r)}` : sessionPage(v)}</div>`;
   box.scrollTop = fresh ? 0 : atBottom ? box.scrollHeight : scroll;
   shown = key;
 }
@@ -402,9 +425,11 @@ function renderDetail(){
 /* Une session : où elle en est, ses Rehearsals dans l'ordre, ce que doit faire le Director si elle est arrêtée. */
 function sessionPage(v){
   const s = v.session, cur = v.current, rs = v.entries.map(e => playing(v.all, e.id)).filter(Boolean);
-  const events = rs.flatMap(r => r.events), first = events.map(e => e.at).sort()[0] || '';
+  const events = rs.flatMap(r => r.events), stamps = events.map(e => e.at).sort(), first = stamps[0] || '';
+  const end = v.finished ? stamps[stamps.length - 1] : new Date().toISOString();
   const trips = rs.reduce((sum, r) => sum + (r.state.round_trips || 0), 0), escalations = events.filter(e => e.event === 'escalate').length;
-  const bits = [pill(v.status), modeTag(s.mode), cur?.current ? `en main : ${role(cur.current)}` : '', cur ? `joue ${esc(cur.state.id)}` : 'aucune Rehearsal en cours'].filter(Boolean);
+  const playingNow = v.finished ? '' : cur ? `joue ${esc(cur.state.id)}` : 'aucune Rehearsal en cours';
+  const bits = [pill(v.status), modeTag(s.mode), cur?.current ? `en main : ${role(cur.current)}` : '', playingNow].filter(Boolean);
   return `<div class="hero"><h1><span class="id">Session ${esc(s.item)}</span>${esc(v.title)}</h1><div class="hero-line">${bits.join('<span class="sep">·</span>')}</div></div>
     ${cur ? callout(cur) + stepper(cur) : ''}
     <div class="grid">
@@ -412,9 +437,9 @@ function sessionPage(v){
       <div class="metric"><small>À venir</small><b>${(s.items || []).length}</b></div>
       <div class="metric"><small>Allers-retours Dancer ↔ Critic</small><b>${trips}</b></div>
       <div class="metric"><small>Escalades</small><b>${escalations}</b></div>
-      <div class="metric"><small>Durée</small><b>${first ? span(first, new Date().toISOString()) : '—'}</b></div>
+      <div class="metric"><small>Durée</small><b>${first ? span(first, end) : '—'}</b></div>
     </div>
-    ${sessionList(v)}`;
+    ${frictionsBlock(rs)}${sessionList(v)}`;
 }
 
 function hero(r){
@@ -467,6 +492,21 @@ function metrics(r){
   </div>`;
 }
 
+/* Les frictions des Rehearsals finies : ce qui a coincé, coûté un tour de plus ou tourné en rond (calculées par le script). */
+function frictionsBlock(rs){
+  const ended = rs.filter(r => r.state.frictions?.frictions);
+  if (!ended.length) return '';
+  const rows = ended.map(r => {
+    const record = r.state.frictions, list = record.frictions;
+    const body = list.length ? `<ul class="steps">${list.map(f => `<li>${esc(f.text)}</li>`).join('')}</ul>` : '<span class="muted">aucune</span>';
+    return `<div class="friction"><div class="card-row"><b class="mono">${esc(r.state.id)}</b><span class="muted">${minutes(record.seconds || 0)}</span>
+      <span style="margin-left:auto" class="badge ${list.length ? 'warn' : 'ok'}">${frictionCount(list.length)}</span></div>${list.length ? body : ''}</div>`;
+  }).join('');
+  return `<div class="block"><h3>Frictions</h3>${rows}</div>`;
+}
+
+const minutes = seconds => span(0, seconds * 1000);
+
 function cast(r){
   const cast = r.project.cast || {}, dispatches = r.state.dispatches || {};
   return `<div class="block"><h3>Distribution</h3><div class="cast">${ROLES.map(name => `
@@ -476,7 +516,7 @@ function cast(r){
 }
 
 function queueBlock(r){
-  const v = sessions(r.project, rehearsals(r.project)).find(v => v.entries.some(e => playing(v.all, e.id)?.key === r.key));
+  const v = allSessions(r.project, rehearsals(r.project)).find(v => v.entries.some(e => playing(v.all, e.id)?.key === r.key));
   return v ? sessionList(v, true) : '';
 }
 
@@ -526,6 +566,8 @@ function event(e, key){
     case 'begin': return line(e, '', `<b>Ouverture</b>${d.item ? ` de ${esc(d.item)}` : ''}${d.plan ? ` · plan ${esc(d.plan)}` : ''}`);
     case 'wait': case 'escalate': case 'done': return step(e, d, key);
     case 'diff-size': return line(e, d.over ? 'escalate' : '', `<b>Diff</b> : ${esc(d.counted)} lignes sur ${esc(d.limit)}${d.excluded ? `, ${esc(d.excluded)} exclues` : ''}${d.over ? ' · au-dessus' : ''}`);
+    case 'frictions': return line(e, (d.frictions || []).length ? 'escalate' : '', `<b>Frictions</b> : ${(d.frictions || []).length
+      ? `<ul class="steps">${d.frictions.map(f => `<li>${esc(f.text)}</li>`).join('')}</ul>` : 'aucune'}`);
     case 'policy': return line(e, d.violations?.length ? 'bad' : '', `<b>Politique</b> · ${role(d.role)} ${d.violations?.length
       ? `: ${d.violations.length} violation(s)<ul class="steps">${d.violations.map(v => `<li>${esc(v)}</li>`).join('')}</ul>` : 'en règle'}`);
     default: return line(e, '', `<b>${esc(e.event)}</b>`, text(JSON.stringify(d, null, 2), key, 0));
@@ -600,7 +642,7 @@ async function poll(){
     $('#live-text').textContent = 'en direct · ' + new Date().toLocaleTimeString('fr-FR');
     if (!answer.unchanged){
       version = answer.version; data = answer;
-      const keys = data.projects.flatMap(p => [...rehearsals(p).map(r => r.key), ...sessions(p, rehearsals(p)).map(v => v.key)]);
+      const keys = data.projects.flatMap(p => [...rehearsals(p).map(r => r.key), ...allSessions(p, rehearsals(p)).map(v => v.key)]);
       if (!keys.includes(picked)){
         const first = data.projects.flatMap(p => sessions(p, rehearsals(p)))[0] || data.projects.flatMap(rehearsals)[0];
         picked = first ? first.key : '';

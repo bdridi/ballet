@@ -2,6 +2,7 @@
 
     python3 ballet_launch.py rehearsal <projet> <élément> [--ignore-blockers]   # `#12`, `12` ou `FEAT-002`
     python3 ballet_launch.py workshop <projet> [<élément>]      # un Workshop autopilot : `BUG-004`, ou la première ligne de *Next up*
+    python3 ballet_launch.py close <projet>#<élément>            # ferme le terminal d'un Conductor fini
 
 Maestro seul l'appelle (sur la demande du Director, ou quand sa règle `auto_launch` le décide pour un élément que le Monitor
 a vu passer `ready`) : c'est le seul lanceur de Ballet.
@@ -23,6 +24,11 @@ de la table `[limits]` de `maestro.toml` (`max_running`, `max_per_day`).
 
 Le lancement écrit sa ligne dans le registre (`ballet_conductors.py`) : projet, élément, genre, terminal, début. L'URL
 Remote Control de la session s'y ajoute si on la lit dans le terminal dans les secondes qui suivent ; sinon elle reste vide.
+
+`close` est l'envers du lancement : Maestro l'appelle sur `DECISION: close`, quand le Monitor a signalé un Conductor fini
+resté ouvert (`· finished`). Il ne ferme qu'un Conductor `finished` que Maestro a lancé : `orca terminal close` arrête
+`claude` et son Remote Control (la conversation reste reprenable par `claude --resume`), et la ligne passe à `closed`.
+Un terminal déjà fermé est noté `closed` sans rien fermer.
 """
 
 import json
@@ -51,7 +57,7 @@ LAUNCH_LOCK = "launch.lock"
 REMOTE_CONTROL_URL = re.compile(r"https://claude\.ai/code/\S+")
 URL_WAIT_SECONDS = 8
 URL_POLL_SECONDS = 1
-USAGE = "usage: rehearsal <project> <item> [--ignore-blockers] | workshop <project> [<item>]"
+USAGE = "usage: rehearsal <project> <item> [--ignore-blockers] | workshop <project> [<item>] | close <project>#<item>"
 
 
 class LaunchError(Exception):
@@ -107,6 +113,31 @@ def _launch(launch, orca, state, url_wait):
         if url:
             ballet_conductors.note_url(launch.key, url, state)
     return _report(launch, terminal, url)
+
+
+def close_conductor(key, orca, state=None):
+    """Ferme le terminal d'un Conductor fini que Maestro a lancé, et passe sa ligne à `closed`."""
+    with ballet_state.locked(state, LAUNCH_LOCK):
+        line = _closable(key, state)
+        if line["terminal"] not in ballet_maestro.live_terminals(orca):
+            ballet_conductors.mark_closed(key, line["terminal"], state)
+            return f"the terminal {line['terminal']} of {key} was already closed: marked closed"
+        orca(["terminal", "close", "--terminal", line["terminal"], "--json"])
+        ballet_conductors.mark_closed(key, line["terminal"], state)
+    return f"closed the {line['kind']} Conductor of {key}: terminal {line['terminal']} (its session stays resumable with claude --resume)"
+
+
+def _closable(key, state):
+    """La ligne du registre, si ce Conductor peut être fermé : fini, et lancé par Maestro."""
+    line = ballet_conductors.read(state).get(key)
+    if not line:
+        raise LaunchError(f"no Conductor {key} in the registry")
+    current = ballet_conductors.state_of(line)
+    if current != ballet_conductors.FINISHED:
+        raise LaunchError(f"the Conductor of {key} is {current}: only a finished Conductor is closed")
+    if not line.get("kind"):
+        raise LaunchError(f"Maestro did not launch the Conductor of {key}: its terminal {line['terminal']} is the Director's to close")
+    return line
 
 
 # --- les garde-fous --------------------------------------------------------------
@@ -288,6 +319,8 @@ def _command(arguments, orca):
         raise UsageError(USAGE)
     if arguments[:1] == ["workshop"] and len(arguments) in (2, 3):
         return launch_workshop(arguments[1], arguments[2] if len(arguments) == 3 else "", orca)
+    if arguments[:1] == ["close"] and len(arguments) == 2 and "#" in arguments[1]:
+        return close_conductor(arguments[1], orca)
     raise UsageError(USAGE)
 
 

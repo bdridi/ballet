@@ -104,6 +104,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import ballet_config
+import ballet_frictions
 import ballet_github
 import ballet_maestro
 import ballet_mutation
@@ -187,6 +188,7 @@ class Rehearsal:
     renamed_tests: dict = field(default_factory=dict)  # les tests renommés que le Dancer déclare : ancien nom → nouveau
     refused_reports: int = 0                         # rapports du Dancer refusés pour une ligne `Red:` manquante
     received: list = field(default_factory=list)     # les ids des messages Orca déjà traités : `receive --run` ne les rejoue pas
+    frictions: dict = field(default_factory=dict)    # à sa fin : {seconds, frictions} (`ballet_frictions`), aussi au journal
 
     @property
     def branch(self):
@@ -207,6 +209,7 @@ class Session:
     ballet_status: str = ""                         # le dernier Ballet status connu de l'issue
     plan_approval: bool = False                     # le plan attend le Director avant le Dancer
     plan_approval_from: str = ""                    # d'où vient ce choix : issue, project ou autopilot
+    frictions: dict = field(default_factory=dict)   # à sa fin : Rehearsal jouée → ses frictions
 
     @property
     def plan(self):
@@ -464,8 +467,9 @@ def _play_next(session_item, step, home, tools):
     session.current = ""
     if not session.items:
         session.status = "done"
+        session.frictions = _frictions_of_played(session, home)
         _save_session(session, home)
-        return Step(step.next, step.reason, step.done + [_session_done_line(session)])
+        return Step(step.next, step.reason, step.done + [_session_done_line(session), *_friction_lines(session)])
     item = session.items.pop(0)
     _save_session(session, home)
     try:
@@ -575,6 +579,30 @@ def _session_lines(session, current):
     if session.played:
         lines.append("played: " + ", ".join(f"{entry['rehearsal']} ({entry['item']})" for entry in session.played))
     return lines
+
+
+def _record_frictions(rehearsal, home):
+    """À la fin de la Rehearsal, ses frictions : dans son état et au journal, pour la Scène et le `done` de la session."""
+    rehearsal.frictions = ballet_frictions.of_rehearsal(asdict(rehearsal), _journal_of(rehearsal.id, home))
+    _save(rehearsal, home)
+    _log(home, rehearsal, "frictions", rehearsal.frictions)
+
+
+def _frictions_of_played(session, home):
+    played = [entry["rehearsal"] for entry in session.played]
+    return {rehearsal_id: load(rehearsal_id, home).frictions for rehearsal_id in played if _state_path(rehearsal_id, home).is_file()}
+
+
+def _friction_lines(session):
+    return [ballet_frictions.line(rehearsal_id, record) for rehearsal_id, record in session.frictions.items()]
+
+
+def _journal_of(rehearsal_id, home):
+    path = _run_dir(home) / "journal.jsonl"
+    if not path.is_file():
+        return []
+    entries = (json.loads(text) for text in path.read_text(encoding="utf-8").splitlines() if text.strip())
+    return [entry for entry in entries if entry.get("rehearsal") == rehearsal_id]
 
 
 def _session_done_line(session):
@@ -1566,6 +1594,7 @@ def _settle(rehearsal, step, home, tools):
     _save(rehearsal, home)
     _log(home, rehearsal, step.next, {"reason": step.reason, "done": step.done})
     if step.next == "done":
+        _record_frictions(rehearsal, home)
         step = _after_premiere(rehearsal, step, home, tools)
     return _follow_on_github(rehearsal.session, step, home, tools)
 

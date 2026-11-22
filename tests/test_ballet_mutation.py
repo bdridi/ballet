@@ -168,6 +168,14 @@ class RunToolsTest(unittest.TestCase):
         self.assertEqual((self.folder / "mutation-1-cargo-mutants-report.json").read_text(), native)
         self.assertEqual(json.loads(Path(outcome.details).read_text())["report"]["survived"], 7)
 
+    def test_un_outil_vert_sans_mutant_dans_le_diff_n_a_pas_de_rapport_manquant(self):
+        outcome = self.run_tools(tool("echo ' INFO No mutants to filter'"))[0]
+        self.assertEqual((outcome.passed, outcome.report), (True, "no mutant in the diff"))
+
+    def test_un_outil_rouge_sans_rapport_reste_un_rapport_manquant(self):
+        outcome = self.run_tools(tool("echo 'No mutants to filter'; exit 2"))[0]
+        self.assertEqual(outcome.report, "missing")
+
     def test_mutation_end_porte_statut_duree_head_et_rapport(self):
         self.run_tools(tool("exit 0"))
         end = self.events[1][1]

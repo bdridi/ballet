@@ -393,6 +393,45 @@ class BalletLaunchTest(unittest.TestCase):
 
     # --- status et tell ---
 
+    # --- close ---
+
+    def finished(self, item="#12"):
+        self.rehearsal(item)
+        terminal = ballet_conductors.read()[f"antimurphy#{item.lstrip('#')}"]["terminal"]
+        ballet_conductors.note_events([{"type": "status", "from": terminal, "subject": f"antimurphy#{item.lstrip('#')} · done"}])
+        return terminal
+
+    def test_close_ferme_le_terminal_d_un_conductor_fini_et_le_note_closed(self):
+        terminal = self.finished()
+        report = ballet_launch.close_conductor("antimurphy#12", self.orca)
+        self.assertIn(f"closed the rehearsal Conductor of antimurphy#12: terminal {terminal}", report)
+        self.assertEqual(self.orca.ran("terminal", "close"), [["terminal", "close", "--terminal", terminal, "--json"]])
+        self.assertEqual(ballet_conductors.state_of(ballet_conductors.read()["antimurphy#12"]), ballet_conductors.CLOSED)
+
+    def test_close_refuse_un_conductor_qui_tourne(self):
+        self.rehearsal("#12")
+        with self.assertRaisesRegex(ballet_launch.LaunchError, "is running: only a finished Conductor is closed"):
+            ballet_launch.close_conductor("antimurphy#12", self.orca)
+        self.assertEqual(self.orca.ran("terminal", "close"), [])
+
+    def test_close_refuse_un_conductor_que_maestro_n_a_pas_lance(self):
+        ballet_conductors.note_events([{"type": "status", "from": "term_5", "subject": "antimurphy#12 · done"}])
+        with self.assertRaisesRegex(ballet_launch.LaunchError, "is the Director's to close"):
+            ballet_launch.close_conductor("antimurphy#12", self.orca)
+
+    def test_close_d_un_terminal_deja_ferme_le_note_sans_rien_fermer(self):
+        terminal = self.finished()
+        self.orca.terminals.remove(terminal)
+        self.assertIn("was already closed: marked closed", ballet_launch.close_conductor("antimurphy#12", self.orca))
+        self.assertEqual(self.orca.ran("terminal", "close"), [])
+
+    def test_close_en_ligne_de_commande(self):
+        self.finished()
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(ballet_launch.main(["x", "close", "antimurphy#12"], orca=self.orca), 0)
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(ballet_launch.main(["x", "close", "antimurphy"], orca=self.orca), 2)
+
     def test_status_montre_les_conductors_lances_avec_l_etat_de_leur_terminal(self):
         self.orca.screen = URL
         self.rehearsal("#12")
@@ -400,7 +439,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.orca.terminals.remove("term_2")
         lines = ballet_maestro.status(self.orca).splitlines()
         self.assertEqual(lines[0], "no open session in any project")
-        self.assertEqual(lines[2], "Conductors:")
+        self.assertEqual(lines[2], "Conductors (finished ones closed after 10 min):")
         self.assertEqual(lines[3], f"antimurphy#12  rehearsal  running  term_1 (alive)  no event yet  {URL}")
         self.assertEqual(lines[4], "antimurphy#13  rehearsal  running  term_2 (gone)  no event yet  " + URL)
 
