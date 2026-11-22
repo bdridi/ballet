@@ -58,6 +58,7 @@ class FakeWorld:
         self.issue_state = "OPEN"
         self.numstat = "10\t2\tsrc/a.rs\n"
         self.inbox = []
+        self.run_batch = []         # les messages en attente du Run du Conductor, consommés par `check --run`
         self.branch = "rehearsal/FEAT-001.2"
         self.head = "c0ffee1"
         self.dirty = ""
@@ -92,6 +93,9 @@ class FakeWorld:
             return self.policy_git(arguments[2:])
         if arguments[:2] == ["orchestration", "inbox"]:
             return json.dumps({"ok": True, "result": {"messages": self.inbox}})
+        if arguments[:2] == ["orchestration", "check"]:
+            batch, self.run_batch = self.run_batch, []
+            return json.dumps({"ok": True, "result": {"messages": batch}})
         if arguments[:2] == ["orchestration", "worker-show"]:
             return json.dumps({"ok": True, "result": {"dispatchId": arguments[3], "runId": "run_conductor"}})
         if arguments[:2] == ["orchestration", "worker-start"]:
@@ -557,6 +561,22 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         if report is not None:
             self.native_report.write_text(report, encoding="utf-8")
         return exit_code, timed_out
+
+    def test_le_reveil_de_mutation_se_lit_aussi_par_le_run(self):
+        self.mutation_profile()
+        self.tools.launch = self.launches_without_wake
+        self.mutated_report()
+        ballet_rehearsal.mutate("FEAT-001.2", self.home, self.tools)
+        wake = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertIn("receive FEAT-001.2 --run run_conductor", wake[wake.index("--body") + 1])
+        payload = json.dumps({"ballet": "mutation", "rehearsal": "FEAT-001.2", "round": 1})
+        self.world.run_batch = [{"id": "msg_mutation", "type": "status", "subject": "FEAT-001.2 · mutation done", "payload": payload}]
+        step = ballet_rehearsal.receive_from_run("FEAT-001.2", "run_conductor", self.home, self.tools)
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        self.assertEqual(step.next, "wait")
+
+    def launches_without_wake(self, argv, cwd):
+        self.launches.append((argv, cwd))
 
     def wake(self, round_=1, message_id="msg_mutation"):
         """Le réveil envoyé par la mutation, reçu comme tout message Orca."""
@@ -1312,6 +1332,80 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.orca_message("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."))
         code, lines = self.run_main("receive", "FEAT-001.2", "--message", "msg_1")
         self.assertEqual((code, lines[-1]), (0, "NEXT: wait"))
+
+    # --- le réveil qui ne nomme que le Run (Orca « current delivery ») ---
+
+    def from_worker(self, message_id, kind, body, dispatch="ctx_1"):
+        return {"id": message_id, "type": kind, "subject": "s", "body": body, "payload": json.dumps({"dispatchId": dispatch})}
+
+    def receive_run(self):
+        return ballet_rehearsal.receive_from_run("FEAT-001.2", "run_conductor", self.home, self.tools)
+
+    def test_un_reveil_par_le_run_consomme_la_boite_et_traite_le_rapport_du_dancer(self):
+        self.begin()
+        self.world.run_batch = [self.from_worker("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."))]
+        code, lines = self.run_main("receive", "FEAT-001.2", "--run", "run_conductor")
+        self.assertEqual((code, lines[-1]), (0, "NEXT: wait"))
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+        self.assertEqual(self.world.ran("orca", "orchestration", "check"), [["orca", "orchestration", "check", "--run", "run_conductor", "--json"]])
+        self.assertEqual(self.state()["received"], ["msg_1"])
+
+    def test_une_question_lue_par_le_run_garde_son_id_pour_la_reponse(self):
+        self.begin()
+        self.world.run_batch = [self.from_worker("msg_q", "question", message("dancer", "choreographer", "question", "1. A?"))]
+        self.receive_run()
+        self.receive(message("choreographer", "dancer", "answer", "1. B."))
+        reply = self.world.ran("orca", "orchestration", "reply")[0]
+        self.assertEqual(reply[reply.index("--id") + 1], "msg_q")
+
+    def test_le_run_ignore_les_messages_d_un_autre_worker_et_ceux_deja_traites(self):
+        self.begin()
+        self.world.inbox.append(self.from_worker("msg_seen", "question", message("dancer", "choreographer", "question", "1. A?")))
+        ballet_rehearsal.receive_from_orca("FEAT-001.2", "msg_seen", self.home, self.tools)
+        self.world.run_batch = [self.world.inbox[0], self.from_worker("msg_old", "worker_done", "{}", dispatch="ctx_9")]
+        commands = len(self.world.commands)
+        step = self.receive_run()
+        self.assertEqual(step.done, ["no new message for FEAT-001.2 in Orca run run_conductor (2 ignored)"])
+        self.assertEqual(self.world.commands[commands:], [["orca", "orchestration", "check", "--run", "run_conductor", "--json"]])
+
+    def test_un_run_vide_ne_change_rien(self):
+        self.begin()
+        before = self.state()
+        step = self.receive_run()
+        self.assertEqual((step.next, step.done), ("wait", ["no new message for FEAT-001.2 in Orca run run_conductor"]))
+        self.assertEqual(self.state(), before)
+
+    def test_le_run_traite_ses_messages_dans_l_ordre(self):
+        self.begin()
+        stopped = {"id": "msg_stop", "type": "escalation", "subject": "Worker stopped without reporting", "body": "exited",
+                   "payload": json.dumps({"dispatchId": "ctx_1", "stopReason": "finished"})}
+        self.world.run_batch = [stopped, self.from_worker("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."))]
+        step = self.receive_run()
+        self.assertEqual(step.next, "wait")
+        self.assertIn("the dancer ended its turn without worker_done: asked to send its report", step.done)
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+        self.assertEqual(self.state()["received"], ["msg_stop", "msg_1"])
+
+    def test_le_run_s_arrete_au_premier_pas_qui_n_est_pas_wait_et_dit_ce_qui_reste(self):
+        self.begin()
+        self.world.run_batch = [self.from_worker("msg_bad", "worker_done", "not a message"),
+                                self.from_worker("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."))]
+        step = self.receive_run()
+        self.assertTrue(step.reason.startswith("invalid message, send it back to its author"))
+        self.assertIn("not processed after this step, still to receive: receive FEAT-001.2 --message msg_1", step.done)
+        self.assertFalse(self.world.ran("gh", "pr", "create"))
+        self.assertEqual(self.state()["received"], ["msg_bad"])
+
+    def test_aide_et_option_inconnue_sont_un_mauvais_usage_sans_rien_toucher(self):
+        self.begin()
+        before, commands = self.state(), len(self.world.commands)
+        for arguments in (("--help",), ("-h",), ("receive", "--help"), ("receive", "FEAT-001.2", "-h"),
+                          ("receive", "FEAT-001.2", "--bogus", "x"), ("status", "--help"), ("begin", "--help")):
+            with self.subTest(arguments=arguments):
+                code, lines = self.run_main(*arguments)
+                self.assertEqual((code, lines), (2, []))
+        self.assertEqual(self.state(), before)
+        self.assertEqual(len(self.world.commands), commands)
 
     # --- ligne de commande ---
 

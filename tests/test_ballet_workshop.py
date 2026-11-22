@@ -41,6 +41,7 @@ class FakeWorld:
         self.commands = []
         self.dispatches = 0
         self.inbox = []
+        self.run_batch = []                     # les messages en attente du Run du Conductor, consommés par `check --run`
         self.branch = "workshop/BUG-004"
         self.new_commits = ["abc1234"]          # ce que le Dramaturg a commité
         self.changed = ["specs/backlog.md"]     # les fichiers de ses commits
@@ -134,6 +135,9 @@ class FakeWorld:
     def orca(self, arguments):
         if arguments[:2] == ["orchestration", "inbox"]:
             return json.dumps({"ok": True, "result": {"messages": self.inbox}})
+        if arguments[:2] == ["orchestration", "check"]:
+            batch, self.run_batch = self.run_batch, []
+            return json.dumps({"ok": True, "result": {"messages": batch}})
         if arguments[:2] == ["orchestration", "worker-start"]:
             self.dispatches += 1
             return json.dumps({"ok": True, "result": {"worker": {"dispatchId": f"ctx_{self.dispatches}"}}})
@@ -876,6 +880,36 @@ class BalletWorkshopTest(unittest.TestCase):
         with redirect_stdout(out), redirect_stderr(err):
             code = ballet_workshop.main(["ballet_workshop.py", *argv], home=self.home, tools=self.tools)
         return code, out.getvalue(), err.getvalue()
+
+    def test_un_reveil_par_le_run_traite_le_rapport_du_dramaturg(self):
+        self.begin()
+        self.world.run_batch = [{"id": "msg_1", "type": "worker_done", "body": report(), "payload": {"dispatchId": "ctx_1"}}]
+        code, out, _ = self.run_main("receive", "BUG-004", "--run", "run_conductor")
+        self.assertEqual(code, 0)
+        self.assertIn("NEXT: done", out)
+        self.assertEqual(self.world.ran("orca", "orchestration", "check"), [["orca", "orchestration", "check", "--run", "run_conductor", "--json"]])
+
+    def test_le_run_ignore_les_messages_d_un_autre_worker_et_ceux_deja_traites(self):
+        self.begin()
+        self.receive("worker_done", message("question", "1. Which name?", to="choreographer"))
+        seen = self.world.inbox[0]
+        self.world.run_batch = [seen, {"id": "msg_old", "type": "worker_done", "body": "{}", "payload": {"dispatchId": "ctx_9"}}]
+        step = ballet_workshop.receive_from_run("BUG-004", "run_conductor", self.home, self.tools)
+        self.assertEqual(step.done, ["no new message for Workshop BUG-004 in Orca run run_conductor (2 ignored)"])
+
+    def test_aide_et_option_inconnue_sont_un_mauvais_usage_sans_rien_toucher(self):
+        self.begin()
+        before, commands = self.state(), len(self.world.commands)
+        for arguments in (("--help",), ("-h",), ("receive", "--help"), ("receive", "BUG-004", "-h"), ("receive", "--bogus", "x")):
+            with self.subTest(arguments=arguments):
+                code, out, _ = self.run_main(*arguments)
+                self.assertEqual((code, out), (2, ""))
+        self.assertEqual(self.state(), before)
+        self.assertEqual(len(self.world.commands), commands)
+
+    def test_une_demande_qui_commence_par_un_tiret_n_est_pas_une_option(self):
+        code, _, _ = self.run_main("begin", "--request", "-- fix the login")
+        self.assertEqual(code, 0)
 
     def test_la_ligne_de_commande_ouvre_la_session_et_l_affiche(self):
         code, out, _ = self.run_main("begin", "BUG-004")

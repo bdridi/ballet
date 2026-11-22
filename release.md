@@ -2,6 +2,19 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
 
+## 0.37.0 — 2026-11-22 · `v0.37.0`
+
+Le Conductor suit le réveil d'Orca qui ne nomme que le Run, et un mauvais appel n'escalade plus. OPP-76 ✅.
+
+- **`receive [<ID>] --run <run_id>`**, dans `ballet_rehearsal.py` et `ballet_workshop.py` : depuis le 21/11, Orca 1.4.259 ne réveille plus le Conductor qu'avec `Run orca orchestration check --run <run>`, sans id de message ni de dispatch (FEAT-007 et FEAT-008 sur antimurphy). Le script consomme le lot en attente par `orchestration check --run <run> --json` (`ballet_orca.run_messages`), depuis le terminal du Conductor ; Orca le marque lu, sans acquittement. Il ne garde que les messages des workers de la Rehearsal (ou du Workshop) et le réveil de sa mutation, les traite dans l'ordre, chacun exactement comme par `--message`, et s'arrête au premier pas qui n'est pas `NEXT: wait` : ce qui reste est listé en lignes `receive <ID> --message <msg_…>`. Rien de neuf : l'état ne bouge pas et le pas le dit (`no new message for <ID> in Orca run <run>`).
+- **Un message n'est jamais traité deux fois** par `--run` : l'état garde `received`, les ids des messages Orca traités, rempli par `--message`, `--dispatch` et `--run`, même quand le message escalade. Le premier `check` d'un Run ancien rend tout l'arriéré non lu (Ballet lisait par `inbox` sans consommer) : il est ignoré.
+- **Le réveil de mutation** se lit par ce chemin aussi, et son corps dit `receive <ID> --run <run>`. `--message`, `--dispatch` et `--mutation` restent.
+- **`--help`, `-h` et une option inconnue** sont un usage invalide (code 2, l'usage sur la sortie d'erreur) dans les deux scripts, avant toute lecture d'état, tout appel à Orca et toute annonce à Maestro. Avant, `receive --help` lisait `--help` comme un fichier de message : `NEXT: escalate invalid message … file not found: --help`, la Rehearsal passait `escalated` et Maestro était prévenu (deux fois sur deux à FEAT-007 et FEAT-008). Une demande `begin --request "…"` qui commence par un tiret reste une demande.
+- Le skill Conductor : le réveil qui ne nomme que le Run se traite par `receive --run <run_…>` (Rehearsal et Workshop) ; ne jamais lancer `orca orchestration check` soi-même (il prendrait les messages du script) ni un script Ballet avec `--help`.
+- Vérifié en vrai sur Orca 1.4.259 (spike 0002) : un Run jetable, deux messages ; `check --run` les rend (`id`, `type`, `subject`, `from`, `payload`, `body`) et les marque lus, le suivant est vide, `--ack` inutile ; hors d'un terminal Orca, `check` est refusé. **Pas vérifié** : un `receive --run` dans une vraie Rehearsal, depuis le terminal d'un Conductor.
+
+**Opportunités traitées** : OPP-76 ✅ (créée).
+
 ## 0.36.0 — 2026-11-21 · `v0.36.0`
 
 Maestro, étape 4 sur 5 : le Monitor observe GitHub et les terminaux, et Maestro lance seul ce que le projet lui confie. OPP-01 ✅, OPP-02 (partiel).

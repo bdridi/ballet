@@ -119,6 +119,7 @@ Trop cher pour la valeur : chaque slice et chaque tour paient un coût fixe (Dan
 - 🆕 **OPP-26 · Le Choreographer vérifie l'outillage** dont dépend son plan (version, comportement) par un spike, plutôt que de reprendre `AGENTS.md` (cas : isolation D1 de `@cloudflare/vitest-plugin` 1.8.2).
 - 🆕 **OPP-27 · Vérifier `label` sur un vrai repo** : création des libellés, `--remove-label` d'un libellé absent de la PR.
 - 🆕 **OPP-28 · Les sous-issues natives de GitHub** plutôt que la ligne `Part of #N` et la recherche (avancement visible sur la parente).
+- ✅ **OPP-76 · Le réveil d'Orca qui ne nomme que le Run** (0.37.0) : depuis Orca 1.4.259, le terminal du Conductor ne reçoit plus que `Run orca orchestration check --run <run>` ; `receive --run <run>` consomme le lot, ne traite que les messages de la Rehearsal ou du Workshop pas encore reçus (`received`), sans acquittement (spike 0002). Et `receive --help`, lu comme un fichier de message, escaladait et prévenait Maestro : `--help`, `-h` et une option inconnue sont un usage invalide.
 
 ## Politique et GitHub
 

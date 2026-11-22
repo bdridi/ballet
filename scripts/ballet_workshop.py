@@ -126,6 +126,7 @@ class Workshop:
     rounds: int = 0                             # questions du Dramaturg au Choreographer, bornées par `max_exchange_rounds`
     advisor_dispatch: str = ""                  # le dispatch Orca du worker Choreographer
     advisor_checkpoint: str = ""                # `HEAD` du worktree quand le Choreographer a reçu la main
+    received: list = field(default_factory=list)  # les ids des messages Orca déjà traités : `receive --run` ne les rejoue pas
     advisor_refs: list = field(default_factory=list)
     advice: str = ""                            # sa dernière réponse
     exchanges: list = field(default_factory=list)   # les questions et réponses, messages entiers, dans l'ordre
@@ -172,10 +173,31 @@ def receive_from_orca(item, wanted, home, tools, by="message"):
     if workshop.status == "done":
         return _over(workshop)
     try:
-        step = _handle_worker_message(workshop, _orca_message(wanted, by, tools), config, home, tools)
+        message = _orca_message(wanted, by, tools)
     except ERRORS as error:
-        step = Step("escalate", str(error))
-    return _settle(workshop, step, home)
+        return _settle(workshop, Step("escalate", str(error)), home)
+    return _settle(workshop, _received_step(workshop, message, config, home, tools), home)
+
+
+def receive_from_run(item, run_id, home, tools):
+    """Le réveil qui ne nomme que le Run du Conductor : ses messages en attente sont consommés d'un coup ; ceux des
+    workers du Workshop, pas encore traités, avancent dans l'ordre, chacun comme par `--message`, jusqu'au premier pas
+    qui n'est pas `wait`. Les autres sont ignorés."""
+    config = _checked_config(home)
+    workshop = _load(item, home)
+    if workshop.status == "done":
+        return _over(workshop)
+    batch = ballet_orca.run_messages(run_id, tools)
+    mine = [message for message in batch if _is_new_for(workshop, message)]
+    ignored = len(batch) - len(mine)
+    if not mine:
+        return _nothing_new(workshop, run_id, ignored)
+    steps = []
+    for message in mine:
+        steps.append(_settle(workshop, _received_step(workshop, message, config, home, tools), home))
+        if steps[-1].next != "wait" or workshop.status != "open":
+            break
+    return _merged_steps(workshop, steps, mine[len(steps):], ignored)
 
 
 def resume(item, home, tools):
@@ -677,6 +699,37 @@ def _open_worktree(workshop, tools):
     return path
 
 
+def _received_step(workshop, message, config, home, tools):
+    """Le pas d'un message lu chez Orca, noté comme reçu avant d'être traité : même en escalade, il n'est jamais rejoué."""
+    if message.get("id") and message["id"] not in workshop.received:
+        workshop.received.append(message["id"])
+    try:
+        return _handle_worker_message(workshop, message, config, home, tools)
+    except ERRORS as error:
+        return Step("escalate", str(error))
+
+
+def _is_new_for(workshop, message):
+    """Un message du Run qui revient à ce Workshop : de son Dramaturg ou de son Choreographer, et pas encore traité."""
+    workers = {workshop.dispatch, workshop.advisor_dispatch} - {""}
+    return message.get("id") not in workshop.received and ballet_orca.worker_dispatch(message) in workers
+
+
+def _nothing_new(workshop, run_id, ignored):
+    """Rien pour le Workshop dans le Run : son état ne bouge pas, et le pas le redit."""
+    return Step(ballet_rehearsal.STEP_OF_STATUS[workshop.status], workshop.reason,
+                [f"no new message for Workshop {workshop.item} in Orca run {run_id}" + (f" ({ignored} ignored)" if ignored else "")])
+
+
+def _merged_steps(workshop, steps, left, ignored):
+    """Les pas des messages traités en un seul : leurs lignes, puis ce qui reste à recevoir ; le `NEXT` du dernier."""
+    last = steps[-1]
+    done = [line for step in steps for line in step.done]
+    done += [f"not processed after this step, still to receive: receive {workshop.item} --message {message['id']}" for message in left]
+    done += [f"{ignored} message(s) of the run ignored: not for Workshop {workshop.item}, or already received"] if ignored else []
+    return Step(last.next, last.reason, done, item=last.item)
+
+
 def _orca_message(wanted, by, tools):
     message = ballet_orca.inbox_message(wanted, by, tools)
     if not message:
@@ -693,7 +746,7 @@ def _parsed(body):
 
 # --- ligne de commande --------------------------------------------------------
 
-USAGE = ("usage: begin [<item>] | begin --request \"<request>\" | receive [<item>] --message <msg-id> | receive [<item>] --dispatch <ctx-id> "
+USAGE = ("usage: begin [<item>] | begin --request \"<request>\" | receive [<item>] --run <run-id> | receive [<item>] --message <msg-id> | receive [<item>] --dispatch <ctx-id> "
          "| resume [<item>] | status [<item>]   (an item: a line of the backlog, OPP-N, FEAT-N, BUG-N or TASK-N, or the slug of a request's Workshop; "
          "no <item> after receive, resume or status: the only open Workshop; none after begin: the Workshop picks the "
          "first line of Next up that has no Workshop yet)")
@@ -717,13 +770,19 @@ def main(argv, home=".", tools=None):
     return 0
 
 
+OPTIONS = ("--request", "--run", "--message", "--dispatch")
+
+
 def _command(command, arguments, home, tools):
+    _refuse_help_and_unknown_options(command, arguments)
     if command == "begin" and len(arguments) == 2 and arguments[0] == "--request":
         return begin(None, home, tools, request=arguments[1])
     if command == "begin" and len(arguments) <= 1:
         return begin(_item(arguments[0]) if arguments else None, home, tools)
     if command in ("receive", "resume", "status"):
         item, rest = _item_and_rest(arguments, home)
+        if command == "receive" and len(rest) == 2 and rest[0] == "--run":
+            return receive_from_run(item, rest[1], home, tools)
         if command == "receive" and len(rest) == 2 and rest[0] in ("--message", "--dispatch"):
             return receive_from_orca(item, rest[1], home, tools, by=rest[0][2:])
         if command == "resume" and not rest:
@@ -731,6 +790,14 @@ def _command(command, arguments, home, tools):
         if command == "status" and not rest:
             return status(item, home, tools)
     raise UsageError(USAGE)
+
+
+def _refuse_help_and_unknown_options(command, arguments):
+    """`--help`, `-h` ou une option inconnue : l'usage, rien d'autre (ni état touché, ni Orca, ni Maestro)."""
+    request_text = arguments[1:2] if command == "begin" and arguments[:1] == ["--request"] else []
+    options = [argument for argument in arguments if argument.startswith("-") and argument not in request_text]
+    if command in ("-h", "--help") or any(option not in OPTIONS for option in options):
+        raise UsageError(USAGE)
 
 
 def _named_item(command, arguments):

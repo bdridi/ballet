@@ -41,6 +41,18 @@ def inbox_message(wanted, by, tools):
     return _by_id(messages, wanted) if by == "message" else _latest_from(messages, wanted)
 
 
+def run_messages(run_id, tools):
+    """Les messages en attente du Run du Conductor, dans l'ordre d'arrivée, consommés d'un coup : Orca les marque lus,
+    sans acquittement (vérifié sur Orca 1.4.259, spike 0002). Seul le terminal du Conductor peut consommer sa boîte :
+    la commande part de ses outils, dans son terminal (`ORCA_TERMINAL_HANDLE`)."""
+    return find_list(json.loads(tools.orca(["orchestration", "check", "--run", run_id, "--json"])), "messages")
+
+
+def worker_dispatch(message):
+    """Le dispatch du worker qui a envoyé le message, lu dans son payload ; vide pour un message qui n'en vient pas."""
+    return payload(message).get("dispatchId") or ""
+
+
 def payload(message):
     """Orca rend le payload en JSON dans une chaîne, ou déjà décodé, ou pas du tout."""
     found = message.get("payload")
@@ -87,5 +99,5 @@ def _by_id(messages, message_id):
 
 def _latest_from(messages, dispatch_id):
     sent = [message for message in messages
-            if message.get("type") in WORKER_MESSAGES and payload(message).get("dispatchId") == dispatch_id]
+            if message.get("type") in WORKER_MESSAGES and worker_dispatch(message) == dispatch_id]
     return max(sent, key=lambda message: int(message.get("sequence") or 0), default=None)

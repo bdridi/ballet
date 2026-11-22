@@ -186,6 +186,7 @@ class Rehearsal:
     mutated: str = ""                                # le `HEAD` de la dernière mutation verte : la suivante part de là
     renamed_tests: dict = field(default_factory=dict)  # les tests renommés que le Dancer déclare : ancien nom → nouveau
     refused_reports: int = 0                         # rapports du Dancer refusés pour une ligne `Red:` manquante
+    received: list = field(default_factory=list)     # les ids des messages Orca déjà traités : `receive --run` ne les rejoue pas
 
     @property
     def branch(self):
@@ -308,18 +309,30 @@ def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
     config = _checked_config(home)
     rehearsal = load(rehearsal_id, home)
     try:
-        message = _orca_message(wanted, by, tools)
-        if _is_mutation_wake(message):
-            step = _after_mutation(rehearsal, ballet_orca.payload(message).get("round"), config, home, tools)
-        elif message.get("type") == "escalation":
-            step = _worker_stopped(rehearsal, message, home, tools)
-        else:
-            header, text = _parsed(message.get("body", ""))
-            question_id = message["id"] if message.get("type") == "question" else None
-            step = _handle(rehearsal, header, text, question_id, config, home, tools)
+        step = _step_of_message(rehearsal, _orca_message(wanted, by, tools), config, home, tools)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
     return _settle(rehearsal, step, home, tools)
+
+
+def receive_from_run(rehearsal_id, run_id, home, tools):
+    """Le réveil qui ne nomme que le Run du Conductor (`orca orchestration check --run <run>`) : ses messages en attente
+    sont consommés d'un coup ; ceux de la Rehearsal, pas encore traités, avancent dans l'ordre, chacun comme par
+    `--message`, jusqu'au premier pas qui n'est pas `wait`. Les autres (une Rehearsal finie, un message déjà traité)
+    sont ignorés."""
+    config = _checked_config(home)
+    rehearsal = load(rehearsal_id, home)
+    batch = ballet_orca.run_messages(run_id, tools)
+    mine = [message for message in batch if _is_new_for(rehearsal, message)]
+    ignored = len(batch) - len(mine)
+    if not mine:
+        return _nothing_new(rehearsal, run_id, ignored)
+    steps = []
+    for message in mine:
+        steps.append(_settle(rehearsal, _received_step(rehearsal, message, config, home, tools), home, tools))
+        if steps[-1].next != "wait" or rehearsal.status != "open":
+            break
+    return _merged_steps(rehearsal, steps, mine[len(steps):], ignored)
 
 
 def receive_mutation(rehearsal_id, home, tools):
@@ -1113,7 +1126,7 @@ def _wake_the_conductor(rehearsal, home, tools):
         tools.orca(["orchestration", "send", "--to", f"run:{pending['run']}", "--type", "status",
                     "--subject", f"{rehearsal.id} · mutation done", "--payload", json.dumps(payload),
                     "--body", f"The mutation of Rehearsal {rehearsal.id} (round {pending['round']}) is done: "
-                              "run `ballet_rehearsal.py receive --message <this message id>`.", "--json"])
+                              f"run `ballet_rehearsal.py receive {rehearsal.id} --run {pending['run']}`.", "--json"])
         _log(home, rehearsal, "mutation-wake", {"round": pending["round"], "sent": True})
     except RehearsalError as error:
         _log(home, rehearsal, "mutation-wake", {"round": pending["round"], "sent": False, "error": str(error)})
@@ -1714,6 +1727,50 @@ def _orca_message(wanted, by, tools):
     return message
 
 
+def _step_of_message(rehearsal, message, config, home, tools):
+    """Un message lu chez Orca, noté comme reçu avant d'être traité : même en escalade, il n'est jamais rejoué."""
+    if message.get("id") and message["id"] not in rehearsal.received:
+        rehearsal.received.append(message["id"])
+    if _is_mutation_wake(message):
+        return _after_mutation(rehearsal, ballet_orca.payload(message).get("round"), config, home, tools)
+    if message.get("type") == "escalation":
+        return _worker_stopped(rehearsal, message, home, tools)
+    header, text = _parsed(message.get("body", ""))
+    question_id = message["id"] if message.get("type") == "question" else None
+    return _handle(rehearsal, header, text, question_id, config, home, tools)
+
+
+def _received_step(rehearsal, message, config, home, tools):
+    try:
+        return _step_of_message(rehearsal, message, config, home, tools)
+    except (RehearsalError, ballet_github.GitHubError) as error:
+        return Step("escalate", str(error))
+
+
+def _is_new_for(rehearsal, message):
+    """Un message du Run qui revient à cette Rehearsal : d'un de ses workers, ou le réveil de sa mutation ; et pas encore traité."""
+    if message.get("id") in rehearsal.received:
+        return False
+    if _is_mutation_wake(message):
+        return ballet_orca.payload(message).get("rehearsal") == rehearsal.id
+    return ballet_orca.worker_dispatch(message) in rehearsal.dispatches.values()
+
+
+def _nothing_new(rehearsal, run_id, ignored):
+    """Rien pour la Rehearsal dans le Run : son état ne bouge pas, et le pas le redit."""
+    return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason,
+                [f"no new message for {rehearsal.id} in Orca run {run_id}" + (f" ({ignored} ignored)" if ignored else "")])
+
+
+def _merged_steps(rehearsal, steps, left, ignored):
+    """Les pas des messages traités en un seul : leurs lignes, puis ce qui reste à recevoir ; le `NEXT` du dernier."""
+    last = steps[-1]
+    done = [line for step in steps for line in step.done]
+    done += [f"not processed after this step, still to receive: receive {rehearsal.id} --message {message['id']}" for message in left]
+    done += [f"{ignored} message(s) of the run ignored: not for {rehearsal.id}, or already received"] if ignored else []
+    return Step(last.next, last.reason, done, item=last.item)
+
+
 def _open_worktree(rehearsal, tools):
     path = ballet_orca.open_worktree(rehearsal.repo, rehearsal.branch, tools, rehearsal.issue)
     if not path:
@@ -1780,13 +1837,17 @@ def _shown(result, home, tools):
     return result.render()
 
 
-USAGE = ("usage: begin <item> | receive [<ID>] --message <msg-id> | receive [<ID>] --dispatch <ctx-id> "
+USAGE = ("usage: begin <item> | receive [<ID>] --run <run-id> | receive [<ID>] --message <msg-id> | receive [<ID>] --dispatch <ctx-id> "
          "| receive [<ID>] <message.md> [--question <msg-id>] | receive [<ID>] --mutation | premiere [<ID>] "
          "| resume [<ID> | <item>] | status [<ID> | <item>] | status <ID> --json   (an item: #<issue> (a Feature, a Bug or a Task) "
          "or a ready FEAT-NNN; no <ID>: the Rehearsal of the only open session)")
 
 
+OPTIONS = ("--run", "--message", "--dispatch", "--question", "--mutation", "--json")
+
+
 def _command(command, arguments, home, tools):
+    _refuse_help_and_unknown_options(command, arguments)
     if command == "begin" and len(arguments) == 1:
         return begin(_item(arguments[0]), home, tools)
     if command in ("resume", "status") and len(arguments) <= 1:
@@ -1812,6 +1873,8 @@ def _rehearsal_command(command, arguments, home, tools):
     if command == "mutate" and len(arguments) == 1:
         mutate(arguments[0], home, tools)
         return f"mutation of {arguments[0]} done"
+    if command == "receive" and len(arguments) == 3 and arguments[1] == "--run":
+        return receive_from_run(arguments[0], arguments[2], home, tools)
     if command == "receive" and len(arguments) == 3 and arguments[1] in ("--message", "--dispatch"):
         return receive_from_orca(arguments[0], arguments[2], home, tools, by=arguments[1][2:])
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):
@@ -1825,6 +1888,13 @@ def _rehearsal_command(command, arguments, home, tools):
     if command == "status" and arguments[1:] == ["--json"]:
         return json.dumps(asdict(load(arguments[0], home)), indent=2)
     raise UsageError(USAGE)
+
+
+def _refuse_help_and_unknown_options(command, arguments):
+    """`--help`, `-h` ou une option inconnue : l'usage, rien d'autre (ni état touché, ni Orca, ni Maestro)."""
+    options = [argument for argument in arguments if argument.startswith("-")]
+    if command in ("-h", "--help") or any(option not in OPTIONS for option in options):
+        raise UsageError(USAGE)
 
 
 def _item(text):

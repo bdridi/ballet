@@ -36,14 +36,17 @@ Every later command takes the Rehearsal `<ID>`. Without it, the script acts on t
 
 ## 2. On every wake
 
-Orca wakes you with a worker's message: a `worker_done` (a report or a verdict), a `question` (from `ask`), or an `escalation` (a worker stopped without reporting). Or with the script's own `status` message, `<ID> · mutation done`: the mutation it ran in the background is over. Same command, with its message id.
+Orca wakes you with a worker's message: a `worker_done` (a report or a verdict), a `question` (from `ask`), or an `escalation` (a worker stopped without reporting). Or with the script's own `status` message, `<ID> · mutation done`: the mutation it ran in the background is over. Same command.
 
-1. Run, with the id the wake gives: the script reads the whole message from Orca itself. Never copy, summarize or fix it, and never read the inbox yourself.
+1. Run, with the id the wake gives: the script reads the whole message from Orca itself. Never copy, summarize or fix it, never read the inbox yourself, and never run `orca orchestration check` yourself: it would take the messages the script must read.
 
    ```sh
+   python3 <path>/scripts/ballet_rehearsal.py receive --run <run_…>        # the wake names only a Run: "Run `orca orchestration check --run <run_…>`"
    python3 <path>/scripts/ballet_rehearsal.py receive --message <msg_…>    # the wake names a message id
    python3 <path>/scripts/ballet_rehearsal.py receive --dispatch <ctx_…>   # it names only a dispatchId: the worker's last message
    ```
+
+   With `--run`, the script takes every message waiting in the Run and plays those of the Rehearsal that it has not played yet, in order. It stops at the first step that is not `NEXT: wait`; a message left after it is listed as a `receive … --message <msg_…>` line: run it once that step is settled.
 
 2. Follow its last line.
 
@@ -80,7 +83,7 @@ An escalation pauses the session: its next slices wait. Tell the Director, in th
 `/ballet:workshop --autopilot [<item>]` hands you a line of the backlog (`OPP-12`, `FEAT-007`, `BUG-004`, `TASK-009`), not an issue. It is the same job with another script, `../../scripts/ballet_workshop.py` (relative to this skill's folder), and the same last line (`NEXT: wait`, `escalate <reason>`, `done`). The Dramaturg plays, and the Choreographer when the Dramaturg asks its advice (up to `[escalation] max_exchange_rounds` rounds): nobody else answers a question in this loop.
 
 - `begin [<item>]` opens the session (`.ballet/run/workshop-<item>.json`, not a `session-…` file) and the Dramaturg's worktree on `workshop/<item>`, and starts the Dramaturg. Without an item, the script picks the first line of the backlog's *Next up* that has no Workshop yet (and says which): that issue is always `proposed`, whatever the profile skips. A request that is not in the backlog (free text): `begin --request "<request>"`, whole, as the Director said it; the session is named by its slug (`workshop-<slug>.json`, branch `workshop/<slug>`), which names it in every later command (`status <slug>`). The Dramaturg captures it first, then frames that line; the journal's `published` event links the slug to the line and to the issue.
-- On every wake, as for a Rehearsal: `receive --message <msg_…>` (or `--dispatch <ctx_…>`). Without the item, the script takes the only open Workshop; with several, name the item first (`receive BUG-004 --message …`).
+- On every wake, as for a Rehearsal: `receive --run <run_…>` when the wake names only a Run, `receive --message <msg_…>` when it names a message id (or `--dispatch <ctx_…>`). Without the item, the script takes the only open Workshop; with several, name the item first (`receive BUG-004 --message …`).
 - A **question** from the Dramaturg to the Choreographer, and each answer, wakes you like any message: run `receive`, as in a Rehearsal. The script starts the Choreographer at the first question (in the Dramaturg's worktree) and sends it the next ones in its session; it checks at each answer that the Choreographer left the worktree untouched (policy) and sends the answer to the Dramaturg. Relay each step to the Director as usual. Every message is in the journal (key `workshop`), and every question and answer is published as a comment on the issue as soon as the script creates it. The rounds have one bound, `[escalation] max_exchange_rounds` (the project's profile overrides the plugin's): the question beyond it escalates.
 - The Dramaturg's report is all the script needs. It judges the Dramaturg's passage (only the specs space may change), pushes the branch, opens the specs pull request, merges it straight away (no Critic and no CI here: specs are not code), then publishes the issue: `proposed` (the Director accepts it before it enters the queue) or `ready` for the types the profile skips (`[workshop] queue_approval_skipped`). It then removes the worktree: `NEXT: done`.
 - Relay what the script did (the specs on `main`, the issue number and its status) and the Dramaturg's **Decided alone** lines: they are in the issue, which carries the label `ballet:decided-alone` when there are any, and the Director reads them to accept the proposal. Accepting is theirs: they set the issue's `Ballet status` to `ready`.
@@ -91,4 +94,5 @@ An escalation pauses the session: its next slices wait. Tell the Director, in th
 
 - Answer a role's question, edit its message, or summarize it in place of the whole message.
 - Run `gh`, `git push`, `git merge` or an `orca` command yourself: the script does.
+- Run a Ballet script with `--help` to find its usage: the usage is in this skill. A wrong call prints the script's usage line and exits 2, without touching anything.
 - Start, skip or reorder a Rehearsal on your own, or begin a second item: the script plays the session, in the plan's order.
