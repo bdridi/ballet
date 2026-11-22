@@ -147,12 +147,12 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
 - Ce qu'il vérifie :
   - **Critic** : `HEAD` n'a pas bougé et l'arbre de travail est propre (`git status --porcelain` vide) ;
   - **Choreographer** : sur la branche de Rehearsal, tous les fichiers modifiés sont dans le dossier des ADR ou sont `AGENTS.md` ; seules des branches `spike/*` ont été créées ; il est revenu sur la branche de Rehearsal ; l'arbre de travail est propre ; pas de réécriture d'historique ;
-  - **Dramaturg** : tous les fichiers modifiés sont dans l'espace specs, aucun dans une zone interdite ; l'arbre de travail est propre ; pas de réécriture d'historique (en Workshop, hors Conductor : OPP-32) ;
+  - **Dramaturg** : tous les fichiers modifiés sont dans l'espace specs, aucun dans une zone interdite ; l'arbre de travail est propre ; pas de réécriture d'historique (en Workshop assisted, hors Conductor : pas vérifié) ;
   - **Dancer** : il est resté sur la branche de Rehearsal ; aucun fichier modifié par ses commits n'est dans l'espace specs, dans le dossier des ADR ni dans une zone interdite ; l'arbre de travail est propre ; le nouveau `HEAD` descend de l'ancien (pas de réécriture d'historique) ; aucune branche ni aucun tag créé ou supprimé ; aucun test présent sur `main` n'a disparu ni changé de nom (reconnu par son nom : `it`/`test` en JS et TS, `#[test]` en Rust, `def test_` en Python, `Scenario:` en Gherkin). Le corps d'un test existant modifié reste au Critic : au premier run, chaque Rehearsal a retouché les imports d'un fichier de test, une règle à la ligne aurait tout bloqué.
-  - **tous les rôles** : l'état GitHub de l'issue et de la PR (corps, libellés, commentaires, reviews, état) est identique avant et après leur passage ; seule exception, le Choreographer, qui crée les slices de son issue (liées à la parente) et écrit leur section `## Plan` (OPP-29).
+  - **tous les rôles** : l'état GitHub de l'issue et de la PR (corps, libellés, commentaires, reviews, état) est identique avant et après leur passage ; seule exception, le Choreographer, qui crée les slices de son issue (liées à la parente) et écrit leur section `## Plan` (pas encore vérifié).
 - **Ses données vivent dans `[policy]`** (défauts du plugin, surchargés par le projet) : un périmètre par rôle, que le projet remplace ou étend sans recopier la méthode, les zones interdites et sensibles, et la façon de reconnaître un test par langage ; le détail des clés est commenté dans le `config.toml` du plugin. Une config qui laisse un rôle écrire `.ballet/config.toml` est refusée.
 - Les zones interdites sont des motifs de chemins (globs), pour que la vérification reste mécanique.
-- **Un commit appartient au rôle pendant le passage duquel il est apparu** : le Choreographer et le Dancer partagent la branche de Rehearsal, mais jamais en même temps, et l'état avant et après chaque passage suffit à les départager. Les commits du Choreographer et du Dramaturg ne comptent donc pas contre le Dancer (le registre qui le garantit : OPP-30).
+- **Un commit appartient au rôle pendant le passage duquel il est apparu** : le Choreographer et le Dancer partagent la branche de Rehearsal, mais jamais en même temps, et l'état avant et après chaque passage suffit à les départager. Les commits du Choreographer et du Dramaturg ne comptent donc pas contre le Dancer (le registre qui le garantit : pas encore fait).
 
 **Une violation n'est jamais intégrée.** Le Conductor ne pousse pas ; il renvoie le travail au rôle avec la liste des violations, une fois. À la deuxième violation, il escalade vers le Director. Toute violation est journalisée.
 
@@ -165,7 +165,7 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
   - publier l'issue d'une feature prête, d'un bug ou d'une tâche, typée et au statut proposée ou prête (à la sortie du Workshop) ;
   - créer une issue de slice, liée à sa parente (Choreographer) ;
   - écrire la section `## Plan` d'une issue (Choreographer) ;
-  - cocher une tâche du plan (OPP-35) ;
+  - cocher une tâche du plan (pas encore fait) ;
   - commenter l'issue (échanges entre rôles, escalade, rapport final) ;
   - poser ou retirer un libellé ;
   - pousser la branche de Rehearsal, ou de Workshop ;
@@ -178,9 +178,9 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
 - **Jamais de push direct sur `main`** : `main` ne bouge que par le merge d'une PR.
 - **Aucune opération libre** : pas de commande `gh` arbitraire, pas de suppression, pas de modification des réglages du repo.
 - **Le Conductor décide quand appeler une opération, jamais comment elle s'exécute.**
-- **Chaque appel est journalisé** (opération, entrées, résultat), comme les transitions (OPP-35).
+- **Chaque appel est journalisé** (opération, entrées, résultat), comme les transitions (pas encore fait).
 - **Les rôles produisent, le script publie :** le Choreographer publie lui-même l'issue et ses slices, puis rend son rapport au Conductor, qui le journalise ; le Critic rend son verdict, le Conductor le publie.
-- **Garde-fous :** couche 2, les workers sont lancés sans accès à `gh` ni au jeton GitHub quand le CLI le permet ; couche 3, la politique vérifie que l'état GitHub de l'issue n'a pas bougé pendant le passage d'un rôle (OPP-29).
+- **Garde-fous :** couche 2, les workers sont lancés sans accès à `gh` ni au jeton GitHub quand le CLI le permet ; couche 3, la politique vérifie que l'état GitHub de l'issue n'a pas bougé pendant le passage d'un rôle (pas encore fait).
 
 ## 6. Les modes
 
@@ -208,7 +208,7 @@ Toute phase sans le Director peut escalader vers lui. Les déclencheurs par déf
 **Côté Critic**
 - deux refus de suite (le ping-pong ne converge pas) ;
 - un doute sur son propre verdict (`VERDICT: ESCALATE`) ;
-- un désaccord persistant avec le Dancer (OPP-48).
+- un désaccord persistant avec le Dancer (pas encore détecté).
 
 **Côté changement**
 - il sort du périmètre fonctionnel de l'issue ;
@@ -220,7 +220,7 @@ Toute phase sans le Director peut escalader vers lui. Les déclencheurs par déf
 **Côté exécution**
 - la preuve du repo, lancée par le script à chaque rapport du Dancer, reste rouge au-delà du plafond d'allers-retours, ou dépasse `proof_timeout_seconds` ;
 - le test de mutation, lancé par le script après la preuve, reste rouge au-delà du plafond d'allers-retours, ou dépasse `[mutation] timeout_seconds` ;
-- un build instable (vert puis rouge sans changement, OPP-48) ;
+- un build instable (vert puis rouge sans changement, pas encore détecté) ;
 - en parallèle, un conflit de merge que le Dancer n'a pas résolu proprement ;
 - le budget de l'autopilot est atteint.
 
@@ -433,7 +433,7 @@ En mono-repo, une seule entrée `[repos.<nom>]` avec `path = "."` et sans `needs
 
 ## 11. Lancer Ballet
 
-**Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca. Chaque boucle a sa commande (noms à trancher, OPP-08) :
+**Tout part du home du projet** (son repo unique ou son repo de specs), dans un workspace Orca. Chaque boucle a sa commande :
 
 1. le Workshop, `/ballet:workshop` : `assisted` par défaut, le Director cadre en direct avec le Dramaturg (`/ballet:dramaturg`), qui demande l'avis du Choreographer au besoin, sans session ; la feature prête est publiée en issue et entre dans la file. `/ballet:workshop --autopilot [<élément>]` (une ligne du backlog, `BUG-004` ; sans élément, la première de *Next up*) confie l'élément à un Conductor, qui le joue jusqu'à l'issue publiée (`proposed`, ou `ready` selon `[workshop] queue_approval_skipped`, sauf pour l'élément que le Workshop a choisi seul) ;
 2. le Monitor surveille la file et signale à Maestro chaque élément prêt ; Maestro lance `/ballet:rehearsal <élément>` dans une session neuve, au mode lu sur son champ Rehearsal mode (`--autopilot`, `--require-plan-approval`) ; le Director peut aussi la lancer lui-même sur une issue (`#12`) ;
@@ -444,7 +444,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 ## 12. Le monitoring
 
 - **Sur GitHub**, la trace des échanges : l'issue (plan, amendements, questions et réponses) et la PR (rapports du Dancer, verdicts du Critic).
-- **Dès la V1**, le Conductor écrit un événement par transition (JSON lines) : run, issue, phase, rôle, CLI et modèle, début, fin, résultat, allers-retours, escalades et leur motif (format à figer : OPP-36).
+- **Dès la V1**, le Conductor écrit un événement par transition (JSON lines) : run, issue, phase, rôle, CLI et modèle, début, fin, résultat, allers-retours, escalades et leur motif (format à figer avec la base : OPP-79).
 - **La Scène** (`scripts/ballet_stage.py`) : une page locale en lecture seule, par projet, qui lit `.ballet/run/`, la distribution du profil, le titre des issues et le programme sur GitHub (les éléments prêts de la file, `scripts/ballet_program.py`) et les sessions de Conductor ouvertes (l'élément confié, ses slices qui restent) : les sessions, le programme, les Rehearsals, le rôle qui a la main, ce que le Director doit faire, et le fil des échanges, mis à jour en direct. C'est un outil d'observation pour se forger des convictions, pas un livrable de la V1 (§14).
 - **Plus tard**, un vrai tableau de bord par-dessus ces données, à la manière de ce qui était prévu pour Nightshift. Sources complémentaires côté Orca : `orca search` dans les sessions, `worker-list`, `inbox`, hooks de statut des agents.
 - Il sert à piloter, à **comparer les modèles par rôle**, et à décider quand passer une boucle d'`assisted` à `autopilot`.
@@ -490,12 +490,12 @@ Tranchées : voir `docs/ADR/`.
 - La marketplace du plugin au-delà du test (pendant le test : chemin local).
 - Un worker Orca peut-il écrire directement à un autre worker ? (La méthode n'en dépend pas : elle passe par le Conductor.)
 - Les types et les champs natifs des issues, par l'API : lecture, écriture, et trace de leurs changements dans la timeline (OPP-03, à vérifier par un spike).
-- En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas (OPP-54) ?
+- En autopilot, une Rehearsal escaladée : la file attend le Director, ou passe à l'élément suivant qui n'en dépend pas ? Tranché en 0.36.0 : une session par élément, Maestro lance les autres.
 - Le Monitor : un script qui tourne en continu dans un terminal Orca (OPP-01, OPP-02) ; reste à trancher comment réveiller le Workshop en autopilot à heure fixe.
 - Utiliser les Tasks Orca (`run-create`, `task-create --deps`) ou enchaîner les `worker-start` à la main : on commence sans.
 - Le Dramaturg consulté pendant la Rehearsal reste-t-il éphémère, ou devient-il persistant ?
-- Le format exact du journal d'événements (OPP-36).
-- Quelles permissions chaque CLI sait réellement imposer à un worker lancé par Orca (lecture seule, limite au dossier de travail), et comment Orca les lui passe (Grok : OPP-41).
+- Le format exact du journal d'événements (OPP-79).
+- Quelles permissions chaque CLI sait réellement imposer à un worker lancé par Orca (lecture seule, limite au dossier de travail), et comment Orca les lui passe (Grok : pas vérifié).
 - Qui pousse les commits du Dramaturg (specs, sur `main`) quand l'espace specs est dans le repo de code : une PR de specs, ou le Conductor au début de la Rehearsal ?
 - Un repo sans CI : la Premiere se contente-t-elle de la preuve locale ?
 - Signer les commits par rôle (une clé par rôle) n'a de sens qu'avec une isolation par l'OS (un utilisateur ou un bac à sable par rôle) : sous le même utilisateur, le Dancer peut lire la clé du Choreographer. Même chantier que la ligne suivante.
