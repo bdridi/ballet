@@ -24,12 +24,16 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     owner = "…"               le jeton de la session Maestro (`claim`) ; vide, personne
     pid = 0                   le processus de son attente en cours (`wait`), 0 sinon
     renewed = "…"             la date ISO de la dernière prise, ou de la fin de la dernière attente
+    session = "…"             l'id de la session Claude de Maestro (`claim` le lit dans `CLAUDE_CODE_SESSION_ID`) : c'est
+                              par lui que le Monitor retrouve son transcript ; vide hors de Claude
 
     [monitor]                 le terminal Orca du Monitor (`monitor` le crée)
     terminal = "term_…"
 
-    [maestro]                 le terminal Orca de la session Maestro (`maestro` le crée)
+    [maestro]                 la session Maestro : son terminal Orca (`maestro` le crée) et ses réglages (facultatifs)
     terminal = "term_…"
+    restart_at_context_percent = 30   le contexte au-delà duquel le Monitor le signale pour un redémarrage ; 0 : jamais
+    context_window_tokens = 1000000   la fenêtre de contexte du modèle de Maestro (le transcript ne la dit pas)
 
     [restart]                 un redémarrage de Maestro en cours (`ballet_restart.py when-idle`) ; absent sinon
     terminal = "term_…"       le terminal `maestro-restart` qui l'exécute
@@ -61,6 +65,13 @@ type confié à l'auto. `ready` et `status` montrent aussi ces éléments bloqu�
 Sous chaque `status` `<projet>#<élément> · finished` du Monitor, `wait` et `recap` écrivent `DECISION: close` (Maestro
 ferme le terminal par `ballet_launch.py close`, puis le dit) ou `DECISION: ask the Director (<raison>)` quand la ligne du
 registre a changé depuis (relancé, autre terminal, déjà fermé).
+
+Quand le contexte de la session Maestro passe `restart_at_context_percent` de `context_window_tokens`, le Monitor écrit une
+fois (par session) `maestro · context over threshold`, des faits seulement ; `wait` et `recap` écrivent dessous
+`DECISION: restart` (Maestro lance `ballet_restart.py when-idle`, qui n'agit que quand plus aucun Conductor ne travaille),
+`DECISION: wait (restart already scheduled)` quand un redémarrage est déjà demandé, ou `DECISION: wait (it was about
+session <id>, Maestro is session <id> now)` pour l'événement d'une session qui n'est plus Maestro (un `recap` relit celui
+qui a causé le redémarrage).
 
 `maestro` lance la session Maestro elle-même, comme `monitor` lance le Monitor : un terminal Orca `maestro` où tourne
 `claude --remote-control 'ballet maestro' '/ballet:maestro'` (le prompt avant les options ; `BALLET_MAESTRO_COMMAND` remplace
@@ -111,7 +122,12 @@ MAILBOX_TITLE = "maestro-mailbox"
 MAILBOX_OBJECTIVE = "Maestro's mailbox: the Conductors and the Monitor write here, Maestro reads"
 ANNOUNCED = ("escalate", "done")
 DEFAULT_CLOSE_MINUTES = 10
+DEFAULT_RESTART_PERCENT = 30
+DEFAULT_CONTEXT_WINDOW = 1_000_000   # mesuré par `claude -p` pour les modèles 5.5 (spike 0003) ; le transcript ne la dit pas
+SESSION_VARIABLE = "CLAUDE_CODE_SESSION_ID"
 FINISHED_SUBJECT = re.compile(r"^(\S+#\S+) · finished$")   # le Monitor : un Conductor fini, terminal encore ouvert
+CONTEXT_SUBJECT = "maestro · context over threshold"          # le Monitor : le contexte de Maestro a passé le seuil
+SESSION_IN_BODY = re.compile(r"\bsession (\S+)\s*$")
 TERMINAL_IN_BODY = re.compile(r"\bterminal (term_\S+?)[,.\s]")
 ALIAS = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -119,7 +135,7 @@ HEADER = "# Maestro (OPP-02), written by ballet_maestro.py: edit it while no Mae
 LEASE_TTL = timedelta(minutes=10)   # le temps de la session, entre deux attentes, pour traiter un message
 WAIT_TIMEOUT_MS = 600_000           # une attente qui expire sans message est relancée : `wait` ne rend la main qu'avec du courrier
 RECAP_LIMIT = 10                    # les derniers messages de l'historique relus au démarrage
-EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": ""}
+EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": "", "session": ""}
 TARGET = re.compile(r"^[^\s#]+#\S+$")
 PAUSE_FLAG = "auto_launch_paused"
 MONITOR_TITLE = "ballet-monitor"
@@ -195,7 +211,7 @@ def maestro(orca, state=None):
             return f"maestro not created: {_lease_held_message(config['lease'])}"
         receipt = json.loads(orca(["terminal", "create", "--title", MAESTRO_TITLE, "--command", _maestro_command(), "--json"]))
         handle = first_id(receipt, "term_", "orca terminal create")
-        config["maestro"] = {"terminal": handle}
+        config.setdefault("maestro", {})["terminal"] = handle   # ses réglages (`restart_at_context_percent`…) restent
         write_config(config, state)
         return f"maestro created: terminal {handle}"
 
@@ -276,7 +292,8 @@ def project_of(home, config):
 
 def claim(take_over=False, state=None):
     """Le bail de lecture de la boîte, pour une seule session : refusé quand une autre le tient vivant, sauf `take_over`,
-    qui arrête d'abord l'attente de l'ancien propriétaire. Rend le jeton de la nouvelle propriétaire."""
+    qui arrête d'abord l'attente de l'ancien propriétaire. Rend le jeton de la nouvelle propriétaire. Le bail note aussi l'id
+    de sa session Claude : le Monitor lit le contexte de Maestro dans ce transcript."""
     with ballet_state.locked(state):
         config = read_config(state)
         lease = config["lease"]
@@ -284,7 +301,7 @@ def claim(take_over=False, state=None):
             raise MaestroError(_lease_held_message(lease))
         _stop_the_wait(lease["pid"])
         owner = secrets.token_hex(8)
-        config["lease"] = {"owner": owner, "pid": 0, "renewed": _now()}
+        config["lease"] = {"owner": owner, "pid": 0, "renewed": _now(), "session": os.environ.get(SESSION_VARIABLE, "")}
         write_config(config, state)
     return f"lease claimed, owner {owner}"
 
@@ -667,9 +684,11 @@ def _message_text(message, config, state, tag=""):
 
 def _body_with_decisions(message, config, state):
     """Le corps du message ; sous chaque élément d'un `status` `· ready` du Monitor, la décision de la règle de lancement ;
-    sous un `· finished`, celle de fermer le Conductor."""
+    sous un `· finished`, celle de fermer le Conductor ; sous un `context over threshold`, celle de redémarrer."""
     import ballet_monitor
     body = message.get("body", "")
+    if message.get("type") == "status" and message.get("subject") == CONTEXT_SUBJECT:
+        return f"{body}\nDECISION: {restart_decision(body, config)}"
     finished = FINISHED_SUBJECT.match(message.get("subject", ""))
     if message.get("type") == "status" and finished:
         return f"{body}\nDECISION: {close_decision(finished.group(1), _terminal_named(body), state)}"
@@ -699,6 +718,35 @@ def close_decision(key, terminal, state=None):
     if line["terminal"] != terminal:
         return f"ask the Director ({key} now runs in {line['terminal']}, not {terminal})"
     return "close"
+
+
+def restart_decision(body, config):
+    """`restart` quand l'événement parle de la session Maestro d'aujourd'hui et qu'aucun redémarrage n'est demandé ; sinon
+    `wait (<raison>)`. C'est ici que cela se décide : l'agent ne fait que relayer le verdict. Un `recap` relit l'événement
+    qui a causé le redémarrage : il parle d'une session qui n'est plus Maestro, et ne doit pas en redemander un."""
+    told = SESSION_IN_BODY.search(body)
+    current = config["lease"]["session"]
+    if told and current and told.group(1) != current:
+        return f"wait (it was about session {told.group(1)}, Maestro is session {current} now)"
+    if config.get("restart", {}).get("terminal"):
+        return "wait (restart already scheduled)"
+    return "restart"
+
+
+def restart_percent(config):
+    """`[maestro] restart_at_context_percent` : un entier de 0 à 100, 0 : jamais ; 30 sans la clé."""
+    value = config.get("maestro", {}).get("restart_at_context_percent", DEFAULT_RESTART_PERCENT)
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+        raise MaestroError(f"[maestro] restart_at_context_percent in {CONFIG_NAME} must be a whole number from 0 to 100, not {value!r}")
+    return value
+
+
+def context_window(config):
+    """`[maestro] context_window_tokens` : un entier, 1 ou plus ; un million sans la clé."""
+    value = config.get("maestro", {}).get("context_window_tokens", DEFAULT_CONTEXT_WINDOW)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise MaestroError(f"[maestro] context_window_tokens in {CONFIG_NAME} must be a whole number, 1 or more, not {value!r}")
+    return value
 
 
 def close_delay_minutes(config):

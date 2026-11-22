@@ -33,7 +33,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 | **Dancer** | dev | Exécute le plan. |
 | **Critic** | validateur | Juge le travail et rend un verdict. |
 | **Conductor** | coordinateur | Fait tourner une boucle d'un projet : enchaîne les rôles, porte leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
-| **Maestro** (`/ballet:maestro`) | superviseur | Le point d'entrée unique du Director pour tous ses projets : une session qui attend sa boîte Orca, où les Conductors et le Monitor écrivent, lui rapporte, porte ses réponses et seule lance les Conductors, les ferme quand ils ont fini, les arrête sur le mot du Director (`stop`, le travail gardé) et redémarre sa propre session pour vider son contexte (`restart`, quand plus aucun Conductor ne travaille). |
+| **Maestro** (`/ballet:maestro`) | superviseur | Le point d'entrée unique du Director pour tous ses projets : une session qui attend sa boîte Orca, où les Conductors et le Monitor écrivent, lui rapporte, porte ses réponses et seule lance les Conductors, les ferme quand ils ont fini, les arrête sur le mot du Director (`stop`, le travail gardé) et redémarre sa propre session pour vider son contexte (`restart`, quand le Monitor le dit trop plein ou sur le mot du Director, et seulement quand plus aucun Conductor ne travaille). |
 
 - **Rôle** : Dramaturg, Choreographer, Dancer ou Critic. Le Conductor n'est pas un rôle : il les fait jouer.
 - **Worker** : l'instance d'agent (un CLI et un modèle) qu'Orca lance pour jouer un rôle.
@@ -47,7 +47,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
   - **`assisted`** (par défaut) : le Director est dans la boucle ; il cadre, valide le plan et reçoit les escalades ;
   - **`autopilot`** : la boucle tourne sans lui ; chaque rôle décide dans son périmètre et trace sa décision. La Rehearsal en autopilot, c'est le mode nuit.
 - **File** : les issues GitHub du projet qui attendent leur Rehearsal : type `Task`, `Bug` ou `Feature`, champ Ballet status à `ready`, dans l'ordre du champ Priority puis de l'ancienneté ; les `Slice` suivent leur feature. C'est GitHub qui la tient, par les types et les champs natifs des issues, pas un fichier local.
-- **Monitor** : un script déterministe, pas un agent (`ballet_monitor.py`), qui surveille la file sur GitHub et les terminaux des Conductors, et écrit dans la boîte de Maestro l'élément passé prêt, le Conductor disparu, ou le Conductor fini resté ouvert au-delà de `[conductors] close_finished_after_minutes` (`maestro.toml`, 10 min par défaut) ; il ne lance ni ne ferme rien, c'est Maestro qui lance et qui ferme (`ballet_launch.py close`) (OPP-01).
+- **Monitor** : un script déterministe, pas un agent (`ballet_monitor.py`), qui surveille la file sur GitHub et les terminaux des Conductors, et écrit dans la boîte de Maestro l'élément passé prêt, le Conductor disparu, le Conductor fini resté ouvert au-delà de `[conductors] close_finished_after_minutes` (`maestro.toml`, 10 min par défaut), ou le contexte de la session Maestro quand il passe `[maestro] restart_at_context_percent` de sa fenêtre (30 % par défaut, une fois par session) ; il ne lance, ne ferme ni ne redémarre rien : **il ne poste que des événements, c'est-à-dire des faits (quoi, quand, des chiffres, des liens), jamais une instruction ni une décision** ; les décisions sont celles de Maestro (les lignes `DECISION:` de son script, puis son skill : `launch`, `close`, `restart`) (OPP-01).
 
 **Le reste**
 

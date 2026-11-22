@@ -327,8 +327,9 @@ class BalletMonitorTest(unittest.TestCase):
         self.assertEqual(report.told, ["antimurphy#12 · gone"])
         subject, priority, body = self.sent()[0]
         self.assertEqual((subject, priority), ("antimurphy#12 · gone", "high"))
-        self.assertIn("term_9", body)
         line = ballet_conductors.read()["antimurphy#12"]
+        self.assertEqual(body, f"The Conductor of antimurphy#12 is gone: its terminal term_9 no longer exists in Orca "
+                               f"(rehearsal, started {line['started']}, last event none).")
         self.assertEqual((line["state"], ballet_conductors.state_of(line)), ("gone", "gone"))
         self.assertNotEqual(ballet_conductors.state_of(line), ballet_conductors.RUNNING)
 
@@ -353,8 +354,8 @@ class BalletMonitorTest(unittest.TestCase):
         self.finished_conductor(minutes_ago=30)
         self.assertEqual(self.turn().told, ["antimurphy#12 · finished"])
         subject, priority, body = self.sent()[-1]
-        self.assertIn("terminal term_9 is still open after 10 min", body)
-        self.assertIn("ballet_launch.py close antimurphy#12", body)
+        self.assertEqual(body, f"The rehearsal Conductor of antimurphy#12 finished at {ballet_conductors.read()['antimurphy#12']['seen']} "
+                               "and its terminal term_9 is still open after 10 min.")
         self.assertEqual(self.turn().told, [])
         self.assertTrue(ballet_conductors.read()["antimurphy#12"]["finished_told"])
 
@@ -434,6 +435,148 @@ class BalletMonitorTest(unittest.TestCase):
         self.turn()
         self.running_conductor(terminal="term_10")
         self.assertEqual(self.turn().told, ["antimurphy#12 · gone"])
+
+    # --- le contexte de Maestro ---
+
+    def maestro_session(self, session="s-1", tokens=312_000):
+        """Une session Maestro qui tient le bail sous cet id, et son transcript dans un dossier Claude jetable."""
+        claude = self.root / "claude"
+        environment = mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(claude), "CLAUDE_CODE_SESSION_ID": session})
+        environment.start()
+        self.addCleanup(environment.stop)
+        ballet_maestro.claim(take_over=True)
+        self.write_transcript(session, tokens)
+
+    def write_transcript(self, session, tokens):
+        path = self.root / "claude" / "projects" / "-Users-me-ballet" / f"{session}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        usage = {"input_tokens": 2, "cache_read_input_tokens": tokens - 2, "cache_creation_input_tokens": 0, "output_tokens": 9}
+        path.write_text(json.dumps({"type": "assistant", "message": {"model": "claude-opus-5-5", "usage": usage}}) + "\n", encoding="utf-8")
+
+    def set_maestro(self, **settings):
+        config = ballet_maestro.read_config()
+        config["maestro"] = {**config.get("maestro", {}), **settings}
+        ballet_maestro.write_config(config)
+
+    def context_events(self):
+        return [row for row in self.sent() if row[0] == "maestro · context over threshold"]
+
+    def test_un_contexte_au_dessus_du_seuil_est_signale_a_maestro_avec_les_faits(self):
+        self.maestro_session("s-1", tokens=312_000)
+        self.assertEqual(self.turn().told, ["maestro · context over threshold"])
+        subject, priority, body = self.context_events()[0]
+        self.assertEqual(priority, "normal")
+        self.assertEqual(body, "Maestro's context is 312000 tokens · 31% of 1000000 · threshold 30% · session s-1")
+
+    def test_l_evenement_ne_donne_aucune_instruction(self):
+        self.maestro_session("s-1", tokens=312_000)
+        self.turn()
+        body = self.context_events()[0][2].lower()
+        for word in ("restart", "should", "must", "decision", "ballet_restart"):
+            self.assertNotIn(word, body)
+
+    def test_un_contexte_sous_le_seuil_ne_dit_rien(self):
+        self.maestro_session("s-1", tokens=290_000)
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_contexte_pile_au_seuil_est_signale(self):
+        self.maestro_session("s-1", tokens=300_000)
+        self.assertEqual(self.turn().told, ["maestro · context over threshold"])
+
+    def test_un_seuil_de_zero_ne_signale_jamais(self):
+        self.maestro_session("s-1", tokens=900_000)
+        self.set_maestro(restart_at_context_percent=0)
+        self.assertEqual(self.turn().told, [])
+
+    def test_le_seuil_et_la_fenetre_viennent_de_la_config(self):
+        self.maestro_session("s-1", tokens=150_000)
+        self.assertEqual(self.turn().told, [])
+        self.set_maestro(restart_at_context_percent=20, context_window_tokens=500_000)
+        self.assertEqual(self.turn().told, ["maestro · context over threshold"])
+        self.assertEqual(self.context_events()[0][2], "Maestro's context is 150000 tokens · 30% of 500000 · threshold 20% · session s-1")
+
+    def test_le_depassement_n_est_signale_qu_une_fois_par_session(self):
+        self.maestro_session("s-1", tokens=312_000)
+        self.turn()
+        self.assertEqual(self.turn().told, [])
+        self.write_transcript("s-1", 100_000)   # une compaction : le contexte retombe
+        self.assertEqual(self.turn().told, [])
+        self.write_transcript("s-1", 400_000)   # puis repasse au-dessus : la même session ne redemande rien
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(len(self.context_events()), 1)
+
+    def test_apres_un_redemarrage_la_nouvelle_session_est_de_nouveau_surveillee(self):
+        self.maestro_session("s-1", tokens=312_000)
+        self.turn()
+        ballet_maestro.release_lease()
+        self.assertEqual(self.turn().told, [])
+        self.maestro_session("s-2", tokens=45_000)
+        self.assertEqual(self.turn().told, [])
+        self.write_transcript("s-2", 320_000)
+        self.assertEqual(self.turn().told, ["maestro · context over threshold"])
+        self.assertIn("session s-2", self.context_events()[1][2])
+
+    def test_un_envoi_qui_echoue_n_est_pas_note_et_revient_au_tour_suivant(self):
+        self.maestro_session("s-1", tokens=312_000)
+        self.orca.send_failures = 1
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(self.turn().told, ["maestro · context over threshold"])
+
+    def test_sans_session_maestro_le_monitor_ne_lit_rien(self):
+        self.assertEqual(self.turn().errors, [])
+        ballet_maestro.release_lease()
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_bail_sans_id_de_session_est_une_erreur_du_tour_qui_n_arrete_pas_le_reste(self):
+        with mock.patch.dict("os.environ", clear=False) as environment:
+            environment.pop("CLAUDE_CODE_SESSION_ID", None)
+            ballet_maestro.claim(take_over=True)
+        self.running_conductor("antimurphy#13", "term_7")
+        report = self.turn()
+        self.assertEqual(report.told, ["antimurphy#13 · gone"])
+        self.assertIn("no Claude session id", report.errors[0])
+
+    def test_un_transcript_introuvable_est_une_erreur_du_tour(self):
+        self.maestro_session("s-1")
+        (self.root / "claude" / "projects" / "-Users-me-ballet" / "s-1.jsonl").unlink()
+        report = self.turn()
+        self.assertEqual(report.told, [])
+        self.assertIn("no transcript for session s-1", report.errors[0])
+
+    def test_un_transcript_sans_message_ne_dit_rien(self):
+        self.maestro_session("s-1")
+        (self.root / "claude" / "projects" / "-Users-me-ballet" / "s-1.jsonl").write_text("", encoding="utf-8")
+        report = self.turn()
+        self.assertEqual((report.told, report.errors), ([], []))
+
+    def test_un_contexte_plus_grand_que_la_fenetre_est_une_erreur_pas_un_evenement(self):
+        self.maestro_session("s-1", tokens=1_200_000)
+        report = self.turn()
+        self.assertEqual(report.told, [])
+        self.assertIn("context_window_tokens", report.errors[0])
+
+    def test_un_seuil_invalide_est_une_erreur_du_tour_qui_n_arrete_pas_le_reste(self):
+        self.maestro_session("s-1", tokens=900_000)
+        self.set_maestro(restart_at_context_percent="soon")
+        self.running_conductor("antimurphy#13", "term_7")
+        report = self.turn()
+        self.assertEqual(report.told, ["antimurphy#13 · gone"])
+        self.assertIn("restart_at_context_percent", report.errors[0])
+
+    def test_la_file_et_le_contexte_gardent_chacun_leur_part_de_monitor_json(self):
+        self.maestro_session("s-1", tokens=312_000)
+        self.queue.queues["antimurphy"] = [item(12)]
+        self.turn()
+        self.assertEqual([found["number"] for found in ballet_monitor.read_ready()["antimurphy"]], [12])
+        self.queue.queues["antimurphy"] = [item(12), item(13)]
+        self.assertEqual(self.turn().told, ["antimurphy#13 · ready"])   # le contexte n'est pas redit
+        self.assertEqual(len(self.context_events()), 1)
+
+    def test_le_monitor_lit_le_transcript_sans_rien_ecrire_dans_le_dossier_de_claude(self):
+        self.maestro_session("s-1", tokens=312_000)
+        before = sorted(path.name for path in (self.root / "claude").rglob("*"))
+        self.turn()
+        self.assertEqual(sorted(path.name for path in (self.root / "claude").rglob("*")), before)
 
     # --- run ---
 

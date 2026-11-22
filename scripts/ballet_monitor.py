@@ -4,7 +4,12 @@
     python3 ballet_monitor.py run [--interval <s>]   # en boucle, 180 s par défaut : dans son propre terminal Orca
 
 Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boîte de Maestro, depuis son terminal Orca
-(`ORCA_TERMINAL_HANDLE`, comme les Conductors), et Maestro décide. Trois choses seulement :
+(`ORCA_TERMINAL_HANDLE`, comme les Conductors), et Maestro décide.
+
+**Règle : le Monitor ne poste que des événements, c'est-à-dire des faits** (quoi, quand, des chiffres, des liens), jamais une
+instruction ni une décision (« relance-le », « ferme-le », « redémarre »). Les décisions appartiennent à Maestro : les lignes
+`DECISION:` que son script écrit sous le message (`ballet_maestro.py`), puis son skill. Un message du Monitor se lit sans
+savoir ce que Maestro en fera. Quatre choses seulement :
 
 - **Un élément qui devient lançable.** Pour chaque projet de `maestro.toml`, la file GitHub est lue par `ballet_program.py` (les
   `Feature`, `Bug` et `Task` au champ `Ballet status` `ready`, avec leurs bloqueurs ouverts : les liens « Blocked by » de
@@ -24,6 +29,13 @@ Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boît
   terminal vit encore au-delà de `[conductors] close_finished_after_minutes` (10 par défaut, 0 : jamais) devient un
   `status` `<projet>#<élément> · finished`, une seule fois (`finished_told` dans le registre). Le Monitor ne ferme rien :
   Maestro le fait (`ballet_launch.py close`), sur la décision du script (`DECISION: close`).
+- **Le contexte de Maestro au-dessus du seuil.** Le bail de `maestro.toml` note l'id de la session Claude de Maestro ; le
+  Monitor lit son transcript (`ballet_context.py`) et, quand le contexte atteint `[maestro] restart_at_context_percent` de
+  `[maestro] context_window_tokens` (30 % d'un million par défaut, 0 : jamais), écrit `maestro · context over threshold`
+  (pourcentage, tokens, fenêtre, seuil, session), une seule fois par session (`maestro.context_told` dans `monitor.json`) :
+  une session qui prend la suite (redémarrage, `/clear`) a un autre id, donc sa propre alerte. Un retour au-dessous du
+  seuil (compaction) ne la réarme pas. Sans bail, il ne lit rien ; un bail sans id de session, un transcript introuvable
+  ou un contexte plus grand que la fenêtre sont des erreurs du tour. Maestro décide (`DECISION: restart`).
 
 Un envoi qui échoue n'est pas noté comme fait : le tour suivant le refait. `gh` ou Orca injoignable est une ligne d'erreur
 du tour, jamais une panne de `run`.
@@ -39,6 +51,7 @@ from datetime import datetime
 from pathlib import Path
 
 import ballet_conductors
+import ballet_context
 import ballet_maestro
 import ballet_program
 import ballet_state
@@ -50,6 +63,7 @@ DEFAULT_INTERVAL = 180
 KEPT = ("item", "number", "type", "title", "priority", "url", "blocked_by", "doubt")   # ce que le Monitor retient d'un élément prêt
 READY_LINE = re.compile(r"^#(?P<number>\d+) · (?P<type>\w+) · ")
 READY_SUBJECT = re.compile(r"^([^\s#]+)(?:#\S+)? · ready\b")
+CONTEXT_SUBJECT = ballet_maestro.CONTEXT_SUBJECT
 USAGE = "usage: once | run [--interval <seconds>]"
 
 
@@ -74,6 +88,7 @@ def once(orca, queue=ballet_program.ready_items, state=None):
         _attempt(report, alias, lambda: _watch_ready(alias, home, orca, queue, state, report))
     _attempt(report, "Conductors", lambda: _watch_gone(orca, state, report))
     _attempt(report, "finished Conductors", lambda: _watch_finished(orca, state, report))
+    _attempt(report, "Maestro context", lambda: _watch_context(orca, state, report))
     return report
 
 
@@ -189,7 +204,7 @@ def _watch_gone(orca, state, report):
 def _tell_gone(key, line, orca, state, report):
     body = (f"The Conductor of {key} is gone: its terminal {line['terminal']} no longer exists in Orca "
             f"({line.get('kind') or 'kind unknown'}, started {line.get('started') or 'at an unknown time'}, "
-            f"last event {line.get('event') or 'none'}). Relaunch it only on the Director's word.")
+            f"last event {line.get('event') or 'none'}).")
     _send(f"{key} · gone", body, "high", orca, state, report)
     ballet_conductors.mark_gone(key, line["terminal"], state)
 
@@ -211,9 +226,55 @@ def _watch_finished(orca, state, report):
 def _tell_finished(key, line, delay, orca, state, report):
     url = f" Remote Control {line['url']}." if line.get("url") else ""
     body = (f"The {line.get('kind')} Conductor of {key} finished at {line.get('seen')} and its terminal {line['terminal']} "
-            f"is still open after {delay} min.{url} Close it with: ballet_launch.py close {key}")
+            f"is still open after {delay} min.{url}")
     _send(f"{key} · finished", body, "normal", orca, state, report)
     ballet_conductors.note_finished_told(key, line["terminal"], state)
+
+
+# --- le contexte de Maestro ------------------------------------------------------
+
+
+def _watch_context(orca, state, report):
+    """Le contexte de la session Maestro du bail, signalé une fois par session quand il atteint le seuil. Sans bail, ou
+    avec un seuil de 0, rien n'est lu."""
+    config = ballet_maestro.read_config(state)
+    threshold = ballet_maestro.restart_percent(config)
+    if not threshold or not config["lease"]["owner"]:
+        return
+    session = _need(config["lease"]["session"])
+    if read_context_told(state) == session:
+        return
+    used = _context_used(session)
+    if used is None:
+        return
+    window = ballet_maestro.context_window(config)
+    if used > window:
+        raise MaestroError(f"Maestro's context ({used} tokens) is above context_window_tokens ({window}) in {ballet_maestro.CONFIG_NAME}: "
+                           "the window is wrong")
+    if used * 100 >= threshold * window:
+        _tell_context(used, window, threshold, session, orca, state, report)
+
+
+def _need(session):
+    """L'id de session du bail ; un bail qui n'en a pas est une panne à dire."""
+    if not session:
+        raise MaestroError(f"the lease in {ballet_maestro.CONFIG_NAME} has no Claude session id: Maestro's context is not watched "
+                           f"(claim runs inside Claude, where {ballet_maestro.SESSION_VARIABLE} is set)")
+    return session
+
+
+def _context_used(session):
+    """Le contexte courant de la session ; `None` tant que son transcript n'a pas de message de l'assistant."""
+    transcript = ballet_context.transcript_of(session)
+    if not transcript:
+        raise MaestroError(f"no transcript for session {session} under {ballet_context.claude_home() / 'projects'}")
+    return ballet_context.used_tokens(transcript)
+
+
+def _tell_context(used, window, threshold, session, orca, state, report):
+    body = f"Maestro's context is {used} tokens · {used * 100 // window}% of {window} · threshold {threshold}% · session {session}"
+    _send(CONTEXT_SUBJECT, body, "normal", orca, state, report)
+    _save_context_told(session, state)
 
 
 # --- la boîte ------------------------------------------------------------------
@@ -230,18 +291,38 @@ def _send(subject, body, priority, orca, state, report):
 def read_ready(state=None):
     """Les éléments prêts de chaque projet, tels que le dernier tour les a vus : alias → éléments, dans l'ordre de la
     file. Un projet pas encore vu n'y figure pas."""
-    path = _path(state)
-    if not path.is_file():
-        return {}
-    return {alias: project["ready"] for alias, project in json.loads(path.read_text(encoding="utf-8"))["projects"].items()}
+    return {alias: project["ready"] for alias, project in _document(state).get("projects", {}).items()}
+
+
+def read_context_told(state=None):
+    """L'id de la session Maestro dont le dépassement du seuil a été signalé ; vide si aucune."""
+    return _document(state).get("maestro", {}).get("context_told", "")
 
 
 def _save_ready(alias, items, state):
     with ballet_state.locked(state, LOCK_NAME):
+        document = _document(state)
         ready = read_ready(state)
         ready[alias] = items
-        document = {"projects": {name: {"ready": found} for name, found in ready.items()}}
-        ballet_state.write_atomically(_path(state), json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+        document["projects"] = {name: {"ready": found} for name, found in ready.items()}
+        _write_document(document, state)
+
+
+def _save_context_told(session, state):
+    with ballet_state.locked(state, LOCK_NAME):
+        document = _document(state)
+        document["maestro"] = {"context_told": session}
+        _write_document(document, state)
+
+
+def _document(state):
+    """`monitor.json` en entier : `projects` (la file vue) et `maestro` (le contexte signalé) ; vide sans fichier."""
+    path = _path(state)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def _write_document(document, state):
+    ballet_state.write_atomically(_path(state), json.dumps(document, indent=2, ensure_ascii=False) + "\n")
 
 
 def _path(state=None):

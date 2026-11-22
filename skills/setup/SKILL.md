@@ -68,11 +68,13 @@ From now on, each Conductor (`/ballet:rehearsal`, `/ballet:workshop --autopilot`
 python3 <path>/scripts/ballet_maestro.py monitor
 ```
 
-It prints `monitor created: terminal <handle>` or `monitor already there: …`. The Monitor is a script, no LLM: an Orca terminal titled `ballet-monitor` runs `ballet_monitor.py run`, which every 3 minutes reads each project's GitHub queue and the Conductors' terminals, and writes into the mailbox an item that turned `ready` or a Conductor that is `gone`. It launches nothing. Tell the Director not to close that terminal; if they do, rerun this step. It reports into the mailbox of step 4, so run this step after it.
+It prints `monitor created: terminal <handle>` or `monitor already there: …`. The Monitor is a script, no LLM: an Orca terminal titled `ballet-monitor` runs `ballet_monitor.py run`, which every 3 minutes reads each project's GitHub queue and the Conductors' terminals, and writes into the mailbox an item that turned `ready` or a Conductor that is `gone`, and tells Maestro when its own context passes a threshold. It only states facts and launches nothing. Tell the Director not to close that terminal; if they do, rerun this step. It reports into the mailbox of step 4, so run this step after it.
 
 Which items Maestro launches by itself is the Director's choice, per project, in `~/.ballet/maestro.toml`: `auto_launch = ["Task", "Bug"]` under `[projects.<alias>]` (nothing by default: Maestro asks every time). Offer to set it; edit the file only for a project and types the Director names, and only that line.
 
 A Conductor that finished stays open in its terminal until Maestro closes it: the Monitor reports it after `close_finished_after_minutes` under `[conductors]` in `~/.ballet/maestro.toml` (10 by default; 0 never closes one). Mention it; change it only on the Director's word.
+
+Maestro's own context is watched too: when it passes `restart_at_context_percent` under `[maestro]` in the same file (30 by default, of `context_window_tokens`, 1000000 by default; 0 never), the Monitor says so once and Maestro restarts itself, but only once no Conductor is working (`ballet_restart.py when-idle`). Mention it; change either key only on the Director's word.
 
 ## 6. Maestro itself
 
