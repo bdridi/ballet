@@ -1,6 +1,6 @@
 {
   "name": "ballet",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "description": "Ballet: a common method to make coding agents (Claude, Grok, Mistral Vibe) work as a chain, on Orca.",
   "author": { "name": "Bilel Dridi" }
 }

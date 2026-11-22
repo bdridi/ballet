@@ -53,6 +53,7 @@ class FakeOrca:
         self.unreadable = False          # `terminal read` échoue
         self.unreachable = False
         self.unknown_folder = False      # le dossier n'est pas un espace de travail Orca
+        self.failing_workers = set()     # les dispatches que `worker-stop` ne sait pas arrêter
 
     def __call__(self, arguments):
         self.commands.append(arguments)
@@ -66,6 +67,8 @@ class FakeOrca:
             self.created += 1
             self.terminals.append(f"term_{self.created}")
             return json.dumps({"ok": True, "result": {"terminal": {"handle": f"term_{self.created}"}}})
+        if arguments[:2] == ["orchestration", "worker-stop"] and arguments[3] in self.failing_workers:
+            raise ballet_maestro.MaestroError("stop_unknown: the agent exit was not proven")
         if arguments[:2] == ["terminal", "read"]:
             if self.unreadable:
                 raise ballet_maestro.MaestroError("terminal_not_found")
@@ -552,6 +555,193 @@ class BalletLaunchTest(unittest.TestCase):
             self.rehearsal("#12")
         self.reader.assert_not_called()
 
+    # --- stop ---
+
+    STOP_REASON = "stopped by Maestro"
+
+    def session(self, item="#12", current="FEAT-004.1", dispatches=None, status="open"):
+        """Une session de Rehearsal ouverte dans le projet, avec sa Rehearsal en cours et les workers de celle-ci."""
+        import ballet_rehearsal
+        ballet_rehearsal._save_session(Session(item=item, issue=item.lstrip("#"), current=current, ballet_status="in-rehearsal"), self.home)
+        ballet_rehearsal._save(Rehearsal(id=current, issue=item, repo="repo", status=status,
+                                         dispatches=dispatches if dispatches is not None else {"dancer": "ctx_dancer"}), self.home)
+
+    def stop(self, key="antimurphy#12"):
+        with mock.patch("ballet_github.set_status") as set_status:
+            report = ballet_launch.stop_conductor(key, self.orca)
+        self.set_status = set_status
+        return report
+
+    def registry_state(self, key="antimurphy#12"):
+        return ballet_conductors.state_of(ballet_conductors.read()[key])
+
+    def test_stop_ferme_le_terminal_d_un_conductor_qui_tourne_et_le_note_stopped(self):
+        self.rehearsal("#12")
+        report = self.stop()
+        self.assertIn("stopped the rehearsal Conductor of antimurphy#12", report)
+        self.assertIn("terminal term_1 closed", report)
+        self.assertEqual(self.orca.ran("terminal", "close"), [["terminal", "close", "--terminal", "term_1", "--json"]])
+        self.assertEqual(self.registry_state(), ballet_conductors.STOPPED)
+
+    def test_stop_d_un_terminal_deja_ferme_le_note_sans_rien_fermer(self):
+        self.rehearsal("#12")
+        self.orca.terminals.clear()
+        self.assertIn("terminal term_1 was already closed", self.stop())
+        self.assertEqual(self.orca.ran("terminal", "close"), [])
+        self.assertEqual(self.registry_state(), ballet_conductors.STOPPED)
+
+    def test_stop_arrete_aussi_un_conductor_disparu_dont_les_workers_traient(self):
+        self.rehearsal("#12")
+        self.session()
+        ballet_conductors.mark_gone("antimurphy#12", "term_1")
+        self.orca.terminals.clear()
+        self.stop()
+        self.assertEqual(self.orca.ran("orchestration", "worker-stop"), [["orchestration", "worker-stop", "--dispatch", "ctx_dancer", "--json"]])
+        self.assertEqual(self.registry_state(), ballet_conductors.STOPPED)
+
+    def test_stop_refuse_ce_qui_n_est_pas_a_arreter_et_ne_ferme_rien(self):
+        self.rehearsal("#12")
+        ballet_conductors.note_events([{"type": "status", "from": "term_1", "subject": "antimurphy#12 · done"}])
+        with self.assertRaisesRegex(LaunchError, "is finished: only a running or gone Conductor is stopped \\(close a finished one\\)"):
+            self.stop()
+        with self.assertRaisesRegex(LaunchError, "no Conductor antimurphy#99 in the registry"):
+            self.stop("antimurphy#99")
+        ballet_conductors.note_events([{"type": "status", "from": "term_5", "subject": "antimurphy#13 · escalate"}])
+        with self.assertRaisesRegex(LaunchError, "Maestro did not launch the Conductor of antimurphy#13"):
+            self.stop("antimurphy#13")
+        self.assertEqual(self.orca.ran("terminal", "close"), [])
+
+    def test_stop_ne_refait_pas_un_conductor_deja_arrete(self):
+        self.rehearsal("#12")
+        self.stop()
+        with self.assertRaisesRegex(LaunchError, "is stopped: only a running or gone Conductor is stopped"):
+            self.stop()
+
+    def test_stop_arrete_les_workers_de_la_rehearsal_en_cours(self):
+        self.rehearsal("#12")
+        self.session(dispatches={"dancer": "ctx_dancer", "critic": "ctx_critic"})
+        report = self.stop()
+        self.assertEqual([command[3] for command in self.orca.ran("orchestration", "worker-stop")], ["ctx_dancer", "ctx_critic"])
+        self.assertIn("worker ctx_dancer stopped", report)
+        self.assertIn("worker ctx_critic stopped", report)
+
+    def test_stop_garde_l_etat_et_met_la_rehearsal_en_escalade_avec_le_motif(self):
+        import ballet_rehearsal
+        self.rehearsal("#12")
+        self.session()
+        report = self.stop()
+        rehearsal = ballet_rehearsal.load("FEAT-004.1", self.home)
+        self.assertEqual((rehearsal.status, rehearsal.dispatches), ("escalated", {"dancer": "ctx_dancer"}))
+        self.assertIn(self.STOP_REASON, rehearsal.reason)
+        self.assertEqual([session.item for session in ballet_rehearsal.open_sessions(self.home)], ["#12"])
+        journal = (self.home / ".ballet" / "run" / "journal.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"event": "stopped"', journal)
+        self.assertIn("the work is kept: state, branch and worktree are untouched", report)
+
+    def test_stop_ne_touche_ni_au_worktree_ni_a_la_branche(self):
+        self.rehearsal("#12")
+        self.session()
+        self.stop()
+        self.assertEqual(self.orca.ran("worktree"), [])
+
+    def test_stop_pose_le_ballet_status_escalated_sur_l_issue(self):
+        import ballet_rehearsal
+        self.rehearsal("#12")
+        self.session()
+        report = self.stop()
+        self.set_status.assert_called_once()
+        self.assertEqual(self.set_status.call_args.args, ("12", "escalated"))
+        self.assertEqual(ballet_rehearsal._load_session("#12", self.home).ballet_status, "escalated")
+        self.assertIn("Ballet status of #12: escalated", report)
+
+    def test_stop_dont_github_refuse_le_dit_sans_rien_arreter(self):
+        import ballet_github
+        self.rehearsal("#12")
+        self.session()
+        with mock.patch("ballet_github.set_status", side_effect=ballet_github.GitHubError("gh down")):
+            report = ballet_launch.stop_conductor("antimurphy#12", self.orca)
+        self.assertIn("Ballet status of #12 not set to escalated: gh down", report)
+        self.assertEqual(self.registry_state(), ballet_conductors.STOPPED)
+
+    def test_stop_un_worker_qui_ne_s_arrete_pas_est_dit_et_les_autres_le_sont(self):
+        self.rehearsal("#12")
+        self.session(dispatches={"dancer": "ctx_dancer", "critic": "ctx_critic"})
+        self.orca.failing_workers = {"ctx_dancer"}
+        report = self.stop()
+        self.assertIn("worker ctx_dancer not stopped: stop_unknown", report)
+        self.assertIn("worker ctx_critic stopped", report)
+        self.assertEqual(self.registry_state(), ballet_conductors.STOPPED)
+
+    def test_stop_sans_session_ouverte_ferme_le_terminal_sans_toucher_aux_workers(self):
+        self.rehearsal("#12")
+        report = self.stop()
+        self.assertEqual(self.orca.ran("orchestration", "worker-stop"), [])
+        self.assertNotIn("Ballet status", report)
+        self.assertEqual(self.registry_state(), ballet_conductors.STOPPED)
+
+    def test_stop_ne_touche_pas_a_la_session_d_un_autre_element(self):
+        import ballet_rehearsal
+        self.rehearsal("#12")
+        self.session(item="#13", current="FEAT-005.1", dispatches={"dancer": "ctx_other"})
+        self.stop()
+        self.assertEqual(ballet_rehearsal.load("FEAT-005.1", self.home).status, "open")
+        self.assertEqual(self.orca.ran("orchestration", "worker-stop"), [])
+
+    def test_stop_d_un_workshop_arrete_le_dramaturg_et_le_choreographer(self):
+        import ballet_workshop
+        self.workshop("BUG-004")
+        run = self.home / ".ballet" / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "workshop-BUG-004.json").write_text(json.dumps({"item": "BUG-004", "repo": "r", "dispatch": "ctx_dramaturg",
+                                                                "advisor_dispatch": "ctx_choreographer"}), encoding="utf-8")
+        report = self.stop("antimurphy#BUG-004")
+        self.assertEqual([command[3] for command in self.orca.ran("orchestration", "worker-stop")], ["ctx_dramaturg", "ctx_choreographer"])
+        workshop = ballet_workshop._load("BUG-004", self.home)
+        self.assertEqual(workshop.status, "escalated")
+        self.assertIn(self.STOP_REASON, workshop.reason)
+        self.assertIn("stopped the workshop Conductor of antimurphy#BUG-004", report)
+        self.set_status.assert_not_called()
+
+    def test_un_conductor_arrete_libere_sa_place_et_n_est_plus_montre_une_fois_son_terminal_ferme(self):
+        self.limits(max_running=1)
+        self.rehearsal("#12")
+        self.stop()
+        self.rehearsal("#13")
+        self.orca.terminals.clear()
+        lines = ballet_maestro.status(self.orca)
+        self.assertNotIn("antimurphy#12", lines)
+
+    def test_status_montre_un_conductor_arrete_dont_le_terminal_vit_encore(self):
+        self.rehearsal("#12")
+        self.stop()
+        self.orca.terminals.append("term_1")
+        self.assertIn("antimurphy#12  rehearsal  stopped  term_1 (alive)", ballet_maestro.status(self.orca))
+
+    def test_un_element_dont_le_conductor_a_ete_arrete_n_est_jamais_relance_seul(self):
+        config = ballet_maestro.read_config()
+        config["projects"]["antimurphy"]["auto_launch"] = ["Feature"]
+        ballet_maestro.write_config(config)
+        self.rehearsal("#49")
+        self.stop("antimurphy#49")
+        self.assertIn("its last Conductor is stopped", ballet_maestro.decision("antimurphy", "Feature", number="49"))
+
+    def test_un_element_dont_la_session_est_escaladee_apres_stop_reste_refuse_au_lancement(self):
+        self.rehearsal("#12")
+        self.session()
+        self.stop()
+        self.orca.terminals.clear()
+        self.assertRefused(self.rehearsal, "antimurphy#12 has an open session .*state escalated, Rehearsal FEAT-004.1")
+
+    def test_stop_en_ligne_de_commande(self):
+        self.rehearsal("#12")
+        with mock.patch("ballet_github.set_status"):
+            code, out, _ = self.run_main("stop", "antimurphy#12")
+        self.assertEqual(code, 0)
+        self.assertIn("stopped the rehearsal Conductor of antimurphy#12", out)
+        code, _, err = self.run_main("stop", "antimurphy#12")
+        self.assertEqual(code, 1)
+        self.assertTrue(err.startswith("launch: the Conductor of antimurphy#12 is stopped"))
+
     # --- la ligne de commande ---
 
     def run_main(self, *arguments):
@@ -573,7 +763,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.assertTrue(err.startswith("launch: unknown project nowhere"))
 
     def test_main_un_usage_invalide_sort_avec_2(self):
-        for arguments in ((), ("rehearsal", "antimurphy"), ("workshop",), ("stop", "antimurphy#12")):
+        for arguments in ((), ("rehearsal", "antimurphy"), ("workshop",), ("stop", "antimurphy")):
             code, _, err = self.run_main(*arguments)
             self.assertEqual(code, 2)
             self.assertIn("usage:", err)

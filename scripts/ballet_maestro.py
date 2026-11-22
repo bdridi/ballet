@@ -31,6 +31,10 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     [maestro]                 le terminal Orca de la session Maestro (`maestro` le crée)
     terminal = "term_…"
 
+    [restart]                 un redémarrage de Maestro en cours (`ballet_restart.py when-idle`) ; absent sinon
+    terminal = "term_…"       le terminal `maestro-restart` qui l'exécute
+    paused = true             le drapeau de pause est le sien : il le retire à la fin
+
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
     auto_launch = ["Task", "Bug"]    les types que Maestro lance seul ; vide ou absent : il demande toujours
@@ -355,6 +359,11 @@ def resume(state=None):
     return "auto launch resumed: the projects' auto_launch rule applies again"
 
 
+def is_paused(state=None):
+    """Le drapeau `auto_launch_paused` est-il posé ?"""
+    return _pause_flag(state).exists()
+
+
 def _decision(project, kind, config, state, number=None, seen=None):
     if project not in config["projects"]:
         return f"ask the Director (unknown project {project})"
@@ -368,8 +377,9 @@ def _decision(project, kind, config, state, number=None, seen=None):
         return f"ask the Director ([projects.{project}] auto_launch must be a list of types)"
     if kind.casefold() not in (entrusted.casefold() for entrusted in trusted):
         return f"ask the Director ({kind} is not in auto_launch of {project})"
-    if number is not None and _conductor_gone(f"{project}#{number}", state):
-        return "ask the Director (its last Conductor is gone: relaunching on its own could loop)"
+    last = _last_conductor_state(f"{project}#{number}", state) if number is not None else ""
+    if last in (ballet_conductors.GONE, ballet_conductors.STOPPED):
+        return f"ask the Director (its last Conductor is {last}: relaunching on its own could loop)"
     return "launch"
 
 
@@ -392,10 +402,11 @@ def _kept_item(project, number, state):
     return next((item for item in ballet_monitor.read_ready(state).get(project, []) if str(item["number"]) == str(number)), {})
 
 
-def _conductor_gone(key, state):
-    """Le dernier Conductor de l'élément a disparu sans finir : seul le Director décide de le relancer."""
+def _last_conductor_state(key, state):
+    """L'état du dernier Conductor de l'élément ; vide sans Conductor. Disparu ou arrêté sans finir : seul le Director
+    décide de le relancer."""
     line = ballet_conductors.read(state).get(key)
-    return bool(line) and ballet_conductors.state_of(line) == ballet_conductors.GONE
+    return ballet_conductors.state_of(line) if line else ""
 
 
 def _is_list_of_text(value):
@@ -484,6 +495,27 @@ def _renewed_recently(renewed):
         return datetime.now(timezone.utc) - datetime.fromisoformat(renewed) < LEASE_TTL
     except ValueError:   # pas de date, ou illisible : le bail n'a pas été renouvelé
         return False
+
+
+def confirm_owner(owner, state=None):
+    """Le jeton tient le bail : il est renouvelé ; sinon la session n'est plus Maestro (`MaestroError`)."""
+    _owned_mailbox(owner, state)
+
+
+def is_busy(state=None):
+    """La session Maestro vit mais ne dort pas sur sa boîte : elle traite un message (ou une réponse à porter). Sans
+    session vivante, rien n'est occupé."""
+    lease = read_config(state)["lease"]
+    return _lease_alive(lease) and not _wait_runs(lease["pid"])
+
+
+def release_lease(state=None):
+    """Lève le bail et arrête l'attente de son propriétaire : la session suivante le prend sans `--take-over`."""
+    with ballet_state.locked(state):
+        config = read_config(state)
+        _stop_the_wait(config["lease"]["pid"])
+        config["lease"] = dict(EMPTY_LEASE)
+        write_config(config, state)
 
 
 def _lease_held_message(lease):
@@ -717,7 +749,7 @@ def _conductor_lines(registry, orca):
     lines = []
     for key, line in sorted(registry.items()):
         terminal = _terminal_state(line["terminal"], alive)
-        if ballet_conductors.state_of(line) in (ballet_conductors.FINISHED, ballet_conductors.GONE, ballet_conductors.CLOSED) and terminal == "gone":
+        if ballet_conductors.state_of(line) != ballet_conductors.RUNNING and terminal == "gone":
             continue
         last = f"last: {line['event']}" if line.get("event") else "no event yet"
         lines.append("  ".join(part for part in (key, line.get("kind") or "?", ballet_conductors.state_of(line),

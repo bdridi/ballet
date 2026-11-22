@@ -414,6 +414,28 @@ def status_session(session_item, home, tools):
 # --- la session ---------------------------------------------------------------
 
 
+def stop_session(item, reason, home, tools):
+    """Maestro arrête le Conductor de l'élément (`ballet_launch.py stop`) : la Rehearsal en cours passe `escalated` (elle
+    attend le Director ; son état, sa branche et son worktree sont gardés) et le Ballet status de l'issue le dit. Rend les
+    dispatches de ses workers, que l'appelant arrête, et les lignes de ce qui a été fait ; sans session ouverte, rien."""
+    session = next((open_ for open_ in open_sessions(home) if item in (open_.item.lstrip("#"), open_.issue)), None)
+    if not session:
+        return [], []
+    dispatches = _escalate_current(session, reason, home)
+    return dispatches, _follow_on_github(session.item, Step("escalate", reason), home, tools).done
+
+
+def _escalate_current(session, reason, home):
+    if not session.current or not _state_path(session.current, home).is_file():
+        return []
+    rehearsal = load(session.current, home)
+    if rehearsal.status == "open":
+        rehearsal.status, rehearsal.reason = "escalated", reason
+    _log(home, rehearsal, "stopped", {"reason": reason})
+    _save(rehearsal, home)
+    return list(rehearsal.dispatches.values())
+
+
 def _new_session(item, config, tools):
     """La session d'un élément : son mode, l'approbation de son plan et son statut, lus sur son issue ; une feature
     sans issue part en `assisted`, et suit le profil pour son plan."""

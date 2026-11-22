@@ -667,6 +667,20 @@ def _refuse_if_open(item, home):
         raise WorkshopError(f"the Workshop of {item} is already open ({path})")
 
 
+def stop(item, reason, home):
+    """Maestro arrête le Conductor du Workshop (`ballet_launch.py stop`) : il passe `escalated` (il attend le Director ;
+    son worktree et ses specs sont gardés). Rend les dispatches de ses workers, que l'appelant arrête ; sans Workshop
+    ouvert pour cet élément, rien."""
+    workshop = next((open_ for open_ in open_workshops(home) if open_.item == item), None)
+    if not workshop:
+        return []
+    if workshop.status == "open":
+        workshop.status, workshop.reason = "escalated", reason
+    _log(home, workshop, "stopped", {"reason": reason})
+    _save(workshop, home)
+    return [dispatch for dispatch in (workshop.dispatch, workshop.advisor_dispatch) if dispatch]
+
+
 def open_workshops(home):
     found = [Workshop(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(_run_dir(home).glob(f"{WORKSHOP_PREFIX}*.json"))]
     return [workshop for workshop in found if workshop.status != "done"]

@@ -86,7 +86,6 @@ It prints `maestro created: terminal <handle>` or `maestro already there: …`. 
 
 Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca, with or without a profile), the mailbox, the Monitor, Maestro. Then tell the Director where Maestro is: **it runs in the Orca tab `maestro`, and it is reachable in the Claude app under the name « ballet maestro »** (Remote Control, on the Mac as on a phone). It took the lease, tells what happened while they were away, then sleeps on the mailbox and wakes at each escalation. **They must not close that tab.** Opening `/ballet:maestro` somewhere else runs into the lease, and `--take-over` is only for when they say yes (the session in the tab then stops being Maestro). If step 6 said a session already held the lease, report that instead: no second Maestro was started. Then say plainly what is **not there yet**:
 
-- `stop` and `restart` (Maestro launches Conductors, but cannot stop one yet);
 - a Monitor that spots a Conductor that is frozen (its terminal alive, nothing said): it only sees a vanished one;
 - the headless mode (a VPS, `orca serve` under systemd, the keeper).
 

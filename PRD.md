@@ -33,7 +33,7 @@ Un terme par concept, et un seul nom partout : la doc, les skills, les clés de 
 | **Dancer** | dev | Exécute le plan. |
 | **Critic** | validateur | Juge le travail et rend un verdict. |
 | **Conductor** | coordinateur | Fait tourner une boucle d'un projet : enchaîne les rôles, porte leurs questions et intègre leur travail. Il ne danse pas et ne compose pas. |
-| **Maestro** (`/ballet:maestro`) | superviseur | Le point d'entrée unique du Director pour tous ses projets : une session qui attend sa boîte Orca, où les Conductors et le Monitor écrivent, lui rapporte, porte ses réponses et seule lance les Conductors (OPP-02). |
+| **Maestro** (`/ballet:maestro`) | superviseur | Le point d'entrée unique du Director pour tous ses projets : une session qui attend sa boîte Orca, où les Conductors et le Monitor écrivent, lui rapporte, porte ses réponses et seule lance les Conductors, les ferme quand ils ont fini, les arrête sur le mot du Director (`stop`, le travail gardé) et redémarre sa propre session pour vider son contexte (`restart`, quand plus aucun Conductor ne travaille). |
 
 - **Rôle** : Dramaturg, Choreographer, Dancer ou Critic. Le Conductor n'est pas un rôle : il les fait jouer.
 - **Worker** : l'instance d'agent (un CLI et un modèle) qu'Orca lance pour jouer un rôle.
@@ -459,7 +459,7 @@ Pourquoi le home du projet : le Dramaturg et le Conductor y voient le contexte s
 ## 14. Hors périmètre de la V1
 
 - la Rehearsal en parallèle et la file de merge ;
-- Maestro, le point d'entrée du Director pour plusieurs projets : priorités et budget entre eux, résumé du matin (OPP-02) ;
+- Maestro, le point d'entrée du Director pour plusieurs projets : priorités et budget entre eux, résumé du matin (OPP-53, OPP-52) ;
 - le Workshop en autopilot qui choisit seul dans le backlog, sans propositions (il choisit déjà, mais ses issues sortent `proposed`) ;
 - le tableau de bord de monitoring abouti (le journal est dans la V1 ; la Scène n'en est que le concept, voir §12) ;
 - la migration de Flownest.

@@ -11,7 +11,8 @@ Une ligne par `<projet>#<élément>`, écrite par deux voies : `ballet_launch.py
     seen, event     la date et le nom du dernier événement annoncé (`escalate`, `done`)
     state           `running` ; `finished` dès que le Conductor a annoncé `done` ; `gone` quand le Monitor a vu son
                     terminal disparaître d'Orca alors qu'il tournait encore ; `closed` quand Maestro a fermé le terminal
-                    d'un Conductor fini (`ballet_launch.py close`)
+                    d'un Conductor fini (`ballet_launch.py close`) ; `stopped` quand Maestro l'a arrêté en cours de route
+                    (`ballet_launch.py stop`) : terminal fermé, workers arrêtés, travail gardé
     finished_told   vrai quand le Monitor a signalé à Maestro ce Conductor fini dont le terminal restait ouvert
 
 Une ligne écrite avant l'étape 3 (terminal, `seen`, `event`) reste lisible : ce qui manque se déduit.
@@ -25,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 import ballet_state
 
 CONDUCTORS_NAME = "conductors.json"
-RUNNING, FINISHED, GONE, CLOSED = "running", "finished", "gone", "closed"
+RUNNING, FINISHED, GONE, CLOSED, STOPPED = "running", "finished", "gone", "closed", "stopped"
 DONE_EVENT = "done"
 CONDUCTOR_EVENTS = ("escalate", DONE_EVENT)   # ce que dit un Conductor ; `ready` et `gone` sont ceux du Monitor
 CONDUCTOR_SUBJECT = re.compile(r"^(\S+#\S+) · (.+)$")   # `<projet>#<élément> · <événement>`
@@ -116,6 +117,19 @@ def mark_closed(key, terminal, state=None):
         if not line or state_of(line) != FINISHED or line["terminal"] != terminal:
             return False
         registry[key] = {**line, "state": CLOSED, "seen": _now(), "event": CLOSED}
+        _write(registry, state)
+        return True
+
+
+def mark_stopped(key, terminal, state=None):
+    """Maestro a arrêté un Conductor qui tournait (ou dont le terminal avait disparu) : sa ligne passe à `stopped`. Une
+    ligne qui a changé entre-temps n'est pas touchée. Rend vrai quand elle a été marquée."""
+    with ballet_state.locked(state):
+        registry = read(state)
+        line = registry.get(key)
+        if not line or state_of(line) not in (RUNNING, GONE) or line["terminal"] != terminal:
+            return False
+        registry[key] = {**line, "state": STOPPED, "seen": _now(), "event": STOPPED}
         _write(registry, state)
         return True
 

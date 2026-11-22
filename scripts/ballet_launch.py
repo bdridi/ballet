@@ -3,6 +3,7 @@
     python3 ballet_launch.py rehearsal <projet> <élément> [--ignore-blockers]   # `#12`, `12` ou `FEAT-002`
     python3 ballet_launch.py workshop <projet> [<élément>]      # un Workshop autopilot : `BUG-004`, ou la première ligne de *Next up*
     python3 ballet_launch.py close <projet>#<élément>            # ferme le terminal d'un Conductor fini
+    python3 ballet_launch.py stop <projet>#<élément>             # arrête un Conductor en cours, travail gardé
 
 Maestro seul l'appelle (sur la demande du Director, ou quand sa règle `auto_launch` le décide pour un élément que le Monitor
 a vu passer `ready`) : c'est le seul lanceur de Ballet.
@@ -29,12 +30,20 @@ Remote Control de la session s'y ajoute si on la lit dans le terminal dans les s
 resté ouvert (`· finished`). Il ne ferme qu'un Conductor `finished` que Maestro a lancé : `orca terminal close` arrête
 `claude` et son Remote Control (la conversation reste reprenable par `claude --resume`), et la ligne passe à `closed`.
 Un terminal déjà fermé est noté `closed` sans rien fermer.
+
+`stop` arrête un Conductor qui tourne (ou dont le terminal a disparu), sur la demande du Director, en gardant le travail :
+le terminal est fermé (la conversation reste reprenable) ; les workers Orca de sa Rehearsal en cours, ou de son Workshop,
+sont arrêtés (`orchestration worker-stop`, qui n'efface jamais le worktree) ; la Rehearsal ou le Workshop passe
+`escalated`, motif noté (état `.ballet/run/`, branche, worktree et PR gardés) ; le `Ballet status` de l'issue passe
+`escalated` (jamais `ready`, que le Monitor ferait relancer) ; la ligne du registre passe à `stopped`. Une session restée
+ouverte refuse un nouveau lancement : reprendre en plein vol est l'objet d'OPP-80.
 """
 
 import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 import tomllib
@@ -57,7 +66,12 @@ LAUNCH_LOCK = "launch.lock"
 REMOTE_CONTROL_URL = re.compile(r"https://claude\.ai/code/\S+")
 URL_WAIT_SECONDS = 8
 URL_POLL_SECONDS = 1
-USAGE = "usage: rehearsal <project> <item> [--ignore-blockers] | workshop <project> [<item>] | close <project>#<item>"
+USAGE = ("usage: rehearsal <project> <item> [--ignore-blockers] | workshop <project> [<item>] "
+         "| close <project>#<item> | stop <project>#<item>")
+STOP_REASON = ("stopped by Maestro on the Director's word: its workers were stopped; state, branch and worktree are kept, "
+               "nothing resumes it by itself")
+ERROR_EXCERPT = 200
+KEPT_LINE = "the work is kept: state, branch and worktree are untouched; nothing resumes it by itself (a new launch is refused while its session is open)"
 
 
 class LaunchError(Exception):
@@ -125,6 +139,78 @@ def close_conductor(key, orca, state=None):
         orca(["terminal", "close", "--terminal", line["terminal"], "--json"])
         ballet_conductors.mark_closed(key, line["terminal"], state)
     return f"closed the {line['kind']} Conductor of {key}: terminal {line['terminal']} (its session stays resumable with claude --resume)"
+
+
+def stop_conductor(key, orca, state=None, tools=None):
+    """Arrête un Conductor qui tourne : son terminal, ses workers, puis son état de projet à `escalated` ; le travail reste.
+    `tools` (git, gh) est celui des tests ; sinon, ceux du dossier du projet."""
+    with ballet_state.locked(state, LAUNCH_LOCK):
+        line = _stoppable(key, state)
+        home = _project_home_or_none(line["project"], state)
+        lines = [_close_terminal(line["terminal"], orca)]
+        dispatches, project_lines = _escalate_work(line, home, tools)
+        lines += project_lines + _stop_workers(dispatches, orca) + [KEPT_LINE]
+        ballet_conductors.mark_stopped(key, line["terminal"], state)
+    return "\n".join([f"stopped the {line['kind']} Conductor of {key}:", *(f"- {text}" for text in lines)])
+
+
+def _stoppable(key, state):
+    """La ligne du registre, si ce Conductor peut être arrêté : il tourne (ou a disparu), et Maestro l'a lancé."""
+    line = ballet_conductors.read(state).get(key)
+    if not line:
+        raise LaunchError(f"no Conductor {key} in the registry")
+    current = ballet_conductors.state_of(line)
+    if current not in (ballet_conductors.RUNNING, ballet_conductors.GONE):
+        hint = " (close a finished one)" if current == ballet_conductors.FINISHED else ""
+        raise LaunchError(f"the Conductor of {key} is {current}: only a running or gone Conductor is stopped{hint}")
+    if not line.get("kind"):
+        raise LaunchError(f"Maestro did not launch the Conductor of {key}: its terminal {line['terminal']} is the Director's to stop")
+    return line
+
+
+def _close_terminal(terminal, orca):
+    if terminal not in ballet_maestro.live_terminals(orca):
+        return f"terminal {terminal} was already closed"
+    orca(["terminal", "close", "--terminal", terminal, "--json"])
+    return f"terminal {terminal} closed (its session stays resumable with claude --resume)"
+
+
+def _project_home_or_none(project, state):
+    try:
+        return _known_project(project, state)
+    except LaunchError:
+        return None
+
+
+def _escalate_work(line, home, tools):
+    """(les dispatches des workers à arrêter, ce qui a été fait dans le projet) ; rien quand le dossier du projet est perdu."""
+    if home is None:
+        return [], [f"the folder of {line['project']} is unknown: its state was not touched"]
+    if line["kind"] == "workshop":
+        return ballet_workshop.stop(line["item"], STOP_REASON, home), []
+    return ballet_rehearsal.stop_session(line["item"], STOP_REASON, home, tools or _tools_in(home))
+
+
+def _stop_workers(dispatches, orca):
+    """Un worker qui ne s'arrête pas est dit ; les autres le sont quand même."""
+    lines = []
+    for dispatch in dispatches:
+        try:
+            orca(["orchestration", "worker-stop", "--dispatch", dispatch, "--json"])
+            lines.append(f"worker {dispatch} stopped")
+        except MaestroError as error:
+            lines.append(f"worker {dispatch} not stopped: {str(error)[:ERROR_EXCERPT]}")
+    return lines
+
+
+def _tools_in(home):
+    """Les commandes de la Rehearsal (`gh`, `git`), lancées dans le dossier du projet : Maestro n'y est pas."""
+    def run(arguments):
+        completed = subprocess.run(arguments, cwd=home, capture_output=True, text=True)
+        if completed.returncode != 0:
+            raise ballet_rehearsal.RehearsalError(completed.stderr.strip() or completed.stdout.strip() or f"{arguments[0]} failed")
+        return completed.stdout
+    return ballet_rehearsal.Tools(run=run)
 
 
 def _closable(key, state):
@@ -321,6 +407,8 @@ def _command(arguments, orca):
         return launch_workshop(arguments[1], arguments[2] if len(arguments) == 3 else "", orca)
     if arguments[:1] == ["close"] and len(arguments) == 2 and "#" in arguments[1]:
         return close_conductor(arguments[1], orca)
+    if arguments[:1] == ["stop"] and len(arguments) == 2 and "#" in arguments[1]:
+        return stop_conductor(arguments[1], orca)
     raise UsageError(USAGE)
 
 
