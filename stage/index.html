@@ -3,660 +3,653 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ballet Stage</title>
+<title>Ballet · Scène</title>
+<link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css">
 <style>
-  :root {
-    --bg:#fbfbfc; --surface:#ffffff; --panel:#f3f4f6; --fg:#16171a; --muted:#6b6f78; --faint:#9aa0a9; --line:#e6e7eb;
-    --pick:#eef2ff; --pick-line:#c7d2fe; --focus:#4f46e5;
-    --open:#15803d; --open-bg:#dcfce7; --escalated:#b45309; --escalated-bg:#fef3c7; --done:#6b7280; --done-bg:#eef0f3;
-    --bad:#b91c1c; --bad-bg:#fee2e2;
-    --dramaturg:#9333ea; --choreographer:#0d9488; --dancer:#2563eb; --critic:#ea580c; --conductor:#52525b; --director:#be123c;
-    --a-running:#4f46e5; --a-prog:#a16207; --a-done:#047857;
-    --sky:#0369a1; --violet:#7c3aed; --blue:#2563eb; --red:#b91c1c; --teal:#0f766e; --orange:#c2410c; --amber:#a16207; --slate:#475569;
-    --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+/* Style neutre : le design system viendra plus tard. */
+:root {
+  --bg:#f7f7f8; --surface:#fff; --panel:#f0f1f3; --fg:#18181b; --muted:#6b6f78; --faint:#a1a5ad; --line:#e4e5e9;
+  --focus:#4f46e5; --ok:#15803d; --ok-bg:#dcfce7; --warn:#b45309; --warn-bg:#fef3c7; --bad:#b91c1c; --bad-bg:#fee2e2; --run:#4f46e5;
+  --dramaturg:#9333ea; --choreographer:#0d9488; --dancer:#2563eb; --critic:#ea580c; --conductor:#52525b; --director:#be123c; --script:#52525b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0f1012; --surface:#17181b; --panel:#202226; --fg:#ececef; --muted:#9a9ea7; --faint:#62666e; --line:#2a2c31;
+    --focus:#818cf8; --ok:#4ade80; --ok-bg:#14301f; --warn:#fbbf24; --warn-bg:#352a0e; --bad:#f87171; --bad-bg:#3a1717; --run:#818cf8;
+    --dramaturg:#c084fc; --choreographer:#2dd4bf; --dancer:#60a5fa; --critic:#fb923c; --conductor:#a1a1aa; --director:#fb7185; --script:#a1a1aa;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:#0f1012; --surface:#17181b; --panel:#1e2024; --fg:#ececef; --muted:#9a9ea7; --faint:#6b6f78; --line:#2a2c31;
-      --pick:#1f2440; --pick-line:#3b4485; --focus:#818cf8;
-      --open:#4ade80; --open-bg:#14301f; --escalated:#fbbf24; --escalated-bg:#352a0e; --done:#9ca3af; --done-bg:#24262b;
-      --bad:#f87171; --bad-bg:#3a1717;
-      --dramaturg:#c084fc; --choreographer:#2dd4bf; --dancer:#60a5fa; --critic:#fb923c; --conductor:#a1a1aa; --director:#fb7185;
-      --a-running:#818cf8; --a-prog:#facc15; --a-done:#34d399;
-      --sky:#38bdf8; --violet:#a78bfa; --blue:#60a5fa; --red:#f87171; --teal:#2dd4bf; --orange:#fb923c; --amber:#fbbf24; --slate:#94a3b8;
-      --shadow:none;
-    }
-  }
-  * { box-sizing:border-box; }
-  html, body { height:100%; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
-  button { font:inherit; color:inherit; }
-  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
-  code, pre, .mono { font-family:ui-monospace, "SF Mono", Menlo, monospace; }
+}
+:root[data-theme="dark"] {
+    --bg:#0f1012; --surface:#17181b; --panel:#202226; --fg:#ececef; --muted:#9a9ea7; --faint:#62666e; --line:#2a2c31;
+    --focus:#818cf8; --ok:#4ade80; --ok-bg:#14301f; --warn:#fbbf24; --warn-bg:#352a0e; --bad:#f87171; --bad-bg:#3a1717; --run:#818cf8;
+    --dramaturg:#c084fc; --choreographer:#2dd4bf; --dancer:#60a5fa; --critic:#fb923c; --conductor:#a1a1aa; --director:#fb7185; --script:#a1a1aa;
+}
+* { box-sizing:border-box; }
+html, body { margin:0; height:100%; }
+body { background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
+a { color:inherit; text-decoration:none; }
+button { font:inherit; color:inherit; cursor:pointer; }
+:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+.mono, pre, code { font-family:ui-monospace, "SF Mono", Menlo, monospace; }
+.muted { color:var(--muted); } .faint { color:var(--faint); }
+.num { font-variant-numeric:tabular-nums; }
+h1 { font-size:22px; letter-spacing:-.015em; margin:4px 0; }
+h2 { font-size:15px; margin:0; }
+h3 { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin:0 0 8px; display:flex; align-items:center; gap:8px; }
+.empty { color:var(--muted); padding:24px 0; text-align:center; }
 
-  /* --- en-tête --- */
-  .top { height:52px; display:flex; align-items:center; gap:14px; padding:0 20px; border-bottom:1px solid var(--line); background:var(--surface); }
-  .brand { display:flex; align-items:baseline; gap:8px; }
-  .brand b { font-size:16px; letter-spacing:-.01em; }
-  .brand span { color:var(--muted); }
-  .live { margin-left:auto; display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
-  .dot { width:8px; height:8px; border-radius:50%; background:var(--open); box-shadow:0 0 0 0 var(--open); animation:pulse 2s infinite; }
-  .live.off .dot { background:var(--bad); animation:none; }
-  @keyframes pulse { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--open) 50%, transparent); } 70% { box-shadow:0 0 0 6px transparent; } 100% { box-shadow:0 0 0 0 transparent; } }
+/* rôles, pastilles, badges */
+.role { display:inline-flex; align-items:center; gap:5px; font-weight:600; color:var(--r); }
+.role::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--r); }
+.r-dramaturg { --r:var(--dramaturg); } .r-choreographer { --r:var(--choreographer); } .r-dancer { --r:var(--dancer); }
+.r-critic { --r:var(--critic); } .r-conductor { --r:var(--conductor); } .r-director { --r:var(--director); } .r-script { --r:var(--script); }
+.pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; background:var(--panel); color:var(--muted); }
+.p-open { color:var(--run); background:color-mix(in srgb, var(--run) 14%, transparent); }
+.p-open::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; animation:blink 1.4s infinite; }
+.p-escalated { color:var(--warn); background:var(--warn-bg); } .p-done { color:var(--ok); background:var(--ok-bg); }
+.badge { font-size:10.5px; font-weight:700; padding:0 6px; border-radius:4px; background:var(--panel); color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+.badge.ok { background:var(--ok-bg); color:var(--ok); } .badge.warn { background:var(--warn-bg); color:var(--warn); } .badge.bad { background:var(--bad-bg); color:var(--bad); }
+.kind { font-size:11px; font-weight:600; padding:0 6px; border-radius:4px; border:1px solid var(--line); color:var(--muted); }
+@keyframes blink { 50% { opacity:.25; } }
+@keyframes pulse { 0% { stroke-opacity:1; } 50% { stroke-opacity:.25; } 100% { stroke-opacity:1; } }
 
-  main { display:grid; grid-template-columns:340px minmax(0, 1fr); height:calc(100vh - 52px); }
+/* cartes génériques */
+.card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+.metrics { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px; }
+.metric { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:9px 12px; }
+.metric small { color:var(--muted); font-size:11.5px; display:block; }
+.metric b { font-size:19px; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.metric b em { font-style:normal; font-size:12px; color:var(--muted); font-weight:500; }
+.bar { height:5px; border-radius:3px; background:var(--panel); overflow:hidden; display:flex; }
+.bar i { display:block; height:100%; background:var(--ok); }
+.bar i.agent { background:var(--dancer); } .bar i.script { background:var(--script); } .bar i.over { background:var(--warn); }
+table.list { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+table.list th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; padding:8px 12px; background:var(--panel); }
+table.list td { padding:9px 12px; border-top:1px solid var(--line); vertical-align:middle; }
+table.list tr[data-href] { cursor:pointer; } table.list tr[data-href]:hover td { background:var(--panel); }
+.callout { padding:10px 14px; border-radius:10px; background:var(--warn-bg); color:var(--fg); border:1px solid color-mix(in srgb, var(--warn) 35%, transparent); }
+.callout b:first-child { color:var(--warn); }
+.callout.info { background:color-mix(in srgb, var(--run) 9%, var(--surface)); border-color:color-mix(in srgb, var(--run) 30%, transparent); }
+.callout.info b:first-child { color:var(--run); }
+.tabs { display:inline-flex; background:var(--panel); border-radius:8px; padding:2px; text-transform:none; letter-spacing:0; }
+.tabs button { border:0; background:none; padding:3px 10px; border-radius:6px; font-size:12px; color:var(--muted); }
+.tabs button[aria-pressed="true"] { background:var(--surface); color:var(--fg); box-shadow:0 1px 2px rgba(0,0,0,.08); }
 
-  /* --- colonne des projets --- */
-  aside { border-right:1px solid var(--line); overflow:auto; padding:12px 12px 24px; background:var(--surface); }
-  .project + .project { margin-top:20px; }
-  .project-head { display:flex; align-items:center; gap:8px; margin:4px 4px 8px; }
-  .project-head h2 { font-size:13px; margin:0; letter-spacing:.02em; }
-  .tag { font-size:11px; font-weight:600; color:var(--c, var(--muted)); border:1px solid color-mix(in srgb, var(--c, var(--muted)) 30%, transparent);
-    background:color-mix(in srgb, var(--c, var(--muted)) 12%, transparent); border-radius:999px; padding:0 7px; white-space:nowrap; }
-  .c-sky { --c:var(--sky); } .c-violet { --c:var(--violet); } .c-blue { --c:var(--blue); } .c-red { --c:var(--red); }
-  .c-teal { --c:var(--teal); } .c-orange { --c:var(--orange); } .c-amber { --c:var(--amber); } .c-slate { --c:var(--slate); }
-  .stopped { margin:0 4px 8px; padding:8px 10px; border-radius:8px; background:var(--escalated-bg); color:var(--escalated); font-size:12px; }
-  .card-link { display:block; text-decoration:none; color:inherit; padding:10px 12px; border:1px solid transparent; border-radius:10px; margin-bottom:4px; }
-  .card-link:hover { background:var(--panel); }
-  .card-link.picked { background:color-mix(in srgb, var(--accent) 11%, var(--surface)); border-color:color-mix(in srgb, var(--accent) 45%, transparent); }
-  .card-link.ghost { border:1px dashed var(--line); background:transparent; cursor:default; }
-  .card-link.ghost:hover { background:transparent; }
-  .side-block { --accent:var(--a-running); margin:0 0 14px; padding:8px 8px 4px; border:1px solid var(--line);
-    border-left:3px solid var(--accent); border-radius:10px; background:color-mix(in srgb, var(--accent) 4%, var(--surface)); }
-  .side-block.program { --accent:var(--a-prog); }
-  .side-block.finished { --accent:var(--a-done); background:var(--surface); }
-  .side-head { display:flex; align-items:center; gap:8px; width:calc(100% - 8px); margin:2px 4px 8px; padding:0; border:0; background:none; cursor:pointer; text-align:left;
-    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); }
-  .side-head::before { content:"▾"; font-size:14px; width:12px; transition:transform .12s; }
-  .side-block.folded .side-head { margin-bottom:4px; }
-  .side-block.folded .side-head::before { transform:rotate(-90deg); }
-  .side-block.folded .side-body { display:none; }
-  .side-head i { width:8px; height:8px; border-radius:50%; background:var(--accent); }
-  .side-head .count { margin-left:auto; min-width:20px; text-align:center; padding:0 6px; border-radius:999px; font-size:11px;
-    color:var(--accent); background:color-mix(in srgb, var(--accent) 15%, transparent); }
-  .side-empty { margin:0 4px 8px; color:var(--muted); font-size:12px; }
-  .side-block .group-label { display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:0; font-size:12px; color:var(--muted); margin:8px 4px 4px; }
-  .side-block .group-label b { color:var(--fg); }
-  .card-row { display:flex; align-items:center; gap:8px; }
-  .card-row b { font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .card-title { color:var(--fg); font-size:13px; margin:2px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .card-meta { color:var(--muted); font-size:12px; display:flex; gap:8px; }
-  .group-label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); margin:12px 4px 4px; }
+/* le fil (v1) */
+ol.thread { list-style:none; margin:0; padding:0; position:relative; }
+ol.thread::before { content:""; position:absolute; left:15px; top:6px; bottom:6px; width:2px; background:var(--line); }
+.ev { position:relative; display:grid; grid-template-columns:32px minmax(0, 1fr); gap:12px; padding:5px 0; }
+.avatar { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; color:#fff; background:var(--r); z-index:1; border:3px solid var(--bg); }
+.bubble { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:8px 12px; min-width:0; position:relative; }
+.ev.handoff .bubble { background:transparent; border-style:dashed; }
+.bubble > time, .lbody > time { position:absolute; right:12px; top:8px; color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; }
+.lbody { position:relative; padding:5px 50px 0 0; font-size:13px; color:var(--muted); }
+.lbody > time { right:0; top:5px; }
+.lbody b { color:var(--fg); }
+.meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; padding-right:44px; }
+.tick { width:32px; display:flex; justify-content:center; padding-top:10px; z-index:1; }
+.tick i { width:10px; height:10px; border-radius:50%; background:var(--bg); border:2px solid var(--faint); }
+.ev.ok .tick i { background:var(--ok); border-color:var(--ok); } .ev.bad .tick i { background:var(--bad); border-color:var(--bad); }
+.ev.warn .tick i { background:var(--warn); border-color:var(--warn); } .ev.warn .lbody, .ev.warn .lbody b { color:var(--warn); }
+.ev.run .tick i { border-color:var(--run); } .ev.quiet { opacity:.75; }
+.ev.bad .lbody b { color:var(--bad); }
+.steps { margin:2px 0 0; padding:0; list-style:none; font-size:12px; }
+.steps li::before { content:"· "; color:var(--faint); }
+pre.text { white-space:pre-wrap; word-break:break-word; margin:6px 0 0; padding:8px 10px; border-radius:8px; background:var(--panel); font-size:12px; line-height:1.5; }
+.sep-day { display:flex; align-items:center; gap:10px; margin:12px 0 4px 44px; font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.06em; }
+.sep-day::after { content:""; flex:1; height:1px; background:var(--line); }
 
-  /* --- pastilles --- */
-  .pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; }
-  .pill.open { color:var(--a-running); background:color-mix(in srgb, var(--a-running) 14%, transparent); }
-  .pill.escalated { color:var(--escalated); background:var(--escalated-bg); }
-  .pill.done { color:var(--done); background:var(--done-bg); }
-  .pill.todo { color:var(--muted); background:var(--panel); }
-  .role { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--r); }
-  .role::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--r); }
-  .r-dramaturg { --r:var(--dramaturg); } .r-choreographer { --r:var(--choreographer); } .r-dancer { --r:var(--dancer); }
-  .r-critic { --r:var(--critic); } .r-conductor { --r:var(--conductor); } .r-director { --r:var(--director); }
-  .badge { font-size:11px; font-weight:600; padding:0 6px; border-radius:4px; background:var(--panel); color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
-  .badge.ok { background:var(--open-bg); color:var(--open); } .badge.warn { background:var(--escalated-bg); color:var(--escalated); }
-  .badge.bad { background:var(--bad-bg); color:var(--bad); }
-
-  /* --- détail --- */
-  section#detail { overflow:auto; padding:24px clamp(16px, 3vw, 40px) 48px; }
-  .wrap { max-width:980px; margin:0 auto; }
-  .hero h1 { font-size:22px; letter-spacing:-.015em; margin:6px 0 4px; }
-  .hero h1 .id { color:var(--muted); font-weight:500; margin-right:8px; font-variant-numeric:tabular-nums; }
+  /* La Scène : Dashboard, en scène, programme, Workshops, Rehearsals (sessions de Conductor), tickets, Premieres ;
+     transitions et communication en Mermaid. Données : /api/stage, lues dans ~/.ballet/ballet.db. */
+  .top { height:52px; display:flex; align-items:center; gap:12px; padding:0 18px; border-bottom:1px solid var(--line); background:var(--surface); position:sticky; top:0; z-index:5; }
+  .brand b { font-size:16px; } .brand span { color:var(--muted); margin-left:6px; }
+  select.project { font:inherit; font-size:13px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  .top nav { display:flex; gap:2px; }
+  .top nav a { padding:5px 9px; border-radius:7px; color:var(--muted); font-size:13px; white-space:nowrap; }
+  .top nav a.on { background:var(--panel); color:var(--fg); font-weight:600; }
+  .health { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:12.5px; padding:3px 10px; border-radius:999px; background:var(--ok-bg); color:var(--ok); font-weight:600; }
+  .health.warn { background:var(--warn-bg); color:var(--warn); }
+  .clock { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .layout { display:grid; grid-template-columns:320px minmax(0,1fr); height:calc(100vh - 52px); }
+  aside { border-right:1px solid var(--line); background:var(--surface); overflow:auto; padding:12px; }
+  .blk { --a:var(--run); border:1px solid var(--line); border-left:3px solid var(--a); border-radius:10px; padding:4px 6px; margin-bottom:12px; }
+  .blk.dir { --a:var(--warn); } .blk.prog { --a:#a16207; } .blk.tix { --a:var(--ok); }
+  .blk-head { display:flex; align-items:center; gap:8px; width:100%; padding:6px; border:0; background:none; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--a); text-align:left; }
+  .blk-head::before { content:"▾"; font-size:13px; width:10px; transition:transform .12s; }
+  .blk.folded .blk-head::before { transform:rotate(-90deg); } .blk.folded .blk-body { display:none; }
+  .blk-head .count { margin-left:auto; background:color-mix(in srgb, var(--a) 14%, transparent); padding:0 7px; border-radius:999px; }
+  .blk-body { padding-bottom:4px; }
+  .blk-foot { display:block; font-size:12px; color:var(--focus); padding:4px 8px 2px; }
+  .item { display:block; padding:7px 9px; border-radius:8px; border:1px solid transparent; }
+  .item:hover { background:var(--panel); }
+  .item.picked { background:color-mix(in srgb, var(--a) 10%, var(--surface)); border-color:color-mix(in srgb, var(--a) 40%, transparent); }
+  .item .row { display:flex; align-items:center; gap:6px; font-size:13px; } .item .row .end { margin-left:auto; }
+  .item .t { font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .s { font-size:11.5px; color:var(--muted); display:flex; gap:6px; align-items:center; margin-top:2px; }
+  .proj { font-size:10.5px; font-weight:700; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  .sim { font-size:10px; font-weight:700; color:#a16207; border:1px dashed #a16207; border-radius:4px; padding:0 4px; }
+  .legacy { font-size:10px; color:var(--muted); border:1px dotted var(--faint); border-radius:4px; padding:0 4px; }
+  main { overflow:auto; padding:22px clamp(16px, 3vw, 40px) 60px; }
+  .wrap { max-width:1100px; margin:0 auto; display:grid; gap:20px; }
+  .crumbs { font-size:12.5px; color:var(--muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; } .crumbs a:hover { color:var(--fg); }
   .hero-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px; color:var(--muted); font-size:13px; }
-  .hero-line .sep { color:var(--faint); }
-  .callout { margin:16px 0 0; padding:12px 14px; border-radius:10px; border:1px solid color-mix(in srgb, var(--escalated) 35%, transparent); background:var(--escalated-bg); }
-  .callout b { color:var(--escalated); display:block; margin-bottom:2px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
-  .callout p { margin:2px 0; }
-  .callout.done { border-color:color-mix(in srgb, var(--open) 30%, transparent); background:var(--open-bg); }
-  .callout.done b { color:var(--open); }
-
-  .stepper { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin:20px 0; }
-  .phase { padding:8px 10px 9px; border-radius:8px; background:var(--panel); position:relative; overflow:hidden; }
-  .phase::before { content:""; position:absolute; left:0; top:0; right:0; height:3px; background:var(--line); }
-  .phase small { display:block; color:var(--muted); font-size:11px; }
-  .phase span { font-weight:600; font-size:13px; }
-  .phase.done::before { background:var(--open); }
-  .phase.now::before { background:var(--focus); }
-  .phase.wait::before { background:var(--escalated); }
-  .phase.skip span, .phase.todo span { color:var(--muted); font-weight:500; }
-
-  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
-  .friction { padding:8px 0; border-top:1px solid var(--line); }
-  .friction:first-of-type { border-top:0; }
-  .friction .steps { margin:4px 0 0; }
-  .metric { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; box-shadow:var(--shadow); }
-  .metric small { color:var(--muted); font-size:12px; display:block; }
-  .metric b { font-size:18px; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
-  .metric b em { font-style:normal; font-size:13px; color:var(--muted); font-weight:500; }
-  .bar { height:5px; border-radius:3px; background:var(--panel); margin-top:6px; overflow:hidden; }
-  .bar i { display:block; height:100%; background:var(--open); border-radius:3px; }
-  .bar.over i { background:var(--bad); }
-
-  .block { margin-top:24px; }
-  .block > h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px; display:flex; align-items:center; gap:8px; }
-  .cast { display:flex; flex-wrap:wrap; gap:8px; }
-  .actor { border:1px solid var(--line); border-radius:10px; padding:7px 11px; background:var(--surface); font-size:12px; }
-  .actor .role { font-size:13px; }
-  .actor small { display:block; color:var(--muted); }
-  .actor.idle { opacity:.6; }
-
-  .qlist { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--surface); }
-  .qrow { display:grid; grid-template-columns:22px 110px minmax(0,1fr) auto; gap:10px; align-items:center; padding:8px 12px; border-top:1px solid var(--line); text-decoration:none; color:inherit; }
-  .qrow:first-child { border-top:0; }
-  a.qrow:hover { background:var(--panel); }
-  .qrow.now { background:var(--pick); }
-  .qrow .n { color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; text-align:right; }
-  .qrow .t { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .qrow .muted { color:var(--muted); }
-
-  /* --- le fil --- */
-  .tabs { display:inline-flex; background:var(--panel); border-radius:8px; padding:2px; margin-left:auto; text-transform:none; letter-spacing:0; }
-  .tabs button { border:0; background:none; padding:3px 10px; border-radius:6px; font-size:12px; color:var(--muted); cursor:pointer; }
-  .tabs button[aria-pressed="true"] { background:var(--surface); color:var(--fg); box-shadow:var(--shadow); }
-  ol.thread { list-style:none; margin:0; padding:0; position:relative; }
-  ol.thread::before { content:""; position:absolute; left:15px; top:6px; bottom:6px; width:2px; background:var(--line); }
-  .ev { position:relative; display:grid; grid-template-columns:32px minmax(0, 1fr); gap:12px; padding:6px 0; }
-  .avatar { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; color:#fff; background:var(--r); position:relative; z-index:1; border:3px solid var(--bg); }
-  .tick { width:32px; display:flex; justify-content:center; align-items:flex-start; padding-top:11px; position:relative; z-index:1; }
-  .tick i { width:10px; height:10px; border-radius:50%; background:var(--bg); border:2px solid var(--faint); }
-  .ev.escalate .tick i { border-color:var(--escalated); background:var(--escalated); }
-  .ev.final .tick i { border-color:var(--open); background:var(--open); }
-  .ev.bad .tick i { border-color:var(--bad); background:var(--bad); }
-  .bubble { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:9px 12px; box-shadow:var(--shadow); min-width:0; }
-  .bubble.handoff { background:transparent; box-shadow:none; border-style:dashed; }
-  .meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13px; }
-  .meta .to { color:var(--muted); }
-  .meta time { margin-left:auto; color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; }
-  .line { font-size:13px; color:var(--muted); padding-top:6px; min-width:0; }
-  .line b { color:var(--fg); font-weight:600; }
-  .line time { float:right; color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; margin-left:8px; }
-  .ev.escalate .line { color:var(--escalated); }
-  .ev.escalate .line b { color:var(--escalated); }
-  .steps { margin:4px 0 0; padding:0; list-style:none; font-size:12px; color:var(--muted); }
-  .steps li::before { content:"· "; color:var(--faint); }
-  pre.text { white-space:pre-wrap; word-break:break-word; margin:8px 0 0; padding:10px 12px; border-radius:8px; background:var(--panel); font-size:12px; line-height:1.5; }
-  pre.text.clamp { max-height:9.2em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 60%, transparent); mask-image:linear-gradient(#000 60%, transparent); }
-  .more { border:0; background:none; color:var(--focus); font-size:12px; padding:4px 0 0; cursor:pointer; }
-  .sep-day, .sep-phase { display:flex; align-items:center; gap:10px; margin:14px 0 6px 44px; font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.06em; }
-  .sep-day::after, .sep-phase::after { content:""; flex:1; height:1px; background:var(--line); }
-  .sep-phase { color:var(--choreographer); }
-  .empty { color:var(--muted); padding:48px 0; text-align:center; }
-  .muted { color:var(--muted); }
-
-  @media (max-width: 820px) {
-    main { grid-template-columns:1fr; height:auto; }
-    aside { border-right:0; border-bottom:1px solid var(--line); max-height:45vh; }
-    section#detail { padding:16px; }
-    .stepper { grid-template-columns:repeat(2, 1fr); }
-    .qrow { grid-template-columns:22px 90px minmax(0,1fr); }
-    .qrow > :last-child { display:none; }
-  }
+  .more { font-size:12.5px; color:var(--focus); }
+  /* runner : robot pour un agent, engrenage pour le script, silhouette pour le Director */
+  .rn { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; font-size:11px; flex:none; color:var(--r); background:color-mix(in srgb, var(--r) 15%, transparent); }
+  .rn.script { --r:var(--script); border-radius:5px; } .rn.human { --r:var(--director); }
+  .outc { font-size:11px; font-weight:700; padding:0 7px; border-radius:999px; white-space:nowrap; }
+  .outc.ok { color:var(--ok); background:var(--ok-bg); } .outc.failed { color:var(--bad); background:var(--bad-bg); } .outc.escalated, .outc.stopped, .outc.timeout { color:var(--warn); background:var(--warn-bg); }
+  .outc.running { color:var(--run); background:color-mix(in srgb, var(--run) 14%, transparent); }
+  .elapsed { font-variant-numeric:tabular-nums; }
+  /* En scène */
+  .now-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(400px, 1fr)); }
+  .now-card { display:grid; gap:10px; } .now-card:hover { border-color:var(--faint); } .now-card.esc { border-color:color-mix(in srgb, var(--warn) 50%, var(--line)); }
+  .now-big { display:flex; gap:10px; align-items:center; font-size:16px; } .now-big .elapsed { margin-left:auto; font-size:20px; font-weight:700; }
+  .lanes { background:var(--panel); border-radius:8px; padding:4px 8px; }
+  .lrow { display:grid; grid-template-columns:100px minmax(0,1fr); align-items:center; height:20px; font-size:12px; }
+  .lane { position:relative; height:100%; } .lane::before { content:""; position:absolute; left:0; right:0; top:50%; border-top:1px solid var(--line); }
+  .seg { position:absolute; top:4px; height:12px; border-radius:3px; min-width:2px; background:var(--r); }
+  .seg.script { background:var(--script); opacity:.6; border-radius:1px; } .seg.human { background:repeating-linear-gradient(45deg, var(--director) 0 3px, transparent 3px 6px); border:1px solid var(--director); }
+  .seg.open { animation:blink 1.4s infinite; }
+  /* gantt (ticket) */
+  .gantt { display:grid; gap:4px; }
+  .gantt .g { display:grid; grid-template-columns:170px minmax(0,1fr) 70px; gap:10px; align-items:center; font-size:12.5px; }
+  .gantt .track { position:relative; height:16px; background:var(--panel); border-radius:4px; }
+  .gantt .track i { position:absolute; top:2px; bottom:2px; border-radius:3px; background:var(--ok); min-width:2px; } .gantt .track i.plan { background:var(--choreographer); } .gantt .track i.ws { background:var(--dramaturg); } .gantt .track i.open { background:var(--run); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-flex; gap:6px; align-items:center; padding:3px 9px; border:1px solid var(--line); border-radius:999px; font-size:12px; background:var(--surface); }
+  .chip:hover { border-color:var(--faint); } .chip.on { border-color:var(--run); box-shadow:0 0 0 1px var(--run) inset; }
+  /* diagrammes */
+  .diagrams { display:grid; gap:14px; }
+  .diag { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px; overflow:auto; }
+  .diag .mermaid { display:flex; justify-content:center; } .diag svg { max-width:100%; height:auto; }
+  .diag-note { font-size:12px; color:var(--muted); margin-top:4px; }
+  /* le fil */
+  .ev .avatar { background:color-mix(in srgb, var(--r) 18%, var(--bg)); color:var(--r); font-size:13px; }
+  .ev .avatar.script { border-radius:8px; }
+  /* dashboard */
+  .health-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+  .hcard { display:grid; gap:4px; } .hcard .st { display:flex; align-items:center; gap:8px; font-weight:600; }
+  .hcard .st i.dot { width:9px; height:9px; border-radius:50%; background:var(--ok); } .hcard .st i.dot.warn { background:var(--warn); } .hcard .st i.dot.bad { background:var(--bad); }
+  .hcard small { color:var(--muted); font-size:12px; } .hcard code { font-size:11px; color:var(--faint); }
+  .bars { display:flex; align-items:flex-end; gap:4px; height:60px; } .bars i { flex:1; background:var(--ok); border-radius:3px 3px 0 0; min-height:2px; position:relative; }
+  .bars-x { display:flex; gap:4px; font-size:10.5px; color:var(--faint); } .bars-x span { flex:1; text-align:center; }
+  .theme { border:1px solid var(--line); background:var(--surface); border-radius:8px; width:30px; height:28px; color:var(--muted); }
+  .acts { display:flex; gap:6px; justify-content:flex-end; }
+  .btn { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); background:var(--surface); border-radius:7px; padding:3px 10px; font-size:12px; white-space:nowrap; }
+  .btn:hover { border-color:var(--faint); } .btn.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+  .pager { display:flex; justify-content:flex-end; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); margin-bottom:6px; font-variant-numeric:tabular-nums; }
+  .pager button { border:1px solid var(--line); background:var(--surface); border-radius:6px; width:26px; height:24px; }
+  .pager button:disabled { opacity:.35; cursor:default; }
+  .split { display:flex; height:10px; border-radius:5px; overflow:hidden; } .split i { display:block; height:100%; }
+  /* palette des rôles validée (clair puis sombre) */
+  :root { --dramaturg:#9333ea; --choreographer:#0d9488; --dancer:#2563eb; --critic:#ea580c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --dramaturg:#a855f7; --choreographer:#0d9488; --dancer:#3b82f6; --critic:#ea580c; } }
+  :root[data-theme="dark"] { --dramaturg:#a855f7; --choreographer:#0d9488; --dancer:#3b82f6; --critic:#ea580c; }
+  /* dashboard v2 */
+  .hstrip { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:8px; }
+  .hmini { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:7px 10px; display:grid; gap:1px; font-size:12px; }
+  .hmini .st { display:flex; align-items:center; gap:7px; font-weight:600; font-size:13px; }
+  .hmini i.dot { width:8px; height:8px; border-radius:50%; background:var(--ok); } .hmini i.dot.warn { background:var(--warn); } .hmini i.dot.bad { background:var(--bad); }
+  .hmini small { color:var(--muted); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:8px; }
+  .kpi { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:grid; gap:2px; }
+  .kpi small { color:var(--muted); font-size:11.5px; } .kpi b { font-size:22px; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  .kpi em { font-style:normal; font-size:11.5px; color:var(--muted); }
+  .kpi svg { width:100%; height:28px; display:block; } .kpi .spark { fill:none; stroke:var(--run); stroke-width:1.6; } .kpi .spark-area { fill:color-mix(in srgb, var(--run) 12%, transparent); }
+  .dgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(440px, 1fr)); gap:14px; }
+  .card h3 em { font-style:normal; text-transform:none; letter-spacing:0; font-weight:400; }
+  .heat { display:grid; grid-template-columns:46px repeat(24, minmax(0,1fr)); gap:2px; font-size:10.5px; color:var(--faint); }
+  .heat i { aspect-ratio:1.6; border-radius:2px; background:var(--panel); max-height:22px; }
+  .heat i[data-n] { background:color-mix(in srgb, var(--run) var(--v), var(--panel)); }
+  .heat span { align-self:center; white-space:nowrap; }
+  .stack { display:grid; grid-template-columns:170px minmax(0,1fr) 64px; gap:10px; align-items:center; font-size:12.5px; margin:4px 0; }
+  .stack .segs { display:flex; gap:2px; height:16px; } .stack .segs i { display:block; height:100%; border-radius:2px; min-width:2px; }
+  .k-agent { background:var(--dancer); } .k-script { background:var(--faint); } .k-human { background:var(--director); }
+  .lgd { display:flex; gap:14px; font-size:11.5px; color:var(--muted); margin-top:8px; } .lgd span { display:inline-flex; gap:6px; align-items:center; } .lgd i { width:10px; height:10px; border-radius:2px; display:inline-block; }
+  svg.chart { width:100%; height:auto; display:block; font-size:10.5px; } svg.chart text { fill:var(--faint); } svg.chart .grid { stroke:var(--line); }
+  svg.chart .pt { fill:var(--run); fill-opacity:.7; } svg.chart .pt.open { fill:none; stroke:var(--run); } svg.chart .med { stroke:var(--warn); stroke-dasharray:5 4; stroke-width:1.5; }
+  .diffs .stack { grid-template-columns:96px minmax(0,1fr) 46px; } .diffs .track { position:relative; height:14px; background:var(--panel); border-radius:3px; }
+  .diffs .track i { position:absolute; left:0; top:0; bottom:0; border-radius:3px; background:var(--ok); } .diffs .track i.over { background:var(--warn); }
+  .diffs .track b { position:absolute; top:-3px; bottom:-3px; width:0; border-left:2px dashed var(--bad); }
+  .stack > span:first-child, .dgrid td { white-space:nowrap; }
+  .rolebar { height:8px; border-radius:2px; background:var(--r); }
+  .tip { position:fixed; pointer-events:none; z-index:60; background:var(--fg); color:var(--bg); font-size:12px; line-height:1.4; padding:5px 9px; border-radius:6px; max-width:300px; box-shadow:0 4px 14px rgba(0,0,0,.2); display:none; }
+  .offline { position:fixed; left:50%; transform:translateX(-50%); bottom:14px; z-index:40; padding:6px 12px; border-radius:8px; background:var(--bad-bg); color:var(--bad); font-size:12.5px; font-weight:600; }
+  dialog.acc { border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--fg); padding:18px 20px; max-width:440px; }
+  dialog.acc::backdrop { background:rgba(0,0,0,.35); } dialog.acc h2 { font-size:16px; margin-bottom:8px; } dialog.acc p { font-size:13px; margin:0 0 14px; }
+  @media (max-width:900px) { .layout { grid-template-columns:1fr; height:auto; } aside { max-height:40vh; } .top nav { display:none; } }
 </style>
 </head>
 <body>
 <header class="top">
   <div class="brand"><b>Ballet</b><span>Scène</span></div>
-  <div class="live" id="live"><span class="dot"></span><span id="live-text">connexion…</span></div>
+  <select class="project" id="project" aria-label="Projet"></select>
+  <nav id="nav"></nav>
+  <a class="health" id="health" href="#/dashboard"></a>
+  <button class="theme" id="theme" title="Thème"></button>
+  <span class="clock" id="clock"></span>
 </header>
-<main>
-  <aside id="list" aria-label="Projets et Rehearsals"></aside>
-  <section id="detail"><p class="empty">Choisis une Rehearsal.</p></section>
-</main>
+<div class="layout"><aside id="side"></aside><main><div class="wrap" id="page"></div></main></div>
+<div class="tip" id="tip"></div>
+<div class="offline" id="offline" hidden></div>
+<script src="/vendor/mermaid.min.js"></script>
 <script>
-const ROLES = ['dramaturg', 'choreographer', 'dancer', 'critic'];
-const PHASES = [['plan', 'Plan', 'Choreographer'], ['code', 'Code', 'Dancer'], ['review', 'Revue', 'Critic'], ['premiere', 'Premiere', 'merge sur main']];
-const PHASE_OF_ROLE = {choreographer:'plan', dancer:'code', critic:'review'};
-const STATUS = {open:'en cours', escalated:'escaladée', done:'terminée'};
-const TALK = new Set(['message', 'handoff', 'nudge', 'handover', 'director-decision']);
-
-let data = null, version = '', picked = decodeURIComponent(location.hash.slice(1)), shown = '';
-let filter = remembered('ballet-stage-filter') || 'all';
-const opened = new Set();
-const folds = new Set((remembered('ballet-stage-folded') || '').split('\n').filter(Boolean));
-const isFolded = (project, kind) => folds.has(`${project}|${kind}`);
-
-const $ = s => document.querySelector(s);
+/* --- outils --------------------------------------------------------------------------------- */
+let STAGE = null, PLAYS = {}, version = '';
+const now = () => Date.now();
+const ROLE = {dramaturg:'Dramaturg', choreographer:'Choreographer', dancer:'Dancer', critic:'Critic', conductor:'Conductor', director:'Director', maestro:'Maestro', monitor:'Monitor'};
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;'}[c]));
-const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
 const clock = at => new Date(at).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-const day = at => new Date(at).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
-const time = at => `<time datetime="${esc(at)}" title="${esc(new Date(at).toLocaleString('fr-FR'))}">${clock(at)}</time>`;
-const role = name => `<span class="role r-${esc(name)}">${esc(cap(name))}</span>`;
-const pill = status => `<span class="pill ${esc(status)}">${esc(STATUS[status] || status)}</span>`;
+const dayOf = at => new Date(at).toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'});
+const secs = (a, b) => Math.max(0, Math.round(((b ? +new Date(b) : now()) - +new Date(a)) / 1000));
+const dur = s => s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min${s < 600 ? ' ' + String(s % 60).padStart(2, '0') : ''}` : s < 172800 ? `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}` : `${Math.round(s / 86400)} j`;
+const ago = at => `il y a ${dur(secs(at))}`;
+const median = xs => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+const role = who => `<span class="role r-${esc(who)}">${esc(ROLE[who] || who)}</span>`;
+const ICON = {agent:'fa-robot', script:'fa-gear', human:'fa-user'};
+const runnerOf = who => who === 'director' ? 'human' : ['conductor', 'script'].includes(who) ? 'script' : 'agent';
+const rn = (runner, who = '') => `<span class="rn ${runner}" style="${runner === 'agent' ? `--r:var(--${who})` : ''}"><i class="fa-solid ${ICON[runner]}"></i></span>`;
+const nodeWho = n => n.kind === 'turn' ? n.name : n.runner === 'human' ? 'director' : 'script';
+const label = n => n.kind === 'turn' ? (ROLE[n.name] || n.name) : n.kind === 'proof' ? 'Preuve' : n.kind === 'mutation' ? `Mutation ${n.name}` : n.kind === 'director' ? 'Attente du Director' : n.name;
+const outc = (o, ended = true) => ended ? `<span class="outc ${o}">${{ok:'ok', failed:'échec', escalated:'escaladé', stopped:'arrêté', timeout:'trop long'}[o] || o}</span>` : '<span class="outc running">en cours</span>';
+const verdict = e => /REJECTED/.test(e.data.text || '') ? 'REJECTED' : /APPROVED/.test(e.data.text || '') ? 'APPROVED' : /ESCALATE/.test(e.data.text || '') ? 'ESCALATE' : '';
 
-function remembered(key){ try { return localStorage.getItem(key); } catch { return null; } }
-function remember(key, value){ try { localStorage.setItem(key, value); } catch {} }
-
-function ago(at){
-  if (!at) return '';
-  const minutes = Math.round((Date.now() - new Date(at)) / 60000);
-  if (minutes < 1) return "à l'instant";
-  if (minutes < 60) return `il y a ${minutes} min`;
-  if (minutes < 60 * 24) return `il y a ${Math.round(minutes / 60)} h`;
-  return `il y a ${Math.round(minutes / 1440)} j`;
+/* --- le modèle -------------------------------------------------------------------------------- */
+let project = 'all', filter = 'all';
+const stored = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const store = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+let sceneMode = stored('stage-scene'), theme = stored('stage-theme') || 'auto';
+const folds = new Set((() => { try { return (localStorage.getItem('stage-folds') || '').split(',').filter(Boolean); } catch { return []; } })());
+const inProject = x => project === 'all' || x.project === project;
+const plays = () => STAGE.plays.filter(inProject);
+const nodesOf = p => PLAYS[p.node]?.nodes || [];
+const openNode = p => nodesOf(p).filter(n => !n.ended_at).at(-1);
+const running = () => plays().filter(p => !p.ended_at);
+const premieres = () => plays().filter(p => p.ended_at && p.pr && p.kind === 'rehearsal').sort((a, b) => a.ended_at < b.ended_at ? 1 : -1);
+const tickets = () => { const seen = new Set(); return plays().filter(p => p.kind === 'rehearsal' && !seen.has(p.key) && seen.add(p.key)); };
+/* Les sessions de Conductor : une ligne par <projet>#<élément>, ses représentations dans l'ordre. */
+function sessions(kind) {
+  const by = new Map();
+  for (const p of plays().filter(p => p.kind === kind)) { if (!by.has(p.session)) by.set(p.session, []); by.get(p.session).push(p); }
+  return [...by].map(([key, ps]) => {
+    const c = STAGE.conductors.find(x => x.id === key), last = ps.at(-1);
+    return {key, project:ps[0].project, item:key.split('#')[1], plays:ps, conductor:c, mode:ps[0].mode, legacy:ps[0].legacy, simulated:ps.some(p => p.simulated),
+      started_at:ps[0].started_at, ended_at:ps.every(p => p.ended_at) ? last.ended_at : null, state:c?.state || (ps.every(p => p.ended_at) ? 'finished' : 'running'),
+      outcome:last.outcome, title:ps.find(p => !p.planning)?.title || last.title};
+  }).sort((a, b) => a.started_at < b.started_at ? 1 : -1);
 }
+const sessionOf = p => sessions(p.kind).find(s => s.key === p.session);
 
-function span(from, to){
-  const minutes = Math.max(0, Math.round((new Date(to) - new Date(from)) / 60000));
-  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
+/* --- la sidebar (blocs pliables) --------------------------------------------------------------- */
+function block(key, cls, title, count, body, foot = '') {
+  return `<div class="blk ${cls} ${folds.has(key) ? 'folded' : ''}"><button class="blk-head" data-fold="${key}">${title}<span class="count">${count}</span></button><div class="blk-body">${body}${foot}</div></div>`;
 }
-
-/* --- le modèle : les Rehearsals d'un projet, la planification rattachée à la slice qui a pris son worktree --- */
-
-function rehearsals(project){
-  const states = project.rehearsals;
-  const absorbed = new Set(states.map(s => s.planned_by).filter(Boolean));
-  return states.filter(s => !absorbed.has(s.id)).map(state => {
-    const planning = state.planned_by ? states.find(s => s.id === state.planned_by) : null;
-    const events = project.journal.filter(e => e.rehearsal === state.id || (planning && e.rehearsal === planning.id));
-    return {
-      key:`${project.name}/${state.id}`, project, state, planning, events,
-      title:cleanTitle(project.titles?.[state.id], state.id) || (state.feature ? `planification de ${state.feature}` : ''),
-      first:events[0]?.at || '', last:events.at(-1)?.at || '', current:currentRole(state, events),
-    };
-  }).sort((a, b) => order(a) - order(b) || b.last.localeCompare(a.last));
+function side(rt) {
+  const picked = id => rt.id === id ? 'picked' : '';
+  const live = running().map(p => { const n = openNode(p);
+    return `<a class="item ${picked(p.node)}" href="#/play/${p.node}"><div class="row"><span class="proj">${p.project}</span><b>${esc(p.key)}</b>${p.simulated ? '<span class="sim">simulé</span>' : ''}<span class="end muted" style="font-size:11.5px">${p.mode}</span></div>
+      <div class="t">${esc(p.title)}</div>${n ? `<div class="s">${rn(n.runner, nodeWho(n))}<span>${esc(label(n))}</span><span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>` : ''}</a>`; }).join('');
+  const waits = running().filter(p => openNode(p)?.runner === 'human').map(p => `<a class="item" href="#/play/${p.node}"><div class="row"><span class="proj">${p.project}</span><b>${esc(p.key)}</b><span class="badge warn end">escalade</span></div><div class="t">${esc(openNode(p).events[0]?.data.reason)}</div></a>`).join('')
+    + STAGE.proposed.filter(inProject).map(x => `<div class="item"><div class="row"><span class="proj">${x.project}</span><b>${x.item}</b><span class="badge warn end">proposed</span></div><div class="t">${esc(x.title)}</div><div class="s">${x.decided_alone} décisions prises seul</div><div class="acts" style="justify-content:flex-start;margin-top:5px">${acceptActs(x)}</div></div>`).join('');
+  const ready = STAGE.ready.filter(inProject).map((x, i) => `<a class="item" href="#/program"><div class="row"><span class="faint num">${i + 1}</span><span class="proj">${x.project}</span><b>${x.item}</b><span class="kind end">${x.type} · ${x.priority}</span></div><div class="t">${esc(x.title)}</div>${x.blocked_by.length ? `<div class="s"><i class="fa-solid fa-link"></i> bloqué par ${x.blocked_by.join(', ')}</div>` : ''}</a>`).join('');
+  const done = tickets().filter(p => p.ended_at && p.type !== 'Slice').reverse();
+  const tix = done.slice(0, 8).map(p => `<a class="item ${picked(p.key)}" href="${p.type === 'Feature' ? '#/ticket/' + p.key : '#/play/' + p.node}"><div class="row"><span class="proj">${p.project}</span><b>${esc(p.key)}</b><span class="kind end">${p.type}</span></div><div class="t">${esc(p.title)}</div><div class="s">${dayOf(p.ended_at)}${slicesOf(p.key).length ? ` · ${slicesOf(p.key).length} slices` : ''}</div></a>`).join('');
+  return block('scene', '', 'En scène', running().length, live || '<p class="muted" style="margin:4px 8px">Rien ne joue.</p>')
+    + block('dir', 'dir', 'Director attendu', (waits.match(/class="item/g) || []).length, waits || '<p class="muted" style="margin:4px 8px">Rien.</p>')
+    + block('prog', 'prog', 'Programme', STAGE.ready.filter(inProject).length, ready, '<a class="blk-foot" href="#/program">Tout le programme →</a>')
+    + block('tix', 'tix', 'Tickets traités', done.length, tix, '<a class="blk-foot" href="#/tickets">Tous les tickets, slices comprises →</a>');
 }
+const slicesOf = key => plays().filter(p => p.parent === key);
 
-const order = r => ({escalated:0, open:1, done:2}[r.state.status] ?? 3);
-const cleanTitle = (title, id) => (title || '').replace(/^(FEAT|BUG|TASK)-\d{3}(\.\d+)?\s*[·:-]?\s*/, '');
+/* --- les pages ----------------------------------------------------------------------------------- */
+const PAGES = {
+  scene() {
+    /* Plusieurs représentations : celles qui attendent le Director d'abord, puis la plus ancienne ; en cartes jusqu'à 4,
+       en liste au-delà (ou au choix). */
+    const live = running().map(p => ({p, n:openNode(p)})).sort((a, b) => (b.n?.runner === 'human') - (a.n?.runner === 'human') || (a.p.started_at < b.p.started_at ? -1 : 1));
+    const mode = sceneMode || (live.length > 4 ? 'list' : 'cards');
+    const card = ({p, n}) => { const s = sessionOf(p), human = n?.runner === 'human';
+      return `<a class="card now-card ${human ? 'esc' : ''}" href="#/play/${p.node}">
+        <div class="crumbs"><span class="proj">${p.project}</span>›<span>Conductor #${esc(s?.item)}</span>›<span>${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : 'Rehearsal'} <b>${esc(p.key)}</b></span>${p.simulated ? '<span class="sim">simulé</span>' : ''}<span style="margin-left:auto">${p.mode}</span></div>
+        <div class="muted" style="margin-top:-6px">${esc(p.title)}</div>
+        <div class="now-big">${rn(n.runner, nodeWho(n))}<b>${esc(label(n))}</b><span class="muted" style="font-size:13px">${{agent:'un agent travaille', script:'étape déterministe', human:'à toi de décider'}[n.runner]}</span><span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>
+        ${human ? `<div class="callout">${esc(n.events[0]?.data.reason)}</div>` : ''}${lanes(p)}
+        <div class="hero-line">${p.counts.turn} tours · ${p.counts.proof} preuves · ${p.counts.mutation} mutations · ouverte depuis ${dur(secs(p.started_at))}</div></a>`; };
+    const list = items => { const {rows, nav} = paged('scene', items);
+      return nav + `<table class="list"><tr><th></th><th>Représentation</th><th>Qui joue</th><th>Depuis</th><th style="width:34%">Portées</th><th>Ouverte</th></tr>${rows.map(({p, n}) =>
+        `<tr data-href="#/play/${p.node}" ${n.runner === 'human' ? 'style="box-shadow:inset 3px 0 var(--warn)"' : ''}><td><span class="proj">${p.project}</span></td><td><b>${esc(p.key)}</b> <span class="kind">${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : 'Rehearsal'}</span>${p.simulated ? ' <span class="sim">simulé</span>' : ''}<div class="muted" style="font-size:12px">${esc(p.title)}</div></td>
+        <td>${rn(n.runner, nodeWho(n))} ${esc(label(n))}</td><td class="num elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</td><td>${lanes(p)}</td><td class="num muted">${dur(secs(p.started_at))}</td></tr>`).join('')}</table>`; };
+    const waiting = live.filter(x => x.n?.runner === 'human').length;
+    return `<div><h1>En scène</h1><div class="hero-line">${live.length} représentation(s) en cours${waiting ? ` · <b style="color:var(--warn)">${waiting} attend(ent) le Director</b>` : ''} · ${project === 'all' ? 'tous les projets' : project}
+        <span class="tabs" style="margin-left:auto">${[['cards', 'Cartes'], ['list', 'Liste']].map(([k, l]) => `<button data-scene="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</span></div></div>
+      ${live.length ? mode === 'cards' ? `<div class="now-grid">${live.slice(0, 4).map(card).join('')}</div>${live.length > 4 ? `<div><h3>Et ${live.length - 4} autre(s)</h3>${list(live.slice(4))}</div>` : ''}` : list(live) : '<p class="empty">Rien ne joue.</p>'}
+      <div><h3>Dernières Premieres <a class="more" href="#/premieres" style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500">Toutes les Premieres →</a></h3>${premiereTable(premieres().slice(0, 5), 'last')}</div>`;
+  },
+  dashboard() { return dashboard(); },
+  program() {
+    const ready = paged('ready', STAGE.ready.filter(inProject)), proposed = paged('proposed', STAGE.proposed.filter(inProject));
+    return `<div><h1>Programme</h1><div class="hero-line">La file vue par le Monitor (Ballet status <b>ready</b>, par Priority puis ancienneté) · ce qui attend d'être accepté</div></div>
+      <div><h3>Proposé · attend le Director</h3>${proposed.nav}<table class="list"><tr><th>Projet</th><th>Issue</th><th>Type</th><th>Titre</th><th>Décidé seul</th><th></th></tr>${proposed.rows.map(x => `<tr><td><span class="proj">${x.project}</span></td><td><b>${x.item}</b></td><td><span class="kind">${x.type}</span></td><td>${esc(x.title)}</td><td><span class="badge warn">${x.decided_alone} décisions</span></td>
+        <td><div class="acts">${acceptActs(x)}</div></td></tr>`).join('')}</table></div>
+      <div><h3>Prêt · ordre de jeu</h3>${ready.nav}<table class="list"><tr><th>#</th><th>Projet</th><th>Issue</th><th>Type</th><th>Prio</th><th>Mode</th><th>Titre</th><th>Lancement</th></tr>${ready.rows.map((x, i) => `<tr><td class="faint">${ready.first + i + 1}</td><td><span class="proj">${x.project}</span></td><td><b>${x.item}</b></td><td><span class="kind">${x.type}</span></td><td>${x.priority}</td><td>${x.mode}</td><td>${esc(x.title)}</td><td>${x.blocked_by.length ? `<span class="badge warn"><i class="fa-solid fa-link"></i> bloqué par ${x.blocked_by.join(', ')}</span>` : '<span class="muted">au prochain tour de Maestro</span>'}</td></tr>`).join('')}</table></div>`;
+  },
+  workshops() { return `<h1>Workshops</h1>${sessionTable(sessions('workshop'), 'workshops')}`; },
+  rehearsals() { return `<div><h1>Rehearsals</h1><div class="hero-line">Une ligne par session de Conductor (<code>&lt;projet&gt;#&lt;élément&gt;</code>), avec les représentations qu'elle a jouées · <span class="legacy">repris</span> : historique d'avant la base, regroupé par feature</div></div>${sessionTable(sessions('rehearsal'), 'rehearsals')}`; },
+  tickets() {
+    const {rows, nav} = paged('tickets', tickets().sort((a, b) => (b.parent || b.key).localeCompare(a.parent || a.key) || a.key.localeCompare(b.key)));
+    return `<div><h1>Tickets</h1><div class="hero-line">Tous les tickets joués, slices comprises</div></div>
+      ${nav}<table class="list"><tr><th>Ticket</th><th>Type</th><th>Titre</th><th>Statut</th><th>PR</th><th>Durée</th><th>Tours</th><th>Diff</th></tr>${rows.map(p =>
+        `<tr data-href="${p.type === 'Feature' && slicesOf(p.key).length ? '#/ticket/' + p.key : '#/play/' + p.node}"><td style="${p.parent ? 'padding-left:28px' : ''}"><span class="proj">${p.project}</span> <b>${esc(p.key)}</b></td><td><span class="kind">${p.planning ? 'Plan' : p.type}</span></td><td>${esc(p.title)}</td><td>${outc(p.outcome, !!p.ended_at)}</td><td>${p.pr ? '#' + p.pr : '—'}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.counts.turn}</td><td class="num">${p.diff ?? '—'}</td></tr>`).join('')}</table>`;
+  },
+  ticket(key) {
+    const ps = plays().filter(p => p.key === key || p.parent === key), slices = ps.filter(p => p.parent === key), f = ps.find(p => p.key === key && !p.planning) || ps[0];
+    const ws = plays().find(p => p.kind === 'workshop' && p.published?.item === key);
+    const all = [...(ws ? [ws] : []), ...ps], t0 = Math.min(...all.map(p => +new Date(p.started_at))), t1 = Math.max(...all.map(p => +new Date(p.ended_at || now()))), x = at => 100 * (+new Date(at || now()) - t0) / (t1 - t0 || 1);
+    const nodes = ps.flatMap(nodesOf), sum = r => nodes.filter(n => n.runner === r).reduce((s, n) => s + secs(n.started_at, n.ended_at), 0);
+    return `<div class="crumbs"><a href="#/tickets">Tickets</a> / ${esc(key)}</div>
+      <div><h1><span class="muted">${esc(key)}</span> ${esc(f.title)}</h1><div class="hero-line"><span class="proj">${f.project}</span><span>${f.type}</span>${f.issue ? `<span>#${f.issue}</span>` : ''}<span>${slices.length} slices</span></div></div>
+      <div class="metrics"><div class="metric"><small>Slices</small><b>${slices.filter(p => p.ended_at).length}<em> / ${slices.length}</em></b></div><div class="metric"><small>De bout en bout</small><b>${dur(Math.round((t1 - t0) / 1000))}</b></div>
+        <div class="metric"><small>Tours d'agents</small><b>${nodes.filter(n => n.kind === 'turn').length}</b></div><div class="metric"><small>Lignes</small><b>${slices.reduce((s, p) => s + (p.diff || 0), 0)}</b></div>
+        <div class="metric"><small>Attentes du Director</small><b>${nodes.filter(n => n.kind === 'director').length}</b></div>
+        <div class="metric"><small><i class="fa-solid fa-robot"></i> / <i class="fa-solid fa-gear"></i> / <i class="fa-solid fa-user"></i></small><b style="font-size:14px">${dur(sum('agent'))} · ${dur(sum('script'))} · ${dur(sum('human'))}</b></div></div>
+      ${slices.length > 3 ? `<div class="callout"><b>Coût</b> · ${slices.length} slices : au-dessus de la règle des 3 slices au plus (0.30.0).</div>` : ''}
+      <div class="card"><h3>Déroulé</h3><div class="gantt">${all.map(p => `<a class="g" href="#/play/${p.node}"><span><b>${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : esc(p.key)}</b></span><span class="track"><i class="${p.kind === 'workshop' ? 'ws' : p.planning ? 'plan' : p.ended_at ? '' : 'open'}" style="left:${x(p.started_at)}%;width:${Math.max(0.4, x(p.ended_at) - x(p.started_at))}%"></i></span><span class="muted num">${dur(secs(p.started_at, p.ended_at))}</span></a>`).join('')}</div></div>
+      <div><h3>Slices</h3>${paged('slices-' + key, slices).nav}<table class="list"><tr><th>Slice</th><th>Titre</th><th>Statut</th><th>PR</th><th>Durée</th><th>Allers-retours</th><th>Diff</th></tr>${paged('slices-' + key, slices).rows.map(p => `<tr data-href="#/play/${p.node}"><td><b>${esc(p.key)}</b></td><td>${esc(p.title)}</td><td>${outc(p.outcome, !!p.ended_at)}</td><td>${p.pr ? '#' + p.pr : '—'}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.round_trips}</td><td class="num">${p.diff ?? '—'}</td></tr>`).join('')}</table></div>`;
+  },
+  premieres() { return `<div><h1>Premieres</h1><div class="hero-line">Chaque merge sur main, le plus récent d'abord</div></div>${premiereTable(premieres(), 'premieres')}`; },
+  play(id) {
+    const p = STAGE.plays.find(x => x.node === id); if (!p) return '<p class="empty">Inconnu.</p>';
+    const s = sessionOf(p), n = openNode(p), tree = PLAYS[id];
+    return `<div class="crumbs"><a href="#/${p.kind === 'workshop' ? 'workshops' : 'rehearsals'}">${p.kind === 'workshop' ? 'Workshops' : 'Rehearsals'}</a> / <span class="proj">${p.project}</span> Conductor #${esc(s.item)} ${s.legacy ? '<span class="legacy">repris</span>' : `<span class="badge">${s.state}</span>`} / <b>${esc(p.key)}</b>${p.simulated ? '<span class="sim">simulé</span>' : ''}</div>
+      <div><h1><span class="muted">${esc(p.key)}</span> ${esc(p.title)}</h1><div class="hero-line">${outc(p.outcome, !!p.ended_at)}<span>${p.mode}</span>${p.issue ? `<a class="more" href="${issueUrl(p.project, p.issue)}" target="_blank" rel="noopener">#${p.issue}</a>` : ''}${p.pr ? `<a class="more" href="${prUrl(p.project, p.pr)}" target="_blank" rel="noopener">PR #${p.pr}</a>` : ''}<span>${dayOf(p.started_at)} ${clock(p.started_at)} · <span class="elapsed" ${p.ended_at ? '' : `data-since="${p.started_at}"`}>${dur(secs(p.started_at, p.ended_at))}</span></span></div></div>
+      ${n?.runner === 'human' ? `<div class="callout"><b>Attend le Director</b> depuis <span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span> · ${esc(n.events[0]?.data.reason)}</div>` : n ? `<div class="callout info"><b>Maintenant</b> · ${rn(n.runner, nodeWho(n))} ${esc(label(n))} depuis <span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>` : ''}
+      ${p.published ? `<div class="callout info"><b>Issue #${p.published.issue} publiée</b> · ${esc(p.published.item)} en <span class="badge warn">${esc(p.published.status)}</span> · ${p.published.decided_alone} décisions prises seul</div>` : ''}
+      ${s.plays.length > 1 ? `<div><h3>Session du Conductor #${esc(s.item)}</h3><div class="chips">${s.plays.map(x => `<a class="chip ${x.node === id ? 'on' : ''}" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)} ${outc(x.outcome, !!x.ended_at)}</a>`).join('')}</div></div>` : ''}
+      <div class="metrics"><div class="metric"><small>Tours d'agents</small><b>${p.counts.turn}</b></div><div class="metric"><small>Preuves</small><b>${p.counts.proof}</b></div><div class="metric"><small>Mutations</small><b>${p.counts.mutation}</b></div><div class="metric"><small>Allers-retours</small><b>${p.round_trips ?? 0}</b></div><div class="metric"><small>Diff</small><b>${p.diff ?? '—'}</b></div><div class="metric"><small>Attentes du Director</small><b>${p.counts.director}</b></div></div>
+      <div class="diagrams"><div class="diag"><h3><i class="fa-solid fa-diagram-project"></i> Transitions <span style="text-transform:none;letter-spacing:0;font-weight:400">les étapes et leurs passages, comptés</span></h3><pre class="mermaid">${esc(transitions(p))}</pre>
+          <div class="diag-note"><i class="fa-solid fa-robot"></i> agent · <i class="fa-solid fa-gear"></i> étape du script · <i class="fa-solid fa-user"></i> Director · en pointillé : pas emprunté · le nœud en cours est encadré</div></div>
+        <div class="diag"><h3><i class="fa-solid fa-comments"></i> Communication <span style="text-transform:none;letter-spacing:0;font-weight:400">qui parle à qui, dans l'ordre</span></h3><pre class="mermaid">${esc(sequence(p))}</pre></div></div>
+      <div><h3>Fil <span class="tabs">${[['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([k, l]) => `<button data-filter="${k}" aria-pressed="${filter === k}">${l}</button>`).join('')}</span></h3>${thread(p)}</div>`;
+  },
+};
+PAGES.workshop = PAGES.play;
 
-/* Qui a la main : le Director sur une escalade ; sinon le dernier worker à qui le Conductor a remis quelque chose,
-   tant qu'il n'a pas répondu. Les vieux journaux sans `handoff` : le rôle cité dans la dernière ligne du script. */
-function currentRole(state, events){
-  if (state.status === 'done') return '';
-  if (state.status === 'escalated') return 'director';
-  for (const e of [...events].reverse()){
-    if (e.event === 'message') return 'conductor';
-    if (e.event === 'handoff' || e.event === 'nudge') return e.detail.role;
-    const said = (e.detail?.done || []).join(' ').match(/(choreographer|dancer|critic) (started|asked)/g);
-    if (said) return said.at(-1).split(' ')[0];
+/* Les tableaux sont paginés : `PAGE_SIZE` lignes, la page retenue par tableau (`pages`). */
+const PAGE_SIZE = 10, pages = {};
+function paged(key, list, size = PAGE_SIZE) {
+  const count = Math.max(1, Math.ceil(list.length / size)), at = Math.min(pages[key] || 0, count - 1);
+  const rows = list.slice(at * size, (at + 1) * size);
+  const nav = list.length <= size ? '' : `<div class="pager"><button data-page="${key}:${at - 1}" ${at ? '' : 'disabled'} aria-label="Page précédente">‹</button><span>${at * size + 1}–${at * size + rows.length} sur ${list.length}</span><button data-page="${key}:${at + 1}" ${at < count - 1 ? '' : 'disabled'} aria-label="Page suivante">›</button></div>`;
+  return {rows, nav, first:at * size};
+}
+/* Une issue proposée s'accepte sur GitHub (Ballet status → ready) : la Scène ne fait que lire. */
+const repoOf = name => STAGE.projects.find(x => x.alias === name)?.repo || '';
+const issueUrl = (name, n) => repoOf(name) && n ? `${repoOf(name)}/issues/${String(n).replace('#', '')}` : '';
+const prUrl = (name, n) => repoOf(name) && n ? `${repoOf(name)}/pull/${n}` : '';
+const acceptActs = x => issueUrl(x.project, x.item) ? `<a class="btn" href="${issueUrl(x.project, x.item)}" target="_blank" rel="noopener" title="L'accepter : Ballet status → ready, sur GitHub"><i class="fa-solid fa-arrow-up-right-from-square"></i> Ouvrir pour accepter</a>` : '<span class="muted">à accepter sur GitHub</span>';
+
+/* --- le Dashboard ---------------------------------------------------------------------------------- */
+const DAY = 86400000, startOfDay = t => new Date(t).setHours(0, 0, 0, 0);
+const tip = text => `data-tip="${esc(text)}"`;
+const ended = n => n.ended_at;
+const nodeSecs = n => secs(n.started_at, n.ended_at);
+const allNodes = () => plays().flatMap(p => nodesOf(p).map(n => ({...n, play:p})));
+const rootOf = p => p.parent || p.key;
+/* Un ticket = sa feature (ou son bug) et ses slices : de la première ouverture à la dernière fermeture. */
+function ticketGroups() {
+  const by = new Map();
+  for (const p of plays().filter(p => p.kind === 'rehearsal')) { const k = p.project + ' ' + rootOf(p); if (!by.has(k)) by.set(k, []); by.get(k).push(p); }
+  return [...by.values()].map(ps => {
+    const nodes = ps.flatMap(nodesOf), sum = r => nodes.filter(n => n.runner === r).reduce((s, n) => s + nodeSecs(n), 0);
+    const start = Math.min(...ps.map(p => +new Date(p.started_at))), done = ps.every(p => p.ended_at);
+    return {key:rootOf(ps[0]), project:ps[0].project, title:(ps.find(p => p.key === rootOf(p) && !p.planning) || ps[0]).title, plays:ps, done,
+      lead:done ? Math.round((Math.max(...ps.map(p => +new Date(p.ended_at))) - start) / 1000) : null, start,
+      split:{agent:sum('agent'), script:sum('script'), human:sum('human')}};
+  }).sort((a, b) => b.start - a.start);
+}
+function dashboard() {
+  return `<div><h1>Dashboard</h1><div class="hero-line">${project === 'all' ? 'Tous les projets' : project} · les 7 derniers jours, sauf mention</div></div>
+    ${healthStrip()}${kpis()}
+    <div class="card"><h3>Activité <em>· événements par heure, 7 jours</em></h3>${heatmap()}</div>
+    <div class="dgrid"><div class="card"><h3>Où part le temps <em>· par ticket</em></h3>${timeSplit()}</div>
+      <div class="card"><h3>Durée des Rehearsals <em>· dans le temps, échelle log</em></h3>${durations()}</div>
+      <div class="card"><h3>Taille des diffs <em>· face à la limite de 700 lignes</em></h3>${diffSizes()}</div>
+      <div class="card"><h3>Les rôles <em>· tours d'agents</em></h3>${rolesTable()}</div></div>
+    <div><h3>Dernières escalades</h3>${escalations()}</div>`;
+}
+function healthStrip() {
+  const H = STAGE.health, M = H.maestro, ctx = M.context_percent, seen = H.monitor.seen_at, fresh = seen && secs(seen) < 3 * H.monitor.interval_s;
+  const card = (state, title, line, detail) => `<div class="hmini" ${tip(detail)}><div class="st"><i class="dot ${state}"></i>${title}</div><small>${line}</small></div>`;
+  return `<div class="hstrip">${[
+    card(fresh ? '' : 'bad', 'Monitor', seen ? `dernier tour ${ago(seen)}` : 'jamais vu', `Un tour toutes les ${H.monitor.interval_s} s par défaut · terminal ${H.monitor.terminal || '—'}`),
+    card(!M.lease_owner ? 'bad' : ctx != null && M.restart_at && ctx >= M.restart_at ? 'warn' : '', 'Maestro', M.lease_owner ? `${ctx != null ? `contexte ${ctx} %` : 'contexte inconnu'}${M.restart_at ? ` · redémarre à ${M.restart_at} %` : ''}` : 'pas de bail : Maestro ne tourne pas',
+      M.lease_owner ? `Bail ${M.lease_pid ? 'en attente sur la boîte, pid ' + M.lease_pid : 'pris'}${M.lease_renewed_at ? ' · renouvelé ' + ago(M.lease_renewed_at) : ''} · session ${M.session || '—'}` : 'Lancer /ballet:maestro'),
+    card(H.mailbox.terminal && H.mailbox.run ? '' : 'bad', 'Boîte de Maestro', H.mailbox.run ? 'prête' : 'absente', H.mailbox.run ? `run ${H.mailbox.run} · terminal ${H.mailbox.terminal}` : '/ballet:setup la recrée'),
+    card(H.paused_at ? 'warn' : '', 'Lancements', `${running().length} / ${H.limits.max_running} en cours · ${H.limits.launched_today} / ${H.limits.max_per_day} aujourd'hui`, H.paused_at ? `En pause depuis ${H.paused_at}` : 'Pas en pause'),
+    card(H.legacy_pending ? 'warn' : '', 'Base', `v${H.db.user_version} · ${H.db.size_kb} Ko · ${H.db.events} événements`, H.legacy_pending ? 'Un ancien état attend la reprise' : '~/.ballet/ballet.db, à jour'),
+  ].join('')}</div>`;
+}
+function kpis() {
+  const t1 = startOfDay(now()) + DAY, days = [...Array(7)].map((_, i) => t1 - (7 - i) * DAY);
+  const prem = premieres(), perDay = days.map(d => prem.filter(p => +new Date(p.ended_at) >= d && +new Date(p.ended_at) < d + DAY).length);
+  const max = Math.max(1, ...perDay), pts = perDay.map((n, i) => `${i * 100 / 6},${26 - n / max * 24}`).join(' ');
+  const spark = `<svg viewBox="0 -2 100 30" preserveAspectRatio="none"><polygon class="spark-area" points="0,28 ${pts} 100,28"/><polyline class="spark" points="${pts}" vector-effect="non-scaling-stroke"/>${perDay.map((n, i) => `<rect x="${i * 100 / 6 - 7}" y="-2" width="14" height="30" fill="transparent" ${tip(`${dayOf(days[i])} · ${n} Premiere(s)`)}/>`).join('')}</svg>`;
+  const lead = ticketGroups().filter(g => g.done).map(g => g.lead), dir = allNodes().filter(n => n.kind === 'director' && ended(n)).map(nodeSecs);
+  const first = prem.filter(p => !p.round_trips).length, agentH = allNodes().filter(n => n.runner === 'agent' && +new Date(n.started_at) >= t1 - 7 * DAY).reduce((s, n) => s + nodeSecs(n), 0) / 3600;
+  const kpi = (label, value, sub, extra = '', detail = '') => `<div class="kpi" ${detail ? tip(detail) : ''}><small>${label}</small><b>${value}</b>${extra}<em>${sub}</em></div>`;
+  return `<div class="kpis">${[
+    kpi('Premieres · 7 jours', perDay.reduce((a, b) => a + b, 0), `${prem.length} en tout`, spark),
+    kpi('Délai médian d\'un ticket', dur(median(lead)), `${lead.length} tickets terminés, ouverture → dernière Premiere`, '', lead.length ? `Le plus court ${dur(Math.min(...lead))} · le plus long ${dur(Math.max(...lead))}` : ''),
+    kpi('Réponse médiane du Director', dur(median(dir)), `${dir.length} attentes`, '', `Durée des nœuds director · max ${dur(Math.max(0, ...dir))}`),
+    kpi('Approuvé au premier tour', `${prem.length ? Math.round(100 * first / prem.length) : 0} %`, `${first} / ${prem.length} Premieres sans aller-retour`),
+    kpi('Heures d\'agents · 7 jours', `${agentH.toFixed(1)} h`, 'somme des tours d\'agents'),
+  ].join('')}</div>`;
+}
+function heatmap() {
+  const t1 = startOfDay(now()) + DAY, t0 = t1 - 7 * DAY, grid = [...Array(7)].map(() => Array(24).fill(0));
+  for (const p of plays()) for (const e of [...nodesOf(p).flatMap(n => n.events), ...(PLAYS[p.node]?.marks || [])]) {
+    const t = +new Date(e.at); if (t >= t0 && t < t1) grid[Math.min(6, Math.floor((t - t0) / DAY))][new Date(t).getHours()]++;
   }
-  return 'conductor';
+  const max = Math.max(1, ...grid.flat());
+  return `<div class="heat"><span></span>${[...Array(24)].map((_, h) => `<span style="text-align:center">${h % 3 ? '' : h}</span>`).join('')}
+    ${grid.map((row, d) => `<span>${dayOf(t0 + d * DAY).replace(/ \S+$/, '')}</span>${row.map((n, h) => `<i ${n ? `data-n style="--v:${Math.round(15 + 85 * n / max)}%"` : ''} ${tip(`${dayOf(t0 + d * DAY)} ${String(h).padStart(2, '0')} h · ${n} événement(s)`)}></i>`).join('')}`).join('')}</div>`;
+}
+const SPLIT = [['agent', 'agent', 'fa-robot'], ['script', 'script', 'fa-gear'], ['human', 'Director', 'fa-user']];
+function timeSplit() {
+  const groups = ticketGroups(), max = Math.max(1, ...groups.map(g => g.split.agent + g.split.script + g.split.human)), {rows, nav} = paged('dash-split', groups);
+  return nav + rows.map(g => { const total = g.split.agent + g.split.script + g.split.human;
+    return `<a class="stack" href="${g.plays.length > 1 ? '#/ticket/' + g.key : '#/play/' + g.plays[0].node}"><span><span class="proj">${g.project}</span> <b>${esc(g.key)}</b></span>
+      <span class="segs" style="width:${Math.max(1, 100 * total / max)}%">${SPLIT.map(([k, l]) => g.split[k] ? `<i class="k-${k}" style="flex:${g.split[k]}" ${tip(`${g.key} · ${l} : ${dur(g.split[k])} (${Math.round(100 * g.split[k] / total)} %)`)}></i>` : '').join('')}</span>
+      <span class="num muted" style="text-align:right">${dur(total)}</span></a>`; }).join('')
+    + `<div class="lgd">${SPLIT.map(([k, l, i]) => `<span><i class="k-${k}"></i><i class="fa-solid ${i}" style="width:auto;height:auto;background:none"></i>${l}</span>`).join('')}</div>`;
+}
+function durations() {
+  const ps = plays().filter(p => p.kind === 'rehearsal').map(p => ({p, s:Math.max(60, secs(p.started_at, p.ended_at)), t:+new Date(p.started_at)}));
+  if (!ps.length) return '<p class="empty">Aucune Rehearsal.</p>';
+  const W = 520, H = 190, L = 44, B = 22, t0 = Math.min(...ps.map(x => x.t)), t1 = now(), lo = Math.log(60), hi = Math.log(Math.max(...ps.map(x => x.s)) * 1.3);
+  const X = t => L + (W - L - 8) * (t - t0) / (t1 - t0 || 1), Y = s => 6 + (H - B - 6) * (1 - (Math.log(s) - lo) / (hi - lo));
+  const ticks = [300, 900, 3600, 4 * 3600, 12 * 3600].filter(s => Math.log(s) < hi), med = median(ps.filter(x => x.p.ended_at).map(x => x.s));
+  const days = [...Array(Math.ceil((t1 - startOfDay(t0)) / DAY))].map((_, i) => startOfDay(t0) + i * DAY).filter(d => d >= t0);
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}">${ticks.map(s => `<line class="grid" x1="${L}" x2="${W}" y1="${Y(s)}" y2="${Y(s)}"/><text x="${L - 6}" y="${Y(s) + 3}" text-anchor="end">${dur(s).replace(/ 00$/, '')}</text>`).join('')}
+    ${days.map(d => `<text x="${X(d)}" y="${H - 6}" text-anchor="middle">${dayOf(d).split(' ').slice(1, 2)}</text>`).join('')}
+    <line class="med" x1="${L}" x2="${W}" y1="${Y(med)}" y2="${Y(med)}" ${tip(`Médiane : ${dur(med)}`)}/><text x="${W - 4}" y="${Y(med) - 4}" text-anchor="end" style="fill:var(--warn)">médiane ${dur(med)}</text>
+    ${ps.map(({p, s, t}) => `<a href="#/play/${p.node}"><circle class="pt ${p.ended_at ? '' : 'open'}" cx="${X(t)}" cy="${Y(s)}" r="5" ${tip(`${p.project} ${p.key}${p.planning ? ' (plan)' : ''} · ${dur(s)}${p.ended_at ? '' : ' · en cours'} · ${dayOf(p.started_at)}`)}/></a>`).join('')}</svg>
+    <div class="lgd"><span><i style="background:var(--run);border-radius:50%"></i>terminée</span><span><i style="border:1.5px solid var(--run);border-radius:50%"></i>en cours</span><span><i style="border-top:2px dashed var(--warn);height:0;border-radius:0"></i>médiane</span></div>`;
+}
+function diffSizes() {
+  const LIMIT = 700, ps = premieres().filter(p => p.diff != null), top = Math.max(LIMIT * 1.25, ...ps.map(p => p.diff)), {rows, nav} = paged('dash-diff', ps);
+  const over = ps.filter(p => p.diff > LIMIT).length;
+  return `<div class="hero-line" style="margin-bottom:6px">${over} / ${ps.length} au-dessus de la limite</div>${nav}<div class="diffs">${rows.map(p => `<a class="stack" href="#/play/${p.node}"><span><b>${esc(p.key)}</b></span><span class="track"><i class="${p.diff > LIMIT ? 'over' : ''}" style="width:${100 * p.diff / top}%" ${tip(`${p.key} · ${p.diff} lignes${p.diff > LIMIT ? ` · ${p.diff - LIMIT} au-dessus` : ''}`)}></i><b style="left:${100 * LIMIT / top}%" ${tip('Limite : 700 lignes')}></b></span><span class="num muted" style="text-align:right">${p.diff}</span></a>`).join('')}</div>`;
+}
+function rolesTable() {
+  const turns = allNodes().filter(n => n.kind === 'turn' && ended(n)), names = ['dramaturg', 'choreographer', 'dancer', 'critic'].filter(r => turns.some(n => n.name === r));
+  const stats = names.map(r => { const xs = turns.filter(n => n.name === r).map(nodeSecs); return {r, n:xs.length, med:median(xs), max:Math.max(...xs), sum:xs.reduce((a, b) => a + b, 0)}; });
+  const top = Math.max(1, ...stats.map(s => s.sum)), {rows, nav} = paged('dash-roles', stats);
+  return nav + `<table class="list"><tr><th>Rôle</th><th>Tours</th><th>Médiane</th><th>Max</th><th style="width:30%">Temps total</th></tr>${rows.map(s => `<tr><td>${role(s.r)}</td><td class="num">${s.n}</td><td class="num">${dur(s.med)}</td><td class="num">${dur(s.max)}</td><td><div class="rolebar r-${s.r}" style="width:${100 * s.sum / top}%" ${tip(`${ROLE[s.r]} · ${dur(s.sum)} en ${s.n} tours`)}></div></td></tr>`).join('')}</table>`;
+}
+function escalations() {
+  const ns = allNodes().filter(n => n.kind === 'director').sort((a, b) => a.started_at < b.started_at ? 1 : -1), {rows, nav} = paged('dash-esc', ns);
+  if (!ns.length) return '<p class="empty">Aucune escalade.</p>';
+  return nav + `<table class="list"><tr><th>Quand</th><th>Représentation</th><th>Motif</th><th>Attente</th></tr>${rows.map(n => `<tr data-href="#/play/${n.play.node}"><td class="muted">${dayOf(n.started_at)} ${clock(n.started_at)}</td><td><span class="proj">${n.play.project}</span> <b>${esc(n.play.key)}</b>${n.play.simulated ? ' <span class="sim">simulé</span>' : ''}</td><td>${esc(n.events[0]?.data.reason || '—')}</td>
+    <td class="num">${n.ended_at ? dur(nodeSecs(n)) : `<span class="outc escalated">attend · <span class="elapsed" data-since="${n.started_at}">${dur(nodeSecs(n))}</span></span>`}</td></tr>`).join('')}</table>`;
+}
+function sessionTable(all, key) {
+  const {rows: list, nav} = paged(key, all);
+  return nav + `<table class="list"><tr><th>Conductor</th><th>Élément</th><th>Mode</th><th>État</th><th>Représentations jouées</th><th>Début</th><th>Durée</th></tr>${list.map(s =>
+    `<tr data-href="#/play/${s.plays.at(-1).node}"><td><span class="proj">${s.project}</span> <b>#${esc(s.item)}</b> ${s.legacy ? '<span class="legacy">repris</span>' : ''}${s.simulated ? '<span class="sim">simulé</span>' : ''}</td><td>${esc(s.title)}</td><td>${s.mode}</td><td>${s.state === 'running' ? '<span class="outc running">en cours</span>' : `<span class="badge">${s.state}</span>`}</td>
+      <td><div class="chips">${s.plays.map(x => `<a class="chip" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)}</a>`).join('')}</div></td><td class="muted">${dayOf(s.started_at)} ${clock(s.started_at)}</td><td class="num">${dur(secs(s.started_at, s.ended_at))}</td></tr>`).join('')}</table>`;
+}
+function premiereTable(all, key) {
+  const {rows: list, nav} = paged(key, all);
+  return nav + `<table class="list"><tr><th>Quand</th><th>Ticket</th><th>Titre</th><th>PR</th><th>Durée</th><th>Allers-retours</th><th>Diff</th></tr>${list.map(p =>
+    `<tr data-href="#/play/${p.node}"><td class="muted">${dayOf(p.ended_at)} ${clock(p.ended_at)}</td><td><span class="proj">${p.project}</span> <b>${esc(p.key)}</b></td><td>${esc(p.title)}</td><td>#${p.pr}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.round_trips}</td><td class="num">${p.diff ?? '—'}</td></tr>`).join('')}</table>`;
+}
+function lanes(p) {
+  const ns = nodesOf(p), t0 = +new Date(p.started_at), t1 = p.ended_at ? +new Date(p.ended_at) : now(), x = at => 100 * (+new Date(at || t1) - t0) / (t1 - t0 || 1);
+  const order = ['dramaturg', 'choreographer', 'dancer', 'critic', 'script', 'director'].filter(k => ns.some(n => nodeWho(n) === k));
+  return `<div class="lanes">${order.map(k => `<div class="lrow"><span>${k === 'script' ? '<span class="role r-script">Script</span>' : role(k)}</span><span class="lane">${ns.filter(n => nodeWho(n) === k).map(n => `<i class="seg ${n.runner === 'agent' ? '' : n.runner === 'human' ? 'human' : 'script'} ${n.ended_at ? '' : 'open'}" style="--r:var(--${k});left:${x(n.started_at)}%;width:${Math.max(0.3, x(n.ended_at) - x(n.started_at))}%"></i>`).join('')}</span></div>`).join('')}</div>`;
 }
 
-/* Où en est la Rehearsal : la phase la plus avancée qu'un rôle a reçue, la Premiere une fois terminée. */
-function phases(r){
-  const seen = new Set(r.events.filter(e => e.event === 'handoff').map(e => PHASE_OF_ROLE[e.detail.role]).filter(Boolean));
-  const reached = r.state.status === 'done' ? 4 : Math.max(0, ...PHASES.map(([key], i) => seen.has(key) ? i : 0));
-  return PHASES.map(([key, label, who], i) => {
-    let state = i < reached ? 'done' : i === reached ? (r.state.status === 'escalated' ? 'wait' : 'now') : 'todo';
-    if (key === 'plan' && !seen.has('plan') && !r.planning && state === 'done') state = 'skip';
-    const note = {done:'fait', now:'en cours', wait:'attend le Director', todo:'à venir', skip:'plan déjà prêt'}[state];
-    return {key, label, who, state, note};
-  });
+/* --- Transitions : un flowchart Mermaid des étapes, chaque passage compté ; la communication n'y est pas. --- */
+const STEPS = {
+  rehearsal: [['begin', 'script', 'Ouverture'], ['choreographer', 'agent', 'Choreographer'], ['dancer', 'agent', 'Dancer'], ['proof', 'script', 'Preuve'], ['mutation', 'script', 'Mutation'], ['critic', 'agent', 'Critic'], ['director', 'human', 'Director'], ['end', 'script', 'Premiere']],
+  workshop: [['begin', 'script', 'Ouverture'], ['dramaturg', 'agent', 'Dramaturg'], ['choreographer', 'agent', 'Choreographer'], ['director', 'human', 'Director'], ['end', 'script', 'Issue publiée']],
+};
+const SKELETON = {
+  rehearsal: [['begin', 'choreographer'], ['begin', 'dancer'], ['choreographer', 'dancer'], ['dancer', 'proof'], ['proof', 'mutation'], ['mutation', 'critic'], ['critic', 'end'], ['proof', 'dancer'], ['mutation', 'dancer'], ['critic', 'dancer'], ['critic', 'director'], ['director', 'dancer']],
+  workshop: [['begin', 'dramaturg'], ['dramaturg', 'choreographer'], ['choreographer', 'dramaturg'], ['dramaturg', 'end'], ['end', 'director']],
+};
+function transitions(p) {
+  const ns = nodesOf(p), stepOf = n => n.kind === 'turn' ? n.name : n.kind === 'proof' ? 'proof' : n.kind === 'mutation' ? 'mutation' : n.kind === 'director' ? 'director' : null;
+  const path = ['begin', ...ns.map(stepOf).filter(Boolean), ...(p.ended_at ? ['end'] : [])].filter((s, i, a) => s !== a[i - 1]);
+  const count = {}, visits = {};
+  path.forEach((s, i) => { visits[s] = (visits[s] || 0) + 1; if (i) { const k = path[i - 1] + '>' + s; count[k] = (count[k] || 0) + 1; } });
+  const current = openNode(p) ? stepOf(openNode(p)) : null;
+  const steps = STEPS[p.kind].filter(([id]) => visits[id] || SKELETON[p.kind].some(e => e.includes(id)));
+  const shape = (id, runner, text) => { const t = `fa:${ICON[runner]} ${text}${visits[id] > 1 ? ` ×${visits[id]}` : ''}`; return runner === 'agent' ? `s_${id}(["${t}"])` : runner === 'human' ? `s_${id}{{"${t}"}}` : `s_${id}["${t}"]`; };
+  const edges = [...new Set([...SKELETON[p.kind].map(e => e.join('>')), ...Object.keys(count)])].map(k => k.split('>'));
+  const lines = ['flowchart LR', ...steps.map(([id, r, t]) => '  ' + shape(id, r, t)),
+    ...edges.map(([a, b]) => { const n = count[a + '>' + b]; return n > 1 ? `  s_${a} -->|×${n}| s_${b}` : n ? `  s_${a} --> s_${b}` : `  s_${a} -.-> s_${b}`; }),
+    ...(isDark() ? ['  classDef agent fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff', '  classDef script fill:#27272a,stroke:#71717a,color:#e4e4e7,stroke-dasharray:4 3', '  classDef human fill:#4c0519,stroke:#fb7185,color:#ffe4e6', '  classDef now stroke:#a5b4fc,stroke-width:4px']
+      : ['  classDef agent fill:#eef2ff,stroke:#6366f1,color:#1e1b4b', '  classDef script fill:#f4f4f5,stroke:#a1a1aa,color:#27272a,stroke-dasharray:4 3', '  classDef human fill:#fff1f2,stroke:#e11d48,color:#881337', '  classDef now stroke:#4f46e5,stroke-width:4px']),
+    '  classDef idle opacity:.45',
+    ...steps.flatMap(([id, r]) => [`  class s_${id} ${r}`, ...(visits[id] ? [] : [`  class s_${id} idle`]), ...(current === id ? [`  class s_${id} now`] : [])])];
+  edges.forEach(([a, b], i) => { if (count[a + '>' + b] && ['dancer', 'dramaturg'].includes(b) && !['begin', 'choreographer'].includes(a)) lines.push(`  linkStyle ${i} stroke:${isDark() ? '#f87171' : '#dc2626'},stroke-width:2px`); });
+  return lines.join('\n');
 }
 
-function sessionEntries(project, session, withDone = false){
-  const states = Object.fromEntries(project.rehearsals.map(s => [s.id, s]));
-  const played = (session.played || []).filter(entry => withDone || states[entry.rehearsal]?.status !== 'done').map(entry => ({
-    kind:'played', item:entry.item, id:entry.rehearsal, state:states[entry.rehearsal],
-    now:entry.rehearsal === session.current, title:cleanTitle(project.titles?.[entry.rehearsal], entry.rehearsal),
-  }));
-  const next = (session.items || []).map(item => ({
-    kind:'next', item, title:cleanTitle(project.queue_titles?.[item], item) || (item.startsWith('#') ? '' : 'feature à planifier'),
-  }));
-  return [...played, ...next];
+/* --- Communication : un diagramme de séquence Mermaid, seulement les messages et les passages de main. --- */
+function sequence(p) {
+  const evs = [...nodesOf(p).flatMap(n => n.events), ...PLAYS[p.node].marks].sort((a, b) => a.id - b.id);
+  const lines = ['sequenceDiagram', '  autonumber'], who = new Set(['conductor']);
+  const name = r => ROLE[r] || r;
+  for (const e of evs) {
+    const d = e.data;
+    if (e.kind === 'handoff') { who.add(d.role); lines.push(`  ${name('conductor')}->>${name(d.role)}: ${d.how === 'start' ? 'lance' : 'relance'}${d.model ? ' (' + d.model + ')' : ''}`); }
+    else if (e.kind === 'message' && d.from && d.to) { who.add(d.from); who.add(d.to); const v = d.type === 'verdict' ? verdict(e) : ''; lines.push(`  ${name(d.from)}-->>${name(d.to)}: ${d.type}${v ? ' ' + v : ''}${d.round ? ' · tour ' + d.round : ''}`); }
+    else if (e.kind === 'escalate') { who.add('director'); lines.push(`  ${name('conductor')}-)${name('director')}: escalade`); }
+    else if (e.kind === 'director-decision') { who.add('director'); lines.push(`  ${name('director')}-)${name('conductor')}: décide`); }
+  }
+  const order = ['director', 'conductor', 'dramaturg', 'choreographer', 'dancer', 'critic'].filter(r => who.has(r));
+  return [lines[0], ...order.map(r => `  participant ${name(r)}`), ...lines.slice(1)].join('\n');
 }
 
-function renderList(){
-  $('#list').innerHTML = data.projects.map(project => {
-    const all = rehearsals(project), live = all.filter(r => r.state.status !== 'done'), past = all.filter(r => r.state.status === 'done');
-    const queue = project.queue || {sessions:[], program:[]};
-    return `<div class="project">
-      <div class="project-head"><h2>${esc(project.name)}</h2></div>
-      ${runningBlock(project, all, live, sessions(project, all))}${programBlock(project, queue.program || [])}${finishedBlock(project, past, finishedSessions(project, all))}
-    </div>`;
-  }).join('');
+/* --- Le fil, comme la v1 : un robot pour un agent, un engrenage pour le script, une silhouette pour le Director. --- */
+function thread(p) {
+  const evs = [...nodesOf(p).flatMap(n => n.events.map(e => ({...e, node:n}))), ...PLAYS[p.node].marks].sort((a, b) => a.id - b.id);
+  const TALK = new Set(['message', 'handoff', 'escalate', 'director-decision', 'published']);
+  const rows = evs.filter(e => filter === 'all' || (filter === 'talk') === TALK.has(e.kind));
+  const pg = paged(`thread-${p.node}-${filter}`, rows, 25);
+  return `${pg.nav}<ol class="thread">${pg.rows.map(row).join('')}</ol>${pg.nav}`;
 }
-
-const TAG_COLOR = {assisted:'sky', autopilot:'violet', Feature:'blue', Bug:'red', Task:'teal', Urgent:'red', High:'orange', Medium:'amber', Low:'slate'};
-const tag = (label, key = label) => `<span class="tag c-${TAG_COLOR[key] || 'slate'}">${esc(label)}</span>`;
-const modeTag = mode => mode ? tag(mode) : '';
-
-/* La Rehearsal qui joue un élément de session ; une planification absorbée par sa slice y mène aussi. */
-const playing = (all, id) => all.find(r => r.state.id === id || r.planning?.id === id);
-
-/* Les sessions de Conductor ouvertes d'un projet (il peut y en avoir plusieurs), chacune avec sa Rehearsal en cours. */
-function sessions(project, all){
-  return (project.queue?.sessions || []).map(session => sessionView(project, session, all, false));
-}
-
-/* Les sessions finies : leurs Rehearsals jouées et leurs frictions restent à voir. */
-function finishedSessions(project, all){
-  return (project.queue?.finished_sessions || []).map(session => sessionView(project, session, all, true));
-}
-
-function sessionView(project, session, all, finished){
-  const entries = sessionEntries(project, session, true), current = finished ? null : playing(all, session.current) || null;
-  const first = playing(all, session.played?.[0]?.rehearsal);
-  return {
-    key:`${project.name}/session:${session.item}`, project, session, entries, current, all, finished,
-    title:cleanTitle(project.queue_titles?.[session.item]) || first?.title || '',
-    done:entries.filter(e => e.kind === 'played' && e.state?.status === 'done').length, total:entries.length,
-    status:finished ? 'done' : current?.state.status === 'escalated' ? 'escalated' : 'open',
-  };
-}
-
-const allSessions = (project, all) => [...sessions(project, all), ...finishedSessions(project, all)];
-
-/* Les frictions d'une Rehearsal finie, gardées dans son état. */
-const frictionsOf = r => r?.state.frictions?.frictions || [];
-const frictionCount = n => n ? `${n} friction${n > 1 ? 's' : ''}` : 'aucune friction';
-
-const link = key => '#' + encodeURIComponent(key);
-
-/* Un bloc se plie ; le choix est gardé par projet, d'un rechargement à l'autre. */
-function sideBlock(project, kind, title, count, body){
-  const folded = isFolded(project.name, kind);
-  return `<div class="side-block ${kind} ${folded ? 'folded' : ''}"><button type="button" class="side-head" data-fold="${esc(project.name + '|' + kind)}" aria-expanded="${!folded}"><i></i>${title}<span class="count">${count}</span></button>
-    <div class="side-body">${body}</div></div>`;
-}
-
-/* Performances en cours : une carte par session de Conductor (sa page liste ses slices) ; puis ce qui joue hors session. */
-function runningBlock(project, all, live, running){
-  const inSession = new Set(running.flatMap(v => v.entries.map(e => playing(all, e.id)?.key)));
-  const cards = running.map(sessionCard).join('');
-  const alone = live.filter(r => !inSession.has(r.key));
-  const loose = alone.length ? `<div class="group-label">Hors session</div>${alone.map(card).join('')}` : '';
-  return sideBlock(project, 'running', 'Performances en cours', running.length + alone.length, cards + loose || '<p class="side-empty">Aucune performance en cours.</p>');
-}
-
-function sessionCard(v){
-  const s = v.session, inside = v.entries.some(e => playing(v.all, e.id)?.key === picked);
-  const frictions = v.entries.reduce((sum, e) => sum + frictionsOf(playing(v.all, e.id)).length, 0);
-  const meta = v.finished
-    ? `<span>${v.done} Rehearsal${v.done > 1 ? 's' : ''}</span><span>${frictionCount(frictions)}</span>`
-    : `<span>${v.done} / ${v.total} slices jouées</span>${v.current?.current ? role(v.current.current) : ''}<span>${esc(ago(v.current?.last))}</span>`;
-  return `<a href="${link(v.key)}" class="card-link ${v.key === picked || inside ? 'picked' : ''}">
-    <div class="card-row"><b>${esc(s.item)}</b>${modeTag(s.mode)}<span style="margin-left:auto">${pill(v.status)}</span></div>
-    <div class="card-title">${esc(v.title)}</div>
-    <div class="card-meta">${meta}</div>
-  </a>`;
-}
-
-/* Un élément prêt qui attend ses bloqueurs (liens « Blocked by » de GitHub), ou dont la dépendance est douteuse. */
-function dependencyNote(p){
-  if (p.doubt) return `<div class="card-title">⚠ ${esc(p.doubt)}</div>`;
-  if ((p.blocked_by || []).length) return `<div class="card-title">bloqué par ${p.blocked_by.map(b => esc(b.item)).join(', ')}</div>`;
-  return '';
-}
-
-/* Programme : ce qui est prêt sur GitHub, par priorité puis ancienneté. */
-function programBlock(project, program){
-  const rows = program.map(p => `<div class="card-link ghost" title="${esc(p.title)}">
-    <div class="card-row">${tag(p.type)}<b class="mono">${esc(p.item)}</b>${p.priority ? `<span style="margin-left:auto">${tag(p.priority)}</span>` : ''}</div>
-    <div class="card-title">${esc(cleanTitle(p.title))}</div>${dependencyNote(p)}</div>`).join('');
-  const error = project.queue_error ? `<div class="stopped">Programme indisponible : ${esc(project.queue_error)}</div>` : '';
-  const empty = project.queue_error ? '' : '<p class="side-empty">Aucun élément prêt.</p>';
-  return sideBlock(project, 'program', 'Programme', program.length, error + (rows || empty));
-}
-
-function finishedBlock(project, past, finished){
-  const sessionCards = finished.length ? `<div class="group-label">Sessions</div>${finished.map(sessionCard).join('')}` : '';
-  const rehearsalCards = past.length ? `${finished.length ? '<div class="group-label">Rehearsals</div>' : ''}${past.map(card).join('')}` : '';
-  return sideBlock(project, 'finished', 'Terminées', finished.length + past.length,
-    sessionCards + rehearsalCards || '<p class="side-empty">Aucune Rehearsal terminée.</p>');
-}
-
-function card(r){
-  const s = r.state;
-  return `<a href="#${esc(r.key)}" class="card-link ${r.key === picked ? 'picked' : ''}">
-    <div class="card-row"><b>${esc(s.id)}</b>${pill(s.status)}${r.current ? `<span style="margin-left:auto">${role(r.current)}</span>` : ''}</div>
-    <div class="card-title">${esc(r.title || (s.issue ? '#' + s.issue : ''))}</div>
-    <div class="card-meta">${s.issue ? `<span>#${esc(s.issue)}</span>` : ''}${s.pull_request ? `<span>PR #${esc(s.pull_request)}</span>` : ''}${s.frictions?.frictions ? `<span>${frictionCount(frictionsOf(r).length)}</span>` : ''}<span>${esc(ago(r.last))}</span></div>
-  </a>`;
-}
-
-/* --- le détail --- */
-
-function renderDetail(){
-  const projects = data.projects, r = projects.flatMap(rehearsals).find(r => r.key === picked);
-  const v = r ? null : projects.flatMap(p => allSessions(p, rehearsals(p))).find(v => v.key === picked);
-  const box = $('#detail');
-  if (!r && !v){ box.innerHTML = '<p class="empty">Choisis une Rehearsal.</p>'; return; }
-  /* Ce qu'on ouvre se lit d'en haut ; en bas du fil, on suit ce qui arrive. */
-  const key = (r || v).key, fresh = shown !== key, atBottom = box.scrollTop > 0 && box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  const scroll = box.scrollTop;
-  box.innerHTML = `<div class="wrap">${r ? `${hero(r)}${callout(r)}${stepper(r)}${metrics(r)}${frictionsBlock([r])}${cast(r)}${queueBlock(r)}${thread(r)}` : sessionPage(v)}</div>`;
-  box.scrollTop = fresh ? 0 : atBottom ? box.scrollHeight : scroll;
-  shown = key;
-}
-
-/* Une session : où elle en est, ses Rehearsals dans l'ordre, ce que doit faire le Director si elle est arrêtée. */
-function sessionPage(v){
-  const s = v.session, cur = v.current, rs = v.entries.map(e => playing(v.all, e.id)).filter(Boolean);
-  const events = rs.flatMap(r => r.events), stamps = events.map(e => e.at).sort(), first = stamps[0] || '';
-  const end = v.finished ? stamps[stamps.length - 1] : new Date().toISOString();
-  const trips = rs.reduce((sum, r) => sum + (r.state.round_trips || 0), 0), escalations = events.filter(e => e.event === 'escalate').length;
-  const playingNow = v.finished ? '' : cur ? `joue ${esc(cur.state.id)}` : 'aucune Rehearsal en cours';
-  const bits = [pill(v.status), modeTag(s.mode), cur?.current ? `en main : ${role(cur.current)}` : '', playingNow].filter(Boolean);
-  return `<div class="hero"><h1><span class="id">Session ${esc(s.item)}</span>${esc(v.title)}</h1><div class="hero-line">${bits.join('<span class="sep">·</span>')}</div></div>
-    ${cur ? callout(cur) + stepper(cur) : ''}
-    <div class="grid">
-      <div class="metric"><small>Jouées</small><b>${v.done}<em> / ${v.total}</em></b></div>
-      <div class="metric"><small>À venir</small><b>${(s.items || []).length}</b></div>
-      <div class="metric"><small>Allers-retours Dancer ↔ Critic</small><b>${trips}</b></div>
-      <div class="metric"><small>Escalades</small><b>${escalations}</b></div>
-      <div class="metric"><small>Durée</small><b>${first ? span(first, end) : '—'}</b></div>
-    </div>
-    ${frictionsBlock(rs)}${sessionList(v)}`;
-}
-
-function hero(r){
-  const s = r.state;
-  const bits = [pill(s.status), r.current ? `en main : ${role(r.current)}` : '',
-    s.issue ? `issue #${esc(s.issue)}` : `feature ${esc(s.feature)}`, s.pull_request ? `PR #${esc(s.pull_request)}` : '',
-    `<span class="mono">rehearsal/${esc(s.id)}</span>`, r.planning ? `planifiée dans ${esc(r.planning.id)}` : '',
-    s.plan ? `plan ${esc(s.plan)}` : ''].filter(Boolean);
-  return `<div class="hero">
-    <h1><span class="id">${esc(s.id)}</span>${esc(r.title)}</h1>
-    <div class="hero-line">${bits.join('<span class="sep">·</span>')}</div>
-  </div>`;
-}
-
-/* Ce que le Director doit faire, dit simplement ; la ligne du script en dessous. */
-function callout(r){
-  const s = r.state;
-  if (s.status === 'done') return s.reason ? `<div class="callout done"><b>Premiere</b><p>${esc(s.reason)}</p></div>` : '';
-  if (s.status !== 'escalated') return '';
-  const toDirector = (s.pending || []).find(q => q.to === 'director');
-  const action = s.blocked_on === 'plan'
-    ? `Lis le plan de <b>#${esc(s.plan_issue)}</b> et ses slices, puis réponds au Choreographer par le Conductor : une question, des changements à faire, ou ton approbation.`
-    : s.blocked_on === 'size'
-      ? `Le diff dépasse le seuil : pose <code>ballet:size-accepted</code> sur la PR #${esc(s.pull_request)}, ou <code>ballet:rejected</code> avec un commentaire, puis reprends.`
-      : toDirector
-        ? `Le ${esc(cap(toDirector.from))} te pose une question : réponds-lui par le Conductor (un message <code>answer</code>).`
-        : s.pull_request
-          ? `Tranche sur la PR #${esc(s.pull_request)} : <code>ballet:approved</code>, ou <code>ballet:rejected</code> avec un commentaire, puis reprends.`
-          : 'Lis le motif et dis au Conductor comment continuer.';
-  return `<div class="callout"><b>Au Director</b><p>${action}</p><p class="muted">${esc(s.reason)}</p></div>`;
-}
-
-function stepper(r){
-  return `<div class="stepper">${phases(r).map(p =>
-    `<div class="phase ${p.state}"><span>${p.label}</span><small>${esc(p.who)} · ${p.note}</small></div>`).join('')}</div>`;
-}
-
-function metrics(r){
-  const s = r.state, limits = r.project.limits || {}, size = s.size || {};
-  const percent = size.limit ? Math.min(100, Math.round(size.counted / size.limit * 100)) : 0;
-  const escalations = r.events.filter(e => e.event === 'escalate').length;
-  const end = s.status === 'done' ? r.last : new Date().toISOString();
-  return `<div class="grid">
-    <div class="metric"><small>Allers-retours Dancer ↔ Critic</small><b>${s.round_trips ?? 0}<em> / ${esc(limits.max_round_trips ?? '?')}</em></b></div>
-    <div class="metric"><small>Diff ${size.over ? (size.strict ? '· au-dessus, strict' : '· au-dessus') : ''}</small>
-      ${size.limit ? `<b>${size.counted}<em> / ${size.limit} lignes</em></b><div class="bar ${size.over ? 'over' : ''}"><i style="width:${percent}%"></i></div>` : '<b><em>pas encore mesuré</em></b>'}</div>
-    <div class="metric"><small>Questions en attente</small><b>${(s.pending || []).length}</b></div>
-    <div class="metric"><small>Escalades</small><b>${escalations}</b></div>
-    <div class="metric"><small>Durée</small><b>${r.first ? span(r.first, end) : '—'}</b></div>
-  </div>`;
-}
-
-/* Les frictions des Rehearsals finies : ce qui a coincé, coûté un tour de plus ou tourné en rond (calculées par le script). */
-function frictionsBlock(rs){
-  const ended = rs.filter(r => r.state.frictions?.frictions);
-  if (!ended.length) return '';
-  const rows = ended.map(r => {
-    const record = r.state.frictions, list = record.frictions;
-    const body = list.length ? `<ul class="steps">${list.map(f => `<li>${esc(f.text)}</li>`).join('')}</ul>` : '<span class="muted">aucune</span>';
-    return `<div class="friction"><div class="card-row"><b class="mono">${esc(r.state.id)}</b><span class="muted">${minutes(record.seconds || 0)}</span>
-      <span style="margin-left:auto" class="badge ${list.length ? 'warn' : 'ok'}">${frictionCount(list.length)}</span></div>${list.length ? body : ''}</div>`;
-  }).join('');
-  return `<div class="block"><h3>Frictions</h3>${rows}</div>`;
-}
-
-const minutes = seconds => span(0, seconds * 1000);
-
-function cast(r){
-  const cast = r.project.cast || {}, dispatches = r.state.dispatches || {};
-  return `<div class="block"><h3>Distribution</h3><div class="cast">${ROLES.map(name => `
-    <div class="actor ${dispatches[name] ? '' : 'idle'}" title="${esc(dispatches[name] || 'pas lancé dans cette Rehearsal')}">
-      ${role(name)}<small>${esc(cast[name]?.cli || '?')}${cast[name]?.model ? ' · ' + esc(cast[name].model) : ''}${dispatches[name] ? ' · lancé' : ''}</small>
-    </div>`).join('')}</div></div>`;
-}
-
-function queueBlock(r){
-  const v = allSessions(r.project, rehearsals(r.project)).find(v => v.entries.some(e => playing(v.all, e.id)?.key === r.key));
-  return v ? sessionList(v, true) : '';
-}
-
-/* Les Rehearsals d'une session dans l'ordre ; `linked` : le titre mène à la page de la session. */
-function sessionList(v, linked = false){
-  const name = `Session ${esc(v.session.item)}`;
-  const rows = v.entries.map((e, i) => {
-    const r = e.kind === 'played' ? playing(v.all, e.id) : null;
-    const status = e.kind === 'next' ? '<span class="muted">à venir</span>' : r ? pill(r.state.status) : '';
-    const inner = `<span class="n">${i + 1}</span><b class="mono">${esc(r?.state.id || e.item)}</b>
-      <span class="t">${esc(r?.title || e.title || '')}${r && e.item !== '#' + (r.state.issue || '') ? ` <span class="muted">← ${esc(e.item)}</span>` : ''}</span>${status}`;
-    return r ? `<a class="qrow ${e.now ? 'now' : ''}" href="#${esc(r.key)}">${inner}</a>` : `<div class="qrow">${inner}</div>`;
-  }).join('');
-  return `<div class="block"><h3>${linked ? `<a href="${link(v.key)}" style="color:inherit">${name}</a>` : name} ${modeTag(v.session.mode)}</h3><div class="qlist">${rows}</div></div>`;
-}
-
-/* --- le fil : les échanges entre rôles, et ce que le script a fait --- */
-
-function thread(r){
-  const tabs = [['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([key, label]) =>
-    `<button type="button" data-filter="${key}" aria-pressed="${filter === key}">${label}</button>`).join('');
-  let lastDay = '', lastRehearsal = '';
-  const rows = r.events.map((e, i) => {
-    if (filter === 'talk' && !TALK.has(e.event)) return '';
-    if (filter === 'script' && TALK.has(e.event)) return '';
-    let head = '';
-    if (day(e.at) !== lastDay){ lastDay = day(e.at); head += `<li class="sep-day">${esc(lastDay)}</li>`; }
-    if (r.planning && e.rehearsal !== lastRehearsal){
-      lastRehearsal = e.rehearsal;
-      head += `<li class="sep-phase">${e.rehearsal === r.planning.id ? `Planification de ${esc(r.planning.feature || r.planning.id)}` : `${esc(r.state.id)} dans le même worktree`}</li>`;
-    }
-    return head + event(e, `${r.key}|${i}`);
-  }).join('');
-  return `<div class="block"><h3>Fil <span class="muted" style="text-transform:none;letter-spacing:0">${r.events.length} entrées</span><span class="tabs">${tabs}</span></h3>
-    <ol class="thread">${rows || '<li class="empty">Rien à montrer ici.</li>'}</ol></div>`;
-}
-
-function event(e, key){
-  const d = e.detail || {};
-  switch (e.event){
-    case 'message': return message(e, d, key);
-    case 'handoff': return bubble('conductor', 'handoff', `${role('conductor')}<span class="to">→</span>${role(d.role)}
-      <span class="badge">${esc(HOW[d.how] || d.how)}</span>${d.agent ? `<span class="muted">${esc(d.agent)}${d.model ? ' ' + esc(d.model) : ''}</span>` : ''}${time(e.at)}`, text(d.text, key, d.how === 'start' ? 3 : 0));
-    case 'nudge': return line(e, '', `${role('conductor')} relance ${role(d.role)}`);
-    case 'handover': return line(e, 'final', `<b>Passage de main</b> : le worktree de la planification joue <b>${esc(d.to)}</b> (#${esc(d.issue)})${d.planned ? `, slice de #${esc(d.planned)}` : ''}`);
-    case 'director-decision': return line(e, 'final', `${role('director')} ${decision(d)}`);
-    case 'begin': return line(e, '', `<b>Ouverture</b>${d.item ? ` de ${esc(d.item)}` : ''}${d.plan ? ` · plan ${esc(d.plan)}` : ''}`);
-    case 'wait': case 'escalate': case 'done': return step(e, d, key);
-    case 'diff-size': return line(e, d.over ? 'escalate' : '', `<b>Diff</b> : ${esc(d.counted)} lignes sur ${esc(d.limit)}${d.excluded ? `, ${esc(d.excluded)} exclues` : ''}${d.over ? ' · au-dessus' : ''}`);
-    case 'frictions': return line(e, (d.frictions || []).length ? 'escalate' : '', `<b>Frictions</b> : ${(d.frictions || []).length
-      ? `<ul class="steps">${d.frictions.map(f => `<li>${esc(f.text)}</li>`).join('')}</ul>` : 'aucune'}`);
-    case 'policy': return line(e, d.violations?.length ? 'bad' : '', `<b>Politique</b> · ${role(d.role)} ${d.violations?.length
-      ? `: ${d.violations.length} violation(s)<ul class="steps">${d.violations.map(v => `<li>${esc(v)}</li>`).join('')}</ul>` : 'en règle'}`);
-    default: return line(e, '', `<b>${esc(e.event)}</b>`, text(JSON.stringify(d, null, 2), key, 0));
+function row(e) {
+  const d = e.data, t = `<time>${clock(e.at)}</time>`;
+  const av = (who) => { const r = runnerOf(who); return `<span class="avatar ${r}" style="--r:var(--${r === 'human' ? 'director' : r === 'script' ? 'script' : who})"><i class="fa-solid ${ICON[r]}"></i></span>`; };
+  const bubble = (who, meta, body = '', cls = '') => `<li class="ev ${cls}">${av(who)}<div class="bubble">${meta}${t}${body}</div></li>`;
+  const line = (who, html, tone = '') => `<li class="ev line ${tone}">${av(who)}<div class="lbody">${html}${t}</div></li>`;
+  const pre = x => x ? `<pre class="text">${esc(x.length > 500 ? x.slice(0, 500) + '…' : x)}</pre>` : '';
+  switch (e.kind) {
+    case 'message': { const v = d.type === 'verdict' ? verdict(e) : ''; return bubble(d.from, `<div class="meta">${role(d.from)} → ${role(d.to)} <span class="badge ${v === 'APPROVED' ? 'ok' : v === 'REJECTED' ? 'bad' : d.type === 'question' ? 'warn' : ''}">${esc(v || d.type)}</span><span class="muted">tour ${esc(d.round)}</span></div>`, pre(d.text)); }
+    case 'handoff': return bubble('conductor', `<div class="meta">${role('conductor')} → ${rn('agent', d.role)} ${role(d.role)} <span class="badge">${d.how === 'start' ? 'lancé' : 'relancé'}</span>${d.model ? `<span class="muted">${esc(d.agent)} ${esc(d.model)}</span>` : ''}</div>`, '', 'handoff');
+    case 'proof-start': return line('script', `<b>Preuve</b> lancée <span class="mono">${esc(e.node?.name || '')}</span>`);
+    case 'proof-end': return line('script', `<b>Preuve</b> ${d.passed ? 'verte' : 'rouge'} · ${d.seconds} s`, d.passed ? 'ok' : 'bad');
+    case 'mutation-start': return line('script', `<b>Mutation</b> ${esc(e.node?.name || '')} lancée en arrière-plan`);
+    case 'mutation-end': return line('script', `<b>Mutation</b> ${d.passed ? 'verte' : 'rouge'} · ${d.seconds} s`, d.passed ? 'ok' : 'bad');
+    case 'escalate': return line('director', `<b>Escalade</b> : ${esc(d.reason)}`, 'warn');
+    case 'director': return line('director', '<b>Le Director a répondu</b>', 'ok');
+    case 'director-decision': return line('director', `<b>Décision du Director</b>${d.verdict ? ' : ' + esc(d.verdict) : ''}`, 'ok');
+    case 'policy': return line('script', `<b>Politique</b> · ${role(d.role)} ${d.violations?.length ? `: ${d.violations.length} violation(s)` : 'en règle'}`, d.violations?.length ? 'bad' : 'quiet');
+    case 'diff-size': return line('script', `<b>Diff</b> ${d.counted} / ${d.limit} lignes${d.over ? ' · au-dessus' : ''}`, d.over ? 'warn' : 'quiet');
+    case 'wait': return line('script', `<b>Script</b><ul class="steps">${(d.done || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul>`, 'quiet');
+    case 'begin': case 'rehearsal': return line('script', `<b>Ouverture</b>${d.item ? ' de ' + esc(d.item) : ''}`);
+    case 'done': return line('script', `<b>Terminé</b> : ${esc(d.reason)}`, 'ok');
+    case 'handover': return line('script', `<b>Passage de main</b> à ${esc(d.to)}`, 'ok');
+    case 'published': return line('script', `<b>Issue #${d.issue} publiée</b> en ${esc(d.status)} · ${d.decided_alone} décisions prises seul`, 'ok');
+    default: return line('script', `<b>${esc(e.kind)}</b>`, 'quiet');
   }
 }
 
-const HOW = {start:'lancé', send:'relancé', reply:'réponse', nudge:'relance'};
-const KIND = {question:'warn', answer:'', report:'', verdict:'', escalation:'bad'};
-
-function message(e, d, key){
-  const verdict = d.type === 'verdict' && (String(d.text || '').match(/VERDICT:\s*(APPROVED|REJECTED|ESCALATE)/) || [])[1];
-  const outcome = d.type === 'report' && (String(d.text || '').match(/^- Outcome:\s*(\w+)/m) || [])[1];
-  const tone = verdict ? {APPROVED:'ok', REJECTED:'bad', ESCALATE:'warn'}[verdict] : KIND[d.type] || '';
-  const label = verdict || (outcome ? `${d.type} · ${outcome}` : d.type);
-  return bubble(d.from, '', `${role(d.from)}<span class="to">→</span>${role(d.to)}<span class="badge ${tone}">${esc(label)}</span>
-    <span class="muted">${esc(d.subject)}${d.round > 1 ? ` · tour ${esc(d.round)}` : ''}</span>${time(e.at)}`, text(withoutHeader(d.text), key, 6));
+/* --- rendu ------------------------------------------------------------------------------------- */
+const NAV = [['dashboard', 'Dashboard'], ['scene', 'En scène'], ['program', 'Programme'], ['workshops', 'Workshops'], ['rehearsals', 'Rehearsals'], ['tickets', 'Tickets'], ['premieres', 'Premieres']];
+const route = () => { const [page = 'dashboard', id = ''] = location.hash.slice(2).split('/').map(decodeURIComponent); return {page, id}; };
+/* Le thème : auto (celui du système), clair ou sombre ; Mermaid suit. */
+const isDark = () => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+const THEMES = {auto:['fa-circle-half-stroke', 'Thème : auto'], light:['fa-sun', 'Thème : clair'], dark:['fa-moon', 'Thème : sombre']};
+function applyTheme() {
+  if (theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
+  const [icon, text] = THEMES[theme]; const b = document.getElementById('theme'); b.innerHTML = `<i class="fa-solid ${icon}"></i>`; b.title = text + ' (cliquer pour changer)';
+  mermaid.initialize({startOnLoad:false, theme:isDark() ? 'dark' : 'neutral', securityLevel:'loose', flowchart:{curve:'basis', htmlLabels:true}, sequence:{mirrorActors:false, showSequenceNumbers:true}});
 }
-
-/* L'en-tête JSON du message est déjà dans la ligne du dessus : le texte commence après. */
-const withoutHeader = t => String(t || '').replace(/^\{"ballet":[^\n]*\n+/, '');
-
-function decision(d){
-  if ('approved' in d) return d.approved ? `approuve le plan de #${esc(d.plan)}` : `n'a pas encore approuvé le plan de #${esc(d.plan)}`;
-  return d.verdict ? `décide <b>${esc(d.verdict)}</b>${d.comments?.length ? ` avec ${d.comments.length} commentaire(s)` : ''}` : "n'a encore rien décidé";
+applyTheme();
+async function render() {
+  const rt = route();
+  document.getElementById('project').innerHTML = [['all', 'Tous les projets'], ...STAGE.projects.map(p => [p.alias, p.alias])].map(([k, l]) => `<option value="${k}" ${project === k ? 'selected' : ''}>${l}</option>`).join('');
+  document.getElementById('nav').innerHTML = NAV.map(([k, l]) => `<a href="#/${k}" class="${rt.page === k || (k === 'tickets' && rt.page === 'ticket') || (k === 'rehearsals' && rt.page === 'play') ? 'on' : ''}">${l}</a>`).join('');
+  const H = STAGE.health, ok = !H.paused_at && !H.legacy_pending && H.monitor.seen_at && secs(H.monitor.seen_at) < 3 * H.monitor.interval_s;
+  const h = document.getElementById('health'); h.className = 'health' + (ok ? '' : ' warn'); h.innerHTML = `<i class="fa-solid fa-heart-pulse"></i>${ok ? 'Ballet OK' : 'Ballet à vérifier'}`;
+  document.getElementById('side').innerHTML = side(rt);
+  document.getElementById('page').innerHTML = (PAGES[rt.page] || PAGES.dashboard)(rt.id);
+  const pending = document.querySelectorAll('.mermaid'); if (pending.length) await mermaid.run({nodes:pending});
 }
-
-function step(e, d, key){
-  const tone = {escalate:'escalate', done:'final'}[e.event] || '';
-  const label = {wait:'attend', escalate:'escalade', done:'terminé'}[e.event];
-  const done = d.done || [], shown = opened.has(key) ? done : done.slice(0, 3);
-  const more = done.length > 3 ? `<button type="button" class="more" data-open="${esc(key)}">${opened.has(key) ? 'moins' : `+ ${done.length - 3} étape(s)`}</button>` : '';
-  return line(e, tone, `<b>Script · ${label}</b>${d.reason ? ` : ${esc(d.reason)}` : ''}`,
-    (shown.length ? `<ul class="steps">${shown.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '') + more);
+function tick() {
+  document.getElementById('clock').textContent = clock(new Date(now()).toISOString());
+  document.querySelectorAll('[data-since]').forEach(el => el.textContent = dur(secs(el.dataset.since)));
 }
-
-function bubble(who, cls, meta, body){
-  const initials = {dramaturg:'Dr', choreographer:'Ch', dancer:'Da', critic:'Cr', conductor:'Co', director:'Di'}[who] || '?';
-  return `<li class="ev"><span class="avatar r-${esc(who)}">${initials}</span><div class="bubble ${cls}"><div class="meta">${meta}</div>${body || ''}</div></li>`;
-}
-
-function line(e, tone, html, extra = ''){
-  return `<li class="ev ${tone}"><span class="tick"><i></i></span><div class="line">${time(e.at)}${html}${extra}</div></li>`;
-}
-
-/* Le texte entier, replié au-delà de quelques lignes ; `lines` = 0 : replié tant qu'on ne l'ouvre pas. */
-function text(t, key, lines){
-  if (!t) return '';
-  const count = String(t).split('\n').length, open = opened.has(key);
-  if (!lines && !open) return `<button type="button" class="more" data-open="${esc(key)}">voir le texte (${count} lignes)</button>`;
-  const long = count > lines;
-  return `<pre class="text ${long && !open ? 'clamp' : ''}">${esc(t)}</pre>` +
-    (long || !lines ? `<button type="button" class="more" data-open="${esc(key)}">${open ? 'replier' : `tout afficher (${count} lignes)`}</button>` : '');
-}
-
-/* --- vie de la page --- */
-
-function render(){ if (data){ renderList(); renderDetail(); } }
-
-document.addEventListener('click', event => {
-  const toggle = event.target.closest('[data-open]'), tab = event.target.closest('[data-filter]'), fold = event.target.closest('[data-fold]');
-  if (fold){ const key = fold.dataset.fold; folds.has(key) ? folds.delete(key) : folds.add(key); remember('ballet-stage-folded', [...folds].join('\n')); renderList(); }
-  if (toggle){ const key = toggle.dataset.open; opened.has(key) ? opened.delete(key) : opened.add(key); renderDetail(); }
-  if (tab){ filter = tab.dataset.filter; remember('ballet-stage-filter', filter); renderDetail(); }
+document.addEventListener('click', e => {
+  const fold = e.target.closest('[data-fold]');
+  if (fold) { const k = fold.dataset.fold; folds.has(k) ? folds.delete(k) : folds.add(k); try { localStorage.setItem('stage-folds', [...folds].join(',')); } catch {} fold.parentElement.classList.toggle('folded'); return; }
+  const f = e.target.closest('[data-filter]'); if (f) { filter = f.dataset.filter; render(); return; }
+  if (e.target.closest('#theme')) { theme = {auto:'light', light:'dark', dark:'auto'}[theme]; store('stage-theme', theme); applyTheme(); render(); return; }
+  const sc = e.target.closest('[data-scene]'); if (sc) { sceneMode = sc.dataset.scene; store('stage-scene', sceneMode); render(); return; }
+  const pg = e.target.closest('[data-page]'); if (pg) { const [k, n] = pg.dataset.page.split(':'); pages[k] = +n; render(); return; }
+  if (e.target.closest('a')) return;
+  const tr = e.target.closest('tr[data-href]'); if (tr) location.hash = tr.dataset.href;
 });
-
-addEventListener('hashchange', () => { picked = decodeURIComponent(location.hash.slice(1)); render(); });
-
-async function poll(){
+/* L'infobulle : toute marque qui porte data-tip. */
+const tipEl = document.getElementById('tip');
+document.addEventListener('mousemove', e => {
+  const m = e.target.closest?.('[data-tip]'); if (!m) { tipEl.style.display = 'none'; return; }
+  tipEl.textContent = m.dataset.tip; tipEl.style.display = 'block';
+  const r = tipEl.getBoundingClientRect(), x = Math.min(e.clientX + 12, innerWidth - r.width - 8), y = e.clientY + 16 + r.height > innerHeight ? e.clientY - r.height - 10 : e.clientY + 16;
+  tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (theme === 'auto') { applyTheme(); render(); } });
+document.getElementById('project').addEventListener('change', e => { project = e.target.value; render(); });
+addEventListener('hashchange', () => { render(); document.querySelector('main').scrollTop = 0; });
+/* Les données : /api/stage, relu toutes les 3 secondes ; la page ne se redessine que quand la base a bougé. */
+async function refresh() {
+  const off = document.getElementById('offline');
   try {
     const answer = await (await fetch('/api/stage?since=' + encodeURIComponent(version), {cache:'no-store'})).json();
-    $('#live').classList.remove('off');
-    $('#live-text').textContent = 'en direct · ' + new Date().toLocaleTimeString('fr-FR');
-    if (!answer.unchanged){
-      version = answer.version; data = answer;
-      const keys = data.projects.flatMap(p => [...rehearsals(p).map(r => r.key), ...allSessions(p, rehearsals(p)).map(v => v.key)]);
-      if (!keys.includes(picked)){
-        const first = data.projects.flatMap(p => sessions(p, rehearsals(p)))[0] || data.projects.flatMap(rehearsals)[0];
-        picked = first ? first.key : '';
-      }
-      render();
-    }
-  } catch {
-    $('#live').classList.add('off');
-    $('#live-text').textContent = 'hors ligne';
-  }
-  setTimeout(poll, 2000);
+    if (answer.error) throw new Error(answer.error);
+    off.hidden = true;
+    if (answer.unchanged) return;
+    ({version} = answer); STAGE = answer.stage; PLAYS = answer.plays;
+    await render();
+  } catch (error) { off.hidden = false; off.textContent = `La Scène ne lit plus la base : ${error.message}`; }
 }
-setInterval(renderList, 30000);   // les « il y a … » vieillissent
-poll();
+refresh().then(() => { tick(); setInterval(tick, 1000); setInterval(refresh, 3000); });
 </script>
 </body>
 </html>

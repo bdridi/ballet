@@ -19,7 +19,6 @@ Ce qui reste à faire, à vérifier ou à trancher dans Ballet. La méthode est 
 
 ## À faire
 
-- 🆕 **OPP-43 · La Scène revue sur la base** : rapide au démarrage (ex-OPP-73), la mutation au fil (ex-OPP-44), les Workshops autopilot avec leurs `proposed` et `decided-alone` (ex-OPP-69), une seule page (ex-OPP-45).
 - 🆕 **OPP-77 · Une feature coûte ~4 à 5 $** : sessions courtes, socle des workers et de Maestro allégé, scripts qui résument, lectures ciblées, modèles moins chers, une seule preuve complète (ex-OPP-66, 67, 78).
 - 🆕 **OPP-75 · Le Conductor figé** : le Monitor voit un Conductor dont le terminal vit mais qui ne fait plus rien, et le dit à Maestro (qui peut le `stop`).
 - 🆕 **OPP-81 · Le terminal de Maestro réutilisé** : `ballet_maestro.py maestro` (et `/ballet:setup`) dit « already there » tant que le terminal noté vit, même quand la session Maestro y est sortie et que l'onglet sert à autre chose ; vérifier que c'est bien Maestro qui y tourne (son agent, son bail) avant de ne rien créer.

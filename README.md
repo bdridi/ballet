@@ -163,14 +163,21 @@ python3 <path-to-ballet>/scripts/ballet_rehearsal.py status
 
 ## 5. Watch it play: the Stage
 
-A local, read-only page that follows your projects live:
+A local, read-only page of everything Ballet plays on the machine, read from `~/.ballet/ballet.db`:
 
 ```sh
-python3 <path-to-ballet>/scripts/ballet_stage.py <project-folder>
-python3 <path-to-ballet>/scripts/ballet_stage.py --scan <folder-of-projects>
+python3 <path-to-ballet>/scripts/ballet_stage.py
 ```
 
-Then open http://127.0.0.1:7700 (`--port` to change it). For each project: its Conductor sessions (the item it was given and its remaining slices), then the program (what waits on GitHub: `Feature`, `Bug` and `Task` issues whose Ballet status is `ready`, by priority then age), what was played, and its Rehearsals. If GitHub does not answer, the page says so. For each Rehearsal: what you have to do when it waits for you, the phase it has reached (plan, code, review, Premiere), the round trips and the diff size against their limits, who plays which role, and the whole thread: every message between the roles in full, what the Conductor handed to each one, the policy checks and every step of the script. Once a Rehearsal is over, its **frictions** (escalations, Critic rejections, red proofs or mutations, refused reports, workers reminded, policy refusals, a diff over the limit, and its duration) are kept in its state and in the journal: the Stage shows them on the Rehearsal and on its session, finished sessions included, and the session's `done` gives them to Maestro. It listens on 127.0.0.1 only and changes nothing.
+Then open http://127.0.0.1:7700 (`--port` to change it). Every project of the machine, with a selector to keep one:
+
+- **Dashboard** (the default page): Ballet's health (Monitor, Maestro and its context, the mailbox, launches against their limits, the base), the indicators (Premieres over 7 days, median lead time of a ticket, the Director's median response time, the share approved on the first round, agent hours), the activity heatmap, where the time goes per ticket (agent, script, Director), Rehearsal durations over time, diff sizes against their limit, the roles and the last escalations.
+- **On stage**: what plays now, what waits for you first; cards up to four, a list beyond (or on demand).
+- **Program**: the queue as the Monitor last saw it, and the issues a Workshop published `proposed` (open them on GitHub to accept them: the Stage changes nothing).
+- **Workshops, Rehearsals** (one line per Conductor session), **Tickets** (slices included) and **Premieres**.
+- For each Rehearsal or Workshop: its transitions (a flowchart of the steps, each passage counted), its communication (who talks to whom, in order) and the whole thread.
+
+Light, dark or the system's theme; every table is paged. Issue titles come from `gh`, read in the background. It listens on 127.0.0.1 only and loads nothing from the network (Mermaid and Font Awesome are in `stage/vendor/`).
 
 ## Settings you may tune
 

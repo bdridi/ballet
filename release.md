@@ -2,6 +2,18 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
+## 0.42.0 — 2026-11-22 · `v0.42.0`
+
+OPP-43 (la Scène revue sur la base) : une seule page pour toute la machine, lue dans `~/.ballet/ballet.db`, sur le design de la maquette E (la Régie) choisi par le Director.
+
+- **Le serveur** (`ballet_stage.py`, réécrit) : plus de dossier de projet en argument, la Scène lit tous les projets de la base (et ceux de `maestro.toml`) ; `--port` seulement. `/api/stage` donne en une fois la santé, les projets (distribution du profil, repo GitHub d'après le remote `origin`), le registre des Conductors, chaque Rehearsal et Workshop joué avec son arbre (nœuds, événements, marques ; textes coupés à 2 000 caractères), la file `ready` du dernier tour du Monitor et les issues publiées `proposed` que ni la file ni une session n'ont prises ; `?since=<version>` répond `unchanged` quand rien n'a bougé. Plus aucun appel à GitHub pour la file : seuls les titres des issues viennent de `gh`, lus en arrière-plan puis gardés, si bien que la page s'ouvre tout de suite (ex-OPP-73). L'historique repris d'avant la base est regroupé par feature, marqué « repris ».
+- **La page** (`stage/index.html`, `stage/v2.html` retiré) : un Dashboard par défaut (santé compacte ; Premieres sur 7 jours avec sparkline, délai médian d'un ticket, réponse médiane du Director, part approuvée au premier tour, heures d'agents ; heatmap 7 j × 24 h ; temps par ticket agent / script / Director ; durée des Rehearsals dans le temps avec sa médiane ; diffs face à la limite ; rôles ; dernières escalades), En scène (ce qui attend le Director d'abord, cartes jusqu'à 4, liste au-delà, bascule Cartes / Liste), Programme, Workshops, Rehearsals par session de Conductor, Tickets, Premieres ; pour chaque représentation ses transitions (flowchart) et sa communication (diagramme de séquence) en Mermaid, et son fil (la mutation au fil, ex-OPP-44 ; le `published` des Workshops autopilot avec ses décisions prises seul, ex-OPP-69). Tous les tableaux paginés par 10, le fil par 25 ; infobulle sur chaque marque ; thème auto / clair / sombre retenu dans le navigateur ; liens vers les issues et les PR. Relue toutes les 3 secondes, redessinée seulement quand la base a bougé ; si la base ne répond plus, la page le dit.
+- **Lecture seule** : une issue `proposed` s'ouvre sur GitHub pour être acceptée (choix du Director : la Scène n'écrit rien).
+- **Local** : Mermaid 10.9.1 et Font Awesome 6.5.1 (CSS et police solid) copiés dans `stage/vendor/` ; rien n'est chargé du réseau.
+- README (§5), PRD (la Scène) à jour. `test_ballet_stage.py` réécrit (19 tests) ; 932 tests verts. Vérifié dans un navigateur sur la vraie base de la machine (antimurphy : 28 représentations), toutes les pages et chaque représentation en clair et en sombre, sans erreur de console ni de Mermaid. **Pas vérifié** : la mise à jour en direct pendant une vraie Rehearsal.
+
+**Opportunités traitées** : OPP-43.
+
 ## 0.41.0 — 2026-11-22 · `v0.41.0`
 
 OPP-79 (l'état en SQLite) : tout l'état de la machine et des projets dans une seule base, `~/.ballet/ballet.db` ; la config reste en TOML ; plus rien n'est écrit dans les projets. Le journal prend une seule forme, des nœuds et leurs événements.
