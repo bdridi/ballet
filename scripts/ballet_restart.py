@@ -18,7 +18,7 @@ la session prend le bail (`claim`), lit `recap` et ouvre par « While you were a
 `MAX_WAIT_SECONDS`, ou si la nouvelle session ne prend pas le bail dans `CLAIM_WAIT_SECONDS`, le script abandonne : il lève
 le drapeau qu'il a posé et le dit dans la boîte (`maestro · restart abandoned`).
 
-Une session Maestro ouverte à la main, hors du terminal `maestro` de `maestro.toml`, ne peut pas être redémarrée par
+Une session Maestro ouverte à la main, hors du terminal `maestro` noté dans la base (`ballet_runtime.py`), ne peut pas être redémarrée par
 script : la demande est refusée (`/clear`, puis `claim --take-over`).
 """
 
@@ -30,7 +30,10 @@ import time
 from pathlib import Path
 
 import ballet_conductors
+import ballet_db
+import ballet_legacy
 import ballet_maestro
+import ballet_runtime
 import ballet_state
 from ballet_maestro import MaestroError
 
@@ -56,9 +59,9 @@ def request(owner, orca, state=None):
     pas le bail, quand la session ne tourne pas dans le terminal de Maestro, ou quand un redémarrage est déjà en cours."""
     ballet_maestro.confirm_owner(owner, state)
     with ballet_state.locked(state):
-        config = ballet_maestro.read_config(state)
-        _refuse_unless_maestro_terminal(config, orca)
-        pending = config.get("restart", {}).get("terminal", "")
+        runtime = ballet_runtime.read(state)
+        _refuse_unless_maestro_terminal(runtime, orca)
+        pending = runtime["restart_terminal"]
         if pending and pending in ballet_maestro.live_terminals(orca):
             return f"restart already in progress: terminal {pending}"
         paused_by_us = not ballet_maestro.is_paused(state)
@@ -68,16 +71,15 @@ def request(owner, orca, state=None):
         except MaestroError:
             _lift_pause(paused_by_us, state)
             raise
-        config["restart"] = {"terminal": terminal, "paused": paused_by_us}
-        ballet_maestro.write_config(config, state)
+        ballet_runtime.update(state, restart_terminal=terminal, restart_owns_pause=paused_by_us)
     return (f"restart scheduled: terminal {terminal} waits until no Conductor is working and this session sleeps on its mailbox, "
             "then restarts it; auto launch is paused until then. Keep relaying meanwhile")
 
 
-def _refuse_unless_maestro_terminal(config, orca):
-    handle = config.get("maestro", {}).get("terminal", "")
+def _refuse_unless_maestro_terminal(runtime, orca):
+    handle = runtime["maestro_terminal"]
     if not handle or handle not in ballet_maestro.live_terminals(orca):
-        raise MaestroError(f"this session does not run in the terminal Maestro owns ({ballet_maestro.CONFIG_NAME} [maestro]): "
+        raise MaestroError(f"this session does not run in the terminal Maestro owns ({handle or 'none noted'}): "
                            "a script cannot restart it; clear it by hand (/clear), then claim --take-over on the Director's yes")
 
 
@@ -150,7 +152,7 @@ def _names_working(orca, state):
 
 
 def _replace_maestro(orca, state):
-    old = ballet_maestro.read_config(state).get("maestro", {}).get("terminal", "")
+    old = ballet_runtime.read(state)["maestro_terminal"]
     ballet_maestro.release_lease(state)
     if old and old in ballet_maestro.live_terminals(orca):
         orca(["terminal", "close", "--terminal", old, "--json"])
@@ -159,7 +161,7 @@ def _replace_maestro(orca, state):
 
 def _new_session_claims(state, sleep, clock):
     deadline = clock() + CLAIM_WAIT_SECONDS
-    while not ballet_maestro.read_config(state)["lease"]["owner"]:
+    while not ballet_runtime.read(state)["lease_owner"]:
         if clock() >= deadline:
             return False
         sleep(CLAIM_POLL_SECONDS)
@@ -168,10 +170,8 @@ def _new_session_claims(state, sleep, clock):
 
 def _finish(orca, state, problem):
     """Retire le drapeau s'il est à nous, oublie la demande, dit l'abandon dans la boîte, puis ferme ce terminal."""
-    config = ballet_maestro.read_config(state)
-    _lift_pause(config.get("restart", {}).get("paused", False), state)
-    if config.pop("restart", None) is not None:
-        ballet_maestro.write_config(config, state)
+    _lift_pause(ballet_runtime.read(state)["restart_owns_pause"], state)
+    ballet_runtime.update(state, restart_terminal="", restart_owns_pause=False)
     if problem:
         _tell_the_mailbox(problem, orca, state)
     _close_this_terminal(orca)
@@ -203,11 +203,12 @@ def _close_this_terminal(orca):
 def main(argv, orca=None):
     """Affiche le résultat et sort avec 0 ; 1 si le redémarrage est refusé, 2 sur un usage invalide."""
     try:
+        ballet_legacy.refuse_if_pending()
         print(_command(argv[1:], orca or ballet_maestro.run_orca))
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
-    except (MaestroError, OSError) as error:
+    except (MaestroError, *ballet_db.ERRORS, OSError) as error:
         print(f"restart: {error}", file=sys.stderr)
         return 1
     return 0

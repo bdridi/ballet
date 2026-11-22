@@ -8,11 +8,12 @@
 Maestro seul l'appelle (sur la demande du Director, ou quand sa règle `auto_launch` le décide pour un élément que le Monitor
 a vu passer `ready`) : c'est le seul lanceur de Ballet.
 
-Le Conductor est `claude --remote-control '<projet>#<élément>' '<prompt>' --allowedTools 'Bash(python3:*)' 'Edit(.ballet/run/**)'`, lancé par
+Le Conductor est `claude --remote-control '<projet>#<élément>' '<prompt>' --allowedTools 'Bash(python3:*)' 'Edit(~/.ballet/projects/**)'`, lancé par
 `orca terminal create --worktree path:<projet> --command …`. Le prompt vient avant les options : `--allowedTools` prend
 tout ce qui la suit pour ses valeurs. Un Conductor ne lance que les scripts de Ballet (`python3`) : `gh`, `git` et `orca`
 sont appelés par ces scripts, jamais par l'agent. Il n'écrit qu'un fichier, le message Ballet du Director
-(`.ballet/run/inbox.md`) : `Edit(.ballet/run/**)` le laisse faire sans demande de permission, quel que soit le mode. `BALLET_CONDUCTOR_COMMAND` remplace `claude` (un autre agent, ou une
+(`inbox.md`, dans le dossier de travail du projet, sous `~/.ballet/projects/`) : `Edit(~/.ballet/projects/**)` (le dossier
+d'état réel, `BALLET_HOME` compris) le laisse faire sans demande de permission, quel que soit le mode. `BALLET_CONDUCTOR_COMMAND` remplace `claude` (un autre agent, ou une
 commande inoffensive pour essayer sans tokens) ; les arguments restent les mêmes.
 
 Avant tout lancement, cinq garde-fous, chacun avec son refus : le projet est connu de `maestro.toml` ; l'élément n'a pas
@@ -34,7 +35,7 @@ Un terminal déjà fermé est noté `closed` sans rien fermer.
 `stop` arrête un Conductor qui tourne (ou dont le terminal a disparu), sur la demande du Director, en gardant le travail :
 le terminal est fermé (la conversation reste reprenable) ; les workers Orca de sa Rehearsal en cours, ou de son Workshop,
 sont arrêtés (`orchestration worker-stop`, qui n'efface jamais le worktree) ; la Rehearsal ou le Workshop passe
-`escalated`, motif noté (état `.ballet/run/`, branche, worktree et PR gardés) ; le `Ballet status` de l'issue passe
+`escalated`, motif noté (état dans la base, branche, worktree et PR gardés) ; le `Ballet status` de l'issue passe
 `escalated` (jamais `ready`, que le Monitor ferait relancer) ; la ligne du registre passe à `stopped`. Une session restée
 ouverte refuse un nouveau lancement : reprendre en plein vol est l'objet d'OPP-80.
 """
@@ -51,16 +52,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ballet_conductors
+import ballet_db
+import ballet_legacy
 import ballet_maestro
 import ballet_program
 import ballet_rehearsal
 import ballet_state
+import ballet_store
 import ballet_workshop
 from ballet_maestro import MaestroError
 
 COMMAND_VARIABLE = "BALLET_CONDUCTOR_COMMAND"
 DEFAULT_AGENT = "claude"
-ALLOWED_TOOLS = ("Bash(python3:*)", "Edit(.ballet/run/**)")
+RUN_PYTHON = "Bash(python3:*)"
 DEFAULT_LIMITS = {"max_running": 3, "max_per_day": 10}
 LAUNCH_LOCK = "launch.lock"
 REMOTE_CONTROL_URL = re.compile(r"https://claude\.ai/code/\S+")
@@ -237,7 +241,7 @@ def _check_guardrails(launch, orca, state):
     _refuse_if_running_in_registry(launch, registry, alive)
     _refuse_if_session_open(launch)
     _refuse_if_too_many_running(registry, alive, config)
-    _refuse_if_too_many_today(registry, config)
+    _refuse_if_too_many_today(state, config)
     _refuse_if_blocked(launch)
 
 
@@ -274,9 +278,9 @@ def _refuse_if_too_many_running(registry, alive, config):
                           f"([limits] max_running in {ballet_maestro.CONFIG_NAME})")
 
 
-def _refuse_if_too_many_today(registry, config):
+def _refuse_if_too_many_today(state, config):
     limit = _limit(config, "max_per_day")
-    today = ballet_conductors.launches_today(registry)
+    today = ballet_conductors.launches_today(state)
     if today >= limit:
         raise LaunchError(f"{today} launch(es) today already: the limit is {limit} ([limits] max_per_day in {ballet_maestro.CONFIG_NAME})")
 
@@ -351,7 +355,17 @@ def _open_terminal(launch, orca):
 def _conductor_command(launch):
     """`<agent> --remote-control <nom> <prompt> --allowedTools …` : le prompt avant les options."""
     agent = shlex.split(os.environ.get(COMMAND_VARIABLE) or DEFAULT_AGENT)
-    return shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--allowedTools", *ALLOWED_TOOLS])
+    return shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--allowedTools", RUN_PYTHON, work_files_rule()])
+
+
+def work_files_rule():
+    """La permission d'écrire dans les dossiers de travail des projets : `~/…` sous le dossier personnel, `//…` (un chemin
+    absolu, dans la syntaxe des règles de Claude Code) ailleurs."""
+    root = (ballet_state.state_dir() / ballet_store.WORK_DIR).resolve()
+    try:
+        return f"Edit(~/{root.relative_to(Path.home().resolve())}/**)"
+    except ValueError:
+        return f"Edit(/{root}/**)"
 
 
 def _find_remote_control_url(terminal, orca, wait_seconds):
@@ -386,11 +400,12 @@ def _report(launch, terminal, url):
 def main(argv, orca=None):
     """Affiche ce qui est parti et sort avec 0 ; 1 si le lancement est refusé, 2 sur un usage invalide."""
     try:
+        ballet_legacy.refuse_if_pending()
         print(_command(argv[1:], orca or ballet_maestro.run_orca))
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
-    except (LaunchError, MaestroError, OSError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:
+    except (LaunchError, MaestroError, *ballet_db.ERRORS, OSError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:
         print(f"launch: {error}", file=sys.stderr)
         return 1
     return 0

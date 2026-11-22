@@ -73,20 +73,9 @@ class InitProjectTest(unittest.TestCase):
         self.init()
         self.assertEqual([p.name for p in (self.project / ".claude" / "skills").iterdir()], [".gitkeep"])
 
-    def test_cree_un_gitignore_qui_ignore_l_etat_des_rehearsals(self):
+    def test_ne_touche_pas_au_gitignore_l_etat_vit_hors_du_projet(self):
         self.init()
-        self.assertEqual((self.project / ".gitignore").read_text(), ".ballet/run/\n")
-
-    def test_complete_un_gitignore_existant_sans_rien_perdre(self):
-        (self.project / ".gitignore").write_text("target/")
-        report = self.init()
-        self.assertEqual((self.project / ".gitignore").read_text(), "target/\n.ballet/run/\n")
-        self.assertIn(self.project.resolve() / ".gitignore", report["updated"])
-
-    def test_n_ajoute_pas_deux_fois_la_ligne_du_gitignore(self):
-        self.init()
-        self.init()
-        self.assertEqual((self.project / ".gitignore").read_text(), ".ballet/run/\n")
+        self.assertFalse((self.project / ".gitignore").exists())
 
 
 class InitProjectGitHubTest(unittest.TestCase):

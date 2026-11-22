@@ -13,31 +13,12 @@
     python3 ballet_maestro.py pause | resume                 # plus rien ne part seul (`~/.ballet/auto_launch_paused`) | tout repart
     python3 ballet_maestro.py tell <projet>#<élément> <texte>   # la réponse du Director, au terminal du Conductor
 
-L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) :
+La config vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) ; seuls `project add` et le Director
+l'écrivent :
 
-    [mailbox]                 la boîte : un terminal Orca vide, à elle seule, et la Run créée `--from` lui
-    terminal = "term_…"
-    run = "run_…"
-    previous_run = "run_…"    la Run d'une boîte recréée, que `recap` relit une dernière fois puis oublie
-
-    [lease]                   le bail de lecture : lire la boîte consomme les messages, une seule session le fait
-    owner = "…"               le jeton de la session Maestro (`claim`) ; vide, personne
-    pid = 0                   le processus de son attente en cours (`wait`), 0 sinon
-    renewed = "…"             la date ISO de la dernière prise, ou de la fin de la dernière attente
-    session = "…"             l'id de la session Claude de Maestro (`claim` le lit dans `CLAUDE_CODE_SESSION_ID`) : c'est
-                              par lui que le Monitor retrouve son transcript ; vide hors de Claude
-
-    [monitor]                 le terminal Orca du Monitor (`monitor` le crée)
-    terminal = "term_…"
-
-    [maestro]                 la session Maestro : son terminal Orca (`maestro` le crée) et ses réglages (facultatifs)
-    terminal = "term_…"
+    [maestro]                 les réglages de la session Maestro (facultatifs ; ces valeurs par défaut)
     restart_at_context_percent = 30   le contexte au-delà duquel le Monitor le signale pour un redémarrage ; 0 : jamais
     context_window_tokens = 1000000   la fenêtre de contexte du modèle de Maestro (le transcript ne la dit pas)
-
-    [restart]                 un redémarrage de Maestro en cours (`ballet_restart.py when-idle`) ; absent sinon
-    terminal = "term_…"       le terminal `maestro-restart` qui l'exécute
-    paused = true             le drapeau de pause est le sien : il le retire à la fin
 
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
@@ -51,9 +32,15 @@ L'état vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) 
     close_finished_after_minutes = 10   un Conductor fini dont le terminal reste ouvert au-delà : le Monitor le signale
                                         (`<projet>#<élément> · finished`) et Maestro le ferme ; 0 : jamais
 
+L'état, lui, vit dans la base (`ballet_runtime.py`, OPP-79) : la boîte (un terminal Orca vide, à elle seule, et la Run
+créée `--from` lui ; la Run d'une boîte recréée, que `recap` relit une dernière fois puis oublie), le bail, les terminaux de
+Maestro et du Monitor, la pause et le redémarrage en cours. Le bail note le jeton de la session Maestro (`claim`), le
+processus de son attente en cours (`wait`, 0 sinon), sa dernière prise, et l'id de sa session Claude (`claim` le lit dans
+`CLAUDE_CODE_SESSION_ID`) : c'est par lui que le Monitor retrouve son transcript.
+
 La règle de lancement automatique se décide ici, dans `decide` : un élément passé `ready` (signalé par le Monitor) est
-lancé seul quand son type est dans `auto_launch` de son projet et que le drapeau `~/.ballet/auto_launch_paused` n'existe
-pas (`pause` le pose, `resume` le retire) ; sinon Maestro demande au Director. `wait` et `recap` écrivent le verdict sous
+lancé seul quand son type est dans `auto_launch` de son projet et que rien n'est en pause (`pause` la pose, `resume` la
+retire) ; sinon Maestro demande au Director. `wait` et `recap` écrivent le verdict sous
 chaque élément `· ready` : `DECISION: launch` ou `DECISION: ask the Director (<raison>)`. Un lancement refusé par un
 plafond laisse l'élément dans `ready` : `ready` le liste tant qu'il n'a pas de Conductor et que le Monitor le voit prêt.
 
@@ -81,8 +68,8 @@ rien). La session créée prend elle-même le bail (`claim`) ; la rouvrir ailleu
 se fait que sur le oui du Director.
 
 Il n'existe jamais deux boîtes : `mailbox` ne fait rien quand le terminal noté vit encore dans Orca, et un verrou
-(`maestro.lock`) empêche deux appels de créer chacun la sienne. Chaque écriture passe par un fichier temporaire, puis
-un renommage.
+(`maestro.lock`) empêche deux appels de créer chacun la sienne (la création appelle Orca : elle dure trop pour une
+transaction de la base). Le bail se prend et se rend dans une transaction de la base.
 
 Le bail est vivant tant que le `pid` de l'attente tourne, ou que `renewed` a moins de 10 minutes : c'est le temps qu'a la
 session, entre deux attentes, pour traiter un message. `claim` refuse un bail vivant ; `claim --take-over` arrête l'attente
@@ -90,13 +77,12 @@ de l'ancien propriétaire et le remplace (après un `/clear`, ou une session mor
 qui tient le bail ; sinon la session n'est plus Maestro.
 
 `wait` et `recap` notent, pour chaque `status` de sujet `<projet>#<élément> · <événement>`, le terminal expéditeur et
-l'événement dans le registre des Conductors (`ballet_conductors.py`, `~/.ballet/conductors.json`, que `ballet_launch.py`
-remplit déjà au lancement) : c'est où `tell` écrit ; un `done` clôt la ligne. Ils lisent en consommant (jamais `--peek`) :
+l'événement dans le registre des Conductors (`ballet_conductors.py`, que `ballet_launch.py` remplit déjà au lancement) : c'est où `tell` écrit ; un `done` clôt la ligne. Ils lisent en consommant (jamais `--peek`) :
 un message lu n'est plus non lu.
 
 Les Conductors (`ballet_rehearsal.py`, `ballet_workshop.py`) appellent `announce` quand ils écrivent `NEXT: escalate`
 ou `NEXT: done` : un message `status`, priorité `high`, sujet `<projet>#<élément> · <événement>`, dans la boîte. Sans
-`maestro.toml` ou sans boîte, rien n'est envoyé ; un envoi qui échoue n'arrête jamais le Conductor.
+boîte, rien n'est envoyé ; un envoi qui échoue n'arrête jamais le Conductor.
 """
 
 import json
@@ -113,7 +99,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import ballet_conductors
+import ballet_db
+import ballet_legacy
 import ballet_program
+import ballet_runtime
 import ballet_state
 
 CONFIG_NAME = "maestro.toml"
@@ -131,13 +120,11 @@ SESSION_IN_BODY = re.compile(r"\bsession (\S+)\s*$")
 TERMINAL_IN_BODY = re.compile(r"\bterminal (term_\S+?)[,.\s]")
 ALIAS = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
-HEADER = "# Maestro (OPP-02), written by ballet_maestro.py: edit it while no Maestro command runs.\n"
+HEADER = "# Maestro's config (OPP-02). Its state lives in ballet.db (OPP-79).\n"
 LEASE_TTL = timedelta(minutes=10)   # le temps de la session, entre deux attentes, pour traiter un message
 WAIT_TIMEOUT_MS = 600_000           # une attente qui expire sans message est relancée : `wait` ne rend la main qu'avec du courrier
 RECAP_LIMIT = 10                    # les derniers messages de l'historique relus au démarrage
-EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": "", "session": ""}
 TARGET = re.compile(r"^[^\s#]+#\S+$")
-PAUSE_FLAG = "auto_launch_paused"
 MONITOR_TITLE = "ballet-monitor"
 MONITOR_SCRIPT = Path(__file__).resolve().with_name("ballet_monitor.py")
 MAESTRO_TITLE = "maestro"
@@ -165,15 +152,15 @@ def mailbox(orca, state=None):
     terminal noté vit encore, rien ne change ; sinon une nouvelle boîte le remplace, et l'ancienne Run est gardée
     pour une dernière lecture."""
     with ballet_state.locked(state):
-        config = read_config(state)
-        box = config["mailbox"]
-        alive = bool(box.get("terminal")) and _terminal_alive(box["terminal"], orca)
-        if alive and box.get("run"):
-            return f"mailbox already there: terminal {box['terminal']}, run:{box['run']}"
-        box = box if alive else _replace_terminal(config, orca, state)
-        box["run"] = _new_run(box["terminal"], orca)
-        write_config(config, state)
-        return f"mailbox created: terminal {box['terminal']}, run:{box['run']}"
+        runtime = ballet_runtime.read(state)
+        terminal, run = runtime["mailbox_terminal"], runtime["mailbox_run"]
+        alive = bool(terminal) and _terminal_alive(terminal, orca)
+        if alive and run:
+            return f"mailbox already there: terminal {terminal}, run:{run}"
+        terminal = terminal if alive else _replace_terminal(runtime, orca, state)
+        run = _new_run(terminal, orca)
+        ballet_runtime.update(state, mailbox_run=run)
+        return f"mailbox created: terminal {terminal}, run:{run}"
 
 
 def monitor(orca, state=None):
@@ -181,14 +168,12 @@ def monitor(orca, state=None):
     rien ne change ; sinon un nouveau le remplace. Une Orca injoignable lève : on ne crée jamais un second Monitor à
     l'aveugle."""
     with ballet_state.locked(state):
-        config = read_config(state)
-        handle = config.get("monitor", {}).get("terminal", "")
+        handle = ballet_runtime.read(state)["monitor_terminal"]
         if handle and _terminal_alive(handle, orca):
             return f"monitor already there: terminal {handle}"
         receipt = json.loads(orca(["terminal", "create", "--title", MONITOR_TITLE, "--command", _monitor_command(), "--json"]))
         handle = first_id(receipt, "term_", "orca terminal create")
-        config["monitor"] = {"terminal": handle}
-        write_config(config, state)
+        ballet_runtime.update(state, monitor_terminal=handle)
         return f"monitor created: terminal {handle}"
 
 
@@ -203,16 +188,16 @@ def maestro(orca, state=None):
     Maestro tient un bail vivant, rien n'est créé (deux sessions se disputeraient la boîte) ; sinon un nouveau terminal
     la lance et le remplace. Une Orca injoignable lève : on ne crée jamais une seconde session à l'aveugle."""
     with ballet_state.locked(state):
-        config = read_config(state)
-        handle = config.get("maestro", {}).get("terminal", "")
+        runtime = ballet_runtime.read(state)
+        handle = runtime["maestro_terminal"]
         if handle and _terminal_alive(handle, orca):
             return f"maestro already there: terminal {handle}"
-        if _lease_alive(config["lease"]):
-            return f"maestro not created: {_lease_held_message(config['lease'])}"
+        lease = _lease(runtime)
+        if _lease_alive(lease):
+            return f"maestro not created: {_lease_held_message(lease)}"
         receipt = json.loads(orca(["terminal", "create", "--title", MAESTRO_TITLE, "--command", _maestro_command(), "--json"]))
         handle = first_id(receipt, "term_", "orca terminal create")
-        config.setdefault("maestro", {})["terminal"] = handle   # ses réglages (`restart_at_context_percent`…) restent
-        write_config(config, state)
+        ballet_runtime.update(state, maestro_terminal=handle)
         return f"maestro created: terminal {handle}"
 
 
@@ -253,10 +238,10 @@ def announce(step, home, orca, state=None):
         return
     try:
         config = read_config(state)
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        step.done.append(f"Maestro not told: {_config_path(state)} unreadable: {error}")
+        run = ballet_runtime.read(state)["mailbox_run"]
+    except (OSError, tomllib.TOMLDecodeError, *ballet_db.ERRORS) as error:
+        step.done.append(f"Maestro not told: its config or state is unreadable: {error}")
         return
-    run = config["mailbox"].get("run")
     if not run:
         return
     subject = f"{project_of(home, config)}#{step.item.lstrip('#')} · {step.next}"
@@ -277,7 +262,7 @@ def post_status(run, subject, body, priority, orca):
 
 def mailbox_run(state=None):
     """La Run de la boîte, où écrire ; une machine sans boîte est refusée."""
-    run = read_config(state)["mailbox"].get("run")
+    run = ballet_runtime.read(state)["mailbox_run"]
     if not run:
         raise MaestroError("no mailbox yet: run ballet_maestro.py mailbox")
     return run
@@ -294,15 +279,14 @@ def claim(take_over=False, state=None):
     """Le bail de lecture de la boîte, pour une seule session : refusé quand une autre le tient vivant, sauf `take_over`,
     qui arrête d'abord l'attente de l'ancien propriétaire. Rend le jeton de la nouvelle propriétaire. Le bail note aussi l'id
     de sa session Claude : le Monitor lit le contexte de Maestro dans ce transcript."""
-    with ballet_state.locked(state):
-        config = read_config(state)
-        lease = config["lease"]
+    with ballet_db.writing(state) as connection:
+        lease = _lease(ballet_runtime.read_in(connection))
         if _lease_alive(lease) and not take_over:
             raise MaestroError(_lease_held_message(lease))
         _stop_the_wait(lease["pid"])
         owner = secrets.token_hex(8)
-        config["lease"] = {"owner": owner, "pid": 0, "renewed": _now(), "session": os.environ.get(SESSION_VARIABLE, "")}
-        write_config(config, state)
+        ballet_runtime.update_in(connection, lease_owner=owner, lease_pid=0, lease_renewed_at=_now(),
+                                 lease_session=os.environ.get(SESSION_VARIABLE, ""))
     return f"lease claimed, owner {owner}"
 
 
@@ -360,25 +344,23 @@ def decision(project, kind, state=None, number=None):
 
 def pause(state=None):
     """Pose le drapeau : rien ne part plus seul, Maestro demande toujours, jusqu'à `resume`."""
-    flag = _pause_flag(state)
-    if flag.exists():
+    if is_paused(state):
         return "auto launch was already paused"
-    ballet_state.write_atomically(flag, _now() + "\n")
+    ballet_runtime.update(state, paused_at=_now())
     return "auto launch paused: nothing is launched on its own, Maestro asks the Director every time (resume to lift it)"
 
 
 def resume(state=None):
     """Retire le drapeau : la règle de chaque projet s'applique de nouveau."""
-    flag = _pause_flag(state)
-    if not flag.exists():
+    if not is_paused(state):
         return "auto launch was not paused"
-    flag.unlink()
+    ballet_runtime.update(state, paused_at="")
     return "auto launch resumed: the projects' auto_launch rule applies again"
 
 
 def is_paused(state=None):
-    """Le drapeau `auto_launch_paused` est-il posé ?"""
-    return _pause_flag(state).exists()
+    """La pause est-elle posée ?"""
+    return bool(ballet_runtime.read(state)["paused_at"])
 
 
 def _decision(project, kind, config, state, number=None, seen=None):
@@ -387,7 +369,7 @@ def _decision(project, kind, config, state, number=None, seen=None):
     dependencies = _dependency_decision(project, number, state, seen)
     if dependencies:
         return dependencies
-    if _pause_flag(state).exists():
+    if is_paused(state):
         return "ask the Director (auto launch is paused)"
     trusted = config["projects"][project].get("auto_launch", [])
     if not _is_list_of_text(trusted):
@@ -428,10 +410,6 @@ def _last_conductor_state(key, state):
 
 def _is_list_of_text(value):
     return isinstance(value, list) and all(isinstance(entry, str) for entry in value)
-
-
-def _pause_flag(state=None):
-    return ballet_state.state_dir(state) / PAUSE_FLAG
 
 
 def _ready_lines(config, registry, state):
@@ -502,6 +480,12 @@ def _known_terminal(target, registry):
 # --- le bail ---------------------------------------------------------------
 
 
+def _lease(runtime):
+    """Le bail, tel que le lisent les règles : propriétaire, pid de l'attente, dernière prise, session."""
+    return {"owner": runtime["lease_owner"], "pid": runtime["lease_pid"], "renewed": runtime["lease_renewed_at"],
+            "session": runtime["lease_session"]}
+
+
 def _lease_alive(lease):
     """Vivant : un propriétaire dont l'attente tourne, ou qui a renouvelé le bail il y a moins de dix minutes."""
     return bool(lease["owner"]) and (_wait_runs(lease["pid"]) or _renewed_recently(lease["renewed"]))
@@ -522,23 +506,26 @@ def confirm_owner(owner, state=None):
 def is_busy(state=None):
     """La session Maestro vit mais ne dort pas sur sa boîte : elle traite un message (ou une réponse à porter). Sans
     session vivante, rien n'est occupé."""
-    lease = read_config(state)["lease"]
+    lease = _lease(ballet_runtime.read(state))
     return _lease_alive(lease) and not _wait_runs(lease["pid"])
 
 
 def release_lease(state=None):
     """Lève le bail et arrête l'attente de son propriétaire : la session suivante le prend sans `--take-over`."""
-    with ballet_state.locked(state):
-        config = read_config(state)
-        _stop_the_wait(config["lease"]["pid"])
-        config["lease"] = dict(EMPTY_LEASE)
-        write_config(config, state)
+    with ballet_db.writing(state) as connection:
+        _stop_the_wait(ballet_runtime.read_in(connection)["lease_pid"])
+        ballet_runtime.update_in(connection, **ballet_runtime.empty_lease())
 
 
 def _lease_held_message(lease):
     where = f"its wait is running (pid {lease['pid']})" if _wait_runs(lease["pid"]) else f"renewed {lease['renewed']}"
     return (f"another Maestro session holds the lease ({where}). Two sessions reading the mailbox would steal each "
             "other's messages. If that session is gone, or you cleared it, take over: claim --take-over")
+
+
+def stop_the_wait(pid):
+    """Arrête l'attente de Maestro sous ce pid, si c'en est bien une ; un pid qu'un autre programme a repris n'est pas touché."""
+    _stop_the_wait(pid)
 
 
 def _stop_the_wait(pid):
@@ -556,27 +543,24 @@ def _wait_runs(pid):
 
 def _take_the_wait(owner, state):
     """Le jeton tient le bail et aucune autre attente ne tourne pour lui : l'attente note son pid. Rend la boîte."""
-    with ballet_state.locked(state):
-        config = read_config(state)
-        lease = config["lease"]
+    with ballet_db.writing(state) as connection:
+        runtime = ballet_runtime.read_in(connection)
+        lease = _lease(runtime)
         if lease["owner"] != owner:
             raise MaestroError("this session is not Maestro anymore: " + _who_holds(lease))
         if _wait_runs(lease["pid"]) and lease["pid"] != os.getpid():
             raise MaestroError(f"a wait of this session is already running (pid {lease['pid']}): one at a time")
-        box = _checked_mailbox(config)
-        config["lease"] = {**lease, "pid": os.getpid(), "renewed": _now()}
-        write_config(config, state)
+        box = _checked_mailbox(runtime)
+        ballet_runtime.update_in(connection, lease_pid=os.getpid(), lease_renewed_at=_now())
     return box
 
 
 def _release_the_wait(owner, state):
     """L'attente finie : pid remis à 0 et bail renouvelé, sauf si un autre a pris le bail entre-temps."""
-    with ballet_state.locked(state):
-        config = read_config(state)
-        if config["lease"]["owner"] != owner:
+    with ballet_db.writing(state) as connection:
+        if ballet_runtime.read_in(connection)["lease_owner"] != owner:
             return
-        config["lease"] = {**config["lease"], "pid": 0, "renewed": _now()}
-        write_config(config, state)
+        ballet_runtime.update_in(connection, lease_pid=0, lease_renewed_at=_now())
 
 
 def _who_holds(lease):
@@ -604,11 +588,11 @@ def _stopped_by_take_over():
 # --- la boîte, lue ------------------------------------------------------------
 
 
-def _checked_mailbox(config):
-    box = config["mailbox"]
-    if not box.get("terminal") or not box.get("run"):
+def _checked_mailbox(runtime):
+    """La boîte : son terminal, sa Run et la Run d'avant (vide sans boîte recréée) ; une machine sans boîte est refusée."""
+    if not runtime["mailbox_terminal"] or not runtime["mailbox_run"]:
         raise MaestroError("no mailbox yet: run ballet_maestro.py mailbox")
-    return box
+    return {"terminal": runtime["mailbox_terminal"], "run": runtime["mailbox_run"], "previous_run": runtime["mailbox_previous_run"]}
 
 
 def _wait_for_messages(box, orca):
@@ -622,13 +606,12 @@ def _wait_for_messages(box, orca):
 
 def _owned_mailbox(owner, state):
     """Le jeton tient le bail : le bail est renouvelé, et la boîte rendue."""
-    with ballet_state.locked(state):
-        config = read_config(state)
-        if config["lease"]["owner"] != owner:
-            raise MaestroError("this session is not Maestro anymore: " + _who_holds(config["lease"]))
-        box = _checked_mailbox(config)
-        config["lease"] = {**config["lease"], "renewed": _now()}
-        write_config(config, state)
+    with ballet_db.writing(state) as connection:
+        runtime = ballet_runtime.read_in(connection)
+        if runtime["lease_owner"] != owner:
+            raise MaestroError("this session is not Maestro anymore: " + _who_holds(_lease(runtime)))
+        box = _checked_mailbox(runtime)
+        ballet_runtime.update_in(connection, lease_renewed_at=_now())
     return box
 
 
@@ -653,25 +636,27 @@ def _history_of(run, orca):
 
 
 def _forget_previous_run(state):
-    with ballet_state.locked(state):
-        config = read_config(state)
-        if config["mailbox"].pop("previous_run", None):
-            write_config(config, state)
+    ballet_runtime.update(state, mailbox_previous_run="")
 
 
 def _render_messages(messages, state):
-    config = read_config(state)
+    config = _config_and_runtime(state)
     return "\n\n".join(_message_text(message, config, state) for message in messages)
 
 
 def _render_history(messages, unread_ids, state):
     if not messages:
         return "the mailbox is empty"
-    config = read_config(state)
+    config = _config_and_runtime(state)
     unread = sum(1 for message in messages if message.get("id") in unread_ids)
     shown = "\n\n".join(_message_text(message, config, state, tag="unread" if message.get("id") in unread_ids else "read")
                          for message in messages)
     return f"{len(messages)} message(s), {unread} unread until now:\n\n{shown}"
+
+
+def _config_and_runtime(state):
+    """La config, avec l'état de la machine sous `runtime` : ce que lisent les décisions."""
+    return {**read_config(state), "runtime": ballet_runtime.read(state)}
 
 
 def _message_text(message, config, state, tag=""):
@@ -688,7 +673,7 @@ def _body_with_decisions(message, config, state):
     import ballet_monitor
     body = message.get("body", "")
     if message.get("type") == "status" and message.get("subject") == CONTEXT_SUBJECT:
-        return f"{body}\nDECISION: {restart_decision(body, config)}"
+        return f"{body}\nDECISION: {restart_decision(body, config['runtime'])}"
     finished = FINISHED_SUBJECT.match(message.get("subject", ""))
     if message.get("type") == "status" and finished:
         return f"{body}\nDECISION: {close_decision(finished.group(1), _terminal_named(body), state)}"
@@ -720,15 +705,15 @@ def close_decision(key, terminal, state=None):
     return "close"
 
 
-def restart_decision(body, config):
+def restart_decision(body, runtime):
     """`restart` quand l'événement parle de la session Maestro d'aujourd'hui et qu'aucun redémarrage n'est demandé ; sinon
     `wait (<raison>)`. C'est ici que cela se décide : l'agent ne fait que relayer le verdict. Un `recap` relit l'événement
     qui a causé le redémarrage : il parle d'une session qui n'est plus Maestro, et ne doit pas en redemander un."""
     told = SESSION_IN_BODY.search(body)
-    current = config["lease"]["session"]
+    current = runtime["lease_session"]
     if told and current and told.group(1) != current:
         return f"wait (it was about session {told.group(1)}, Maestro is session {current} now)"
-    if config.get("restart", {}).get("terminal"):
+    if runtime["restart_terminal"]:
         return "wait (restart already scheduled)"
     return "restart"
 
@@ -766,13 +751,10 @@ def _terminal_named(body):
 
 
 def sessions_of(home):
-    """Les sessions ouvertes d'un projet, Rehearsal puis Workshop, lues avec les fonctions de leurs scripts. Ces
-    scripts importent celui-ci : l'import se fait ici, pas en tête. Un projet sans `.ballet/run/` n'a aucune session
-    (et rien n'y est créé). Chacune : (élément, Rehearsal courante, état)."""
+    """Les sessions ouvertes d'un projet, Rehearsal puis Workshop, lues avec les fonctions de leurs scripts (dans la base).
+    Ces scripts importent celui-ci : l'import se fait ici, pas en tête. Chacune : (élément, Rehearsal courante, état)."""
     import ballet_rehearsal
     import ballet_workshop
-    if not (home / ballet_rehearsal.RUN_DIR).is_dir():
-        return []
     rehearsals = [(session.item, session.current or "-", _rehearsal_state(session, home))
                   for session in ballet_rehearsal.open_sessions(home)]
     workshops = [(workshop.item, "Workshop", workshop.status) for workshop in ballet_workshop.open_workshops(home)]
@@ -835,18 +817,15 @@ def _session_line(alias, session, registry):
 
 
 def read_config(state=None):
-    """L'état de Maestro, avec ses trois tables toujours présentes (le bail avec ses trois clés) ; pas de fichier, un état vide."""
+    """La config de Maestro, avec sa table `projects` toujours présente ; pas de fichier, une config vide."""
     path = _config_path(state)
     config = tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    config.setdefault("mailbox", {})
-    saved = config.get("lease", {})
-    config["lease"] = {key: saved.get(key, empty) for key, empty in EMPTY_LEASE.items()}
     config.setdefault("projects", {})
     return config
 
 
 def write_config(config, state=None):
-    """Écrit l'état d'un coup, par un fichier temporaire puis un renommage."""
+    """Écrit la config d'un coup, par un fichier temporaire puis un renommage."""
     ballet_state.write_atomically(_config_path(state), to_toml(config))
 
 
@@ -899,14 +878,13 @@ def live_terminals(orca):
     return set(_texts(json.loads(orca(["terminal", "list", "--json"]))))
 
 
-def _replace_terminal(config, orca, state):
-    """Un nouveau terminal vide pour la boîte, noté aussitôt (avant sa Run) : un appel qui échoue ensuite le retrouve."""
-    previous_run = config["mailbox"].get("run")
+def _replace_terminal(runtime, orca, state):
+    """Un nouveau terminal vide pour la boîte, noté aussitôt (avant sa Run) : un appel qui échoue ensuite le retrouve.
+    La Run de l'ancienne boîte devient la Run d'avant, que `recap` relira une dernière fois."""
     receipt = json.loads(orca(["terminal", "create", "--title", MAILBOX_TITLE, "--json"]))
     terminal = first_id(receipt, "term_", "orca terminal create")
-    config["mailbox"] = {"terminal": terminal, **({"previous_run": previous_run} if previous_run else {})}
-    write_config(config, state)
-    return config["mailbox"]
+    ballet_runtime.update(state, mailbox_terminal=terminal, mailbox_run="", mailbox_previous_run=runtime["mailbox_run"])
+    return terminal
 
 
 def _new_run(terminal, orca):
@@ -946,11 +924,12 @@ def run_orca(arguments):
 def main(argv, orca=None):
     """Affiche le résultat et sort avec 0 ; 1 si Maestro ne peut pas le faire, 2 sur un usage invalide."""
     try:
+        ballet_legacy.refuse_if_pending()
         print(_command(argv[1:], orca or run_orca))
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
-    except (MaestroError, OSError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:
+    except (MaestroError, *ballet_db.ERRORS, OSError, tomllib.TOMLDecodeError, json.JSONDecodeError) as error:
         print(f"maestro: {error}", file=sys.stderr)
         return 1
     return 0

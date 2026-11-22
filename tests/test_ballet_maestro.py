@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_conductors  # noqa: E402
 import ballet_maestro  # noqa: E402
+import ballet_monitor  # noqa: E402
+import ballet_runtime  # noqa: E402
+import ballet_store  # noqa: E402
 from ballet_rehearsal import Rehearsal, Session, Step  # noqa: E402
 from ballet_workshop import Workshop  # noqa: E402
 
@@ -85,7 +88,22 @@ class BalletMaestroTest(unittest.TestCase):
         return self.live
 
     def config(self):
-        return tomllib.loads((self.state / "maestro.toml").read_text(encoding="utf-8"))
+        path = self.state / "maestro.toml"
+        return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+    def runtime(self):
+        return ballet_runtime.read()
+
+    def lease(self):
+        runtime = self.runtime()
+        return {"owner": runtime["lease_owner"], "pid": runtime["lease_pid"], "renewed": runtime["lease_renewed_at"],
+                "session": runtime["lease_session"]}
+
+    def box(self):
+        """La boîte notée : terminal, Run, Run d'avant, sans les valeurs vides."""
+        runtime = self.runtime()
+        found = {"terminal": runtime["mailbox_terminal"], "run": runtime["mailbox_run"], "previous_run": runtime["mailbox_previous_run"]}
+        return {key: value for key, value in found.items() if value}
 
     def project(self, name):
         folder = self.root / name
@@ -95,33 +113,34 @@ class BalletMaestroTest(unittest.TestCase):
     # --- maestro.toml ---
 
     def test_le_toml_ecrit_se_relit_a_l_identique(self):
-        config = {"mailbox": {"terminal": "term_1", "run": "run_1"}, "lease": {"owner": "abc", "pid": 4242, "renewed": "2026-11-21T08:00:00+00:00", "session": "s-1"},
-                  "monitor": {"terminal": "term_3"},
+        config = {"maestro": {"restart_at_context_percent": 20},
                   "projects": {"antimurphy": {"path": "/p/antimurphy", "auto_launch": ["Task", "Bug"]},
                                "mon projet": {"path": "/p/\"quoted\" été\n"}},
                   "limits": {"max_running": 3}}
         ballet_maestro.write_config(config)
         self.assertEqual(self.config(), config)
 
-    def test_le_toml_reserve_le_bail_et_reste_lisible(self):
-        ballet_maestro.write_config(ballet_maestro.read_config())
-        text = (self.state / "maestro.toml").read_text(encoding="utf-8")
-        self.assertIn("[lease]\nowner = \"\"\npid = 0\nrenewed = \"\"\nsession = \"\"", text)
-        self.assertEqual(self.config()["lease"], EMPTY_LEASE)
+    def test_le_toml_ne_garde_que_la_config(self):
+        ballet_maestro.add_project("antimurphy", str(self.project("antimurphy")))
+        ballet_maestro.mailbox(self.orca)
+        ballet_maestro.claim()
+        self.assertEqual(sorted(self.config()), ["projects"])
 
-    def test_sans_fichier_l_etat_est_vide(self):
-        self.assertEqual(ballet_maestro.read_config(), {"mailbox": {}, "lease": EMPTY_LEASE, "projects": {}})
+    def test_sans_fichier_la_config_et_l_etat_sont_vides(self):
+        self.assertEqual(ballet_maestro.read_config(), {"projects": {}})
+        self.assertEqual(self.lease(), EMPTY_LEASE)
+        self.assertEqual(self.box(), {})
 
     def test_une_ecriture_interrompue_laisse_l_ancien_fichier_entier_et_aucun_temporaire(self):
-        ballet_maestro.write_config({"mailbox": {"run": "run_old"}})
+        ballet_maestro.write_config({"projects": {"old": {"path": "/old"}}})
         with mock.patch.object(ballet_maestro, "to_toml", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
-            ballet_maestro.write_config({"mailbox": {"run": "run_new"}})
-        self.assertEqual(self.config()["mailbox"], {"run": "run_old"})
+            ballet_maestro.write_config({"projects": {"new": {"path": "/new"}}})
+        self.assertEqual(self.config()["projects"], {"old": {"path": "/old"}})
         self.assertEqual(sorted(path.name for path in self.state.iterdir()), ["maestro.toml"])
 
     def test_l_ecriture_remplace_le_fichier_par_un_renommage(self):
         with mock.patch.object(ballet_maestro.os, "replace", wraps=ballet_maestro.os.replace) as replace:
-            ballet_maestro.write_config({"mailbox": {}})
+            ballet_maestro.write_config({"projects": {}})
         source, target = replace.call_args.args
         self.assertEqual(Path(target), self.state / "maestro.toml")
         self.assertEqual(Path(source).parent, self.state)
@@ -136,7 +155,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertNotIn("--command", create)
         run = self.orca.ran("orchestration", "run-create")[0]
         self.assertEqual(run[run.index("--from") + 1], "term_1")
-        self.assertEqual(self.config()["mailbox"], {"terminal": "term_1", "run": "run_1"})
+        self.assertEqual(self.box(), {"terminal": "term_1", "run": "run_1"})
 
     def test_mailbox_est_idempotent_tant_que_le_terminal_vit(self):
         ballet_maestro.mailbox(self.orca)
@@ -149,21 +168,21 @@ class BalletMaestroTest(unittest.TestCase):
         ballet_maestro.mailbox(self.orca)
         self.orca.terminals.clear()
         self.assertEqual(ballet_maestro.mailbox(self.orca), "mailbox created: terminal term_2, run:run_2")
-        self.assertEqual(self.config()["mailbox"], {"terminal": "term_2", "run": "run_2", "previous_run": "run_1"})
+        self.assertEqual(self.box(), {"terminal": "term_2", "run": "run_2", "previous_run": "run_1"})
 
     def test_une_orca_injoignable_ne_cree_rien(self):
-        ballet_maestro.write_config({"mailbox": {"terminal": "term_1", "run": "run_1"}})
+        ballet_runtime.update(mailbox_terminal="term_1", mailbox_run="run_1")
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.mailbox(self.orca)
         self.assertEqual(self.orca.ran("terminal", "create"), [])
-        self.assertEqual(self.config()["mailbox"], {"terminal": "term_1", "run": "run_1"})
+        self.assertEqual(self.box(), {"terminal": "term_1", "run": "run_1"})
 
     def test_une_run_qui_echoue_garde_le_terminal_et_l_appel_suivant_ne_cree_que_la_run(self):
         self.orca.run_failures = 1
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.mailbox(self.orca)
-        self.assertEqual(self.config()["mailbox"], {"terminal": "term_1"})
+        self.assertEqual(self.box(), {"terminal": "term_1"})
         self.assertEqual(ballet_maestro.mailbox(self.orca), "mailbox created: terminal term_1, run:run_1")
         self.assertEqual(len(self.orca.ran("terminal", "create")), 1)
 
@@ -171,12 +190,7 @@ class BalletMaestroTest(unittest.TestCase):
         ballet_maestro.add_project("antimurphy", str(self.project("antimurphy")))
         ballet_maestro.mailbox(self.orca)
         self.assertIn("antimurphy", self.config()["projects"])
-        self.assertEqual(self.config()["lease"], EMPTY_LEASE)
-
-    def test_un_ancien_bail_sans_proprietaire_se_relit_avec_ses_quatre_cles(self):
-        self.state.mkdir()
-        (self.state / "maestro.toml").write_text('[lease]\npid = 0\nsince = ""\n', encoding="utf-8")
-        self.assertEqual(ballet_maestro.read_config()["lease"], EMPTY_LEASE)
+        self.assertEqual(self.lease(), EMPTY_LEASE)
 
     # --- projets ---
 
@@ -210,7 +224,8 @@ class BalletMaestroTest(unittest.TestCase):
 
     def test_l_annonce_envoie_un_status_haute_priorite_sous_l_alias_du_projet(self):
         folder = self.project("antimurphy")
-        ballet_maestro.write_config({"mailbox": {"run": "run_box"}, "projects": {"am": {"path": str(folder)}}})
+        ballet_maestro.write_config({"projects": {"am": {"path": str(folder)}}})
+        ballet_runtime.update(mailbox_run="run_box")
         step = Step("escalate", "plan to review", item="#12")
         ballet_maestro.announce(step, folder, self.orca)
         send = self.orca.ran("orchestration", "send")[0]
@@ -222,7 +237,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(step.done, ["Maestro told: am#12 · escalate"])
 
     def test_un_echec_d_envoi_devient_un_avertissement_sans_rien_lever(self):
-        ballet_maestro.write_config({"mailbox": {"run": "run_box"}})
+        ballet_runtime.update(mailbox_run="run_box")
         self.orca.send_failures = 1
         step = Step("done", item="BUG-004")
         ballet_maestro.announce(step, self.project("antimurphy"), self.orca)
@@ -237,7 +252,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(self.orca.commands, [])
 
     def test_seuls_l_escalade_et_la_fin_d_une_transition_sont_annoncees(self):
-        ballet_maestro.write_config({"mailbox": {"run": "run_box"}})
+        ballet_runtime.update(mailbox_run="run_box")
         for step in (Step("wait", item="#12"), Step("escalate", "a read")):
             ballet_maestro.announce(step, self.root, self.orca)
         self.assertEqual(self.orca.commands, [])
@@ -246,10 +261,8 @@ class BalletMaestroTest(unittest.TestCase):
 
     def hold_lease(self, owner="other", pid=0, age=timedelta(0)):
         """Le bail d'une autre session, renouvelé il y a `age`."""
-        config = ballet_maestro.read_config()
         renewed = (datetime.now(timezone.utc) - age).isoformat(timespec="seconds")
-        config["lease"] = {"owner": owner, "pid": pid, "renewed": renewed}
-        ballet_maestro.write_config(config)
+        ballet_runtime.update(lease_owner=owner, lease_pid=pid, lease_renewed_at=renewed)
 
     def waiting(self, running=True):
         """`ps` voit (ou non) une attente de Maestro tourner sous un pid."""
@@ -259,7 +272,7 @@ class BalletMaestroTest(unittest.TestCase):
 
     def test_claim_libre_ecrit_un_jeton_et_l_affiche(self):
         output = ballet_maestro.claim()
-        lease = self.config()["lease"]
+        lease = self.lease()
         self.assertEqual(output, f"lease claimed, owner {lease['owner']}")
         self.assertRegex(lease["owner"], r"^[0-9a-f]{16}$")
         self.assertEqual(lease["pid"], 0)
@@ -270,7 +283,7 @@ class BalletMaestroTest(unittest.TestCase):
         with self.assertRaises(ballet_maestro.MaestroError) as refused:
             ballet_maestro.claim()
         self.assertIn("claim --take-over", str(refused.exception))
-        self.assertEqual(self.config()["lease"]["owner"], "other")
+        self.assertEqual(self.lease()["owner"], "other")
 
     def test_claim_refuse_un_bail_dont_l_attente_tourne_meme_ancien(self):
         self.hold_lease(pid=4242, age=timedelta(hours=3))
@@ -283,12 +296,11 @@ class BalletMaestroTest(unittest.TestCase):
         self.hold_lease(age=timedelta(minutes=11))
         self.waiting(running=False)
         ballet_maestro.claim()
-        self.assertNotEqual(self.config()["lease"]["owner"], "other")
+        self.assertNotEqual(self.lease()["owner"], "other")
 
     def test_claim_prend_un_bail_sans_proprietaire(self):
-        ballet_maestro.write_config(ballet_maestro.read_config())
         ballet_maestro.claim()
-        self.assertTrue(self.config()["lease"]["owner"])
+        self.assertTrue(self.lease()["owner"])
 
     def test_take_over_arrete_l_attente_de_l_ancien_puis_prend_le_bail(self):
         self.hold_lease(pid=4242, age=timedelta(minutes=1))
@@ -296,7 +308,7 @@ class BalletMaestroTest(unittest.TestCase):
         with mock.patch.object(ballet_maestro.os, "kill") as kill:
             ballet_maestro.claim(take_over=True)
         kill.assert_called_once_with(4242, ballet_maestro.signal.SIGTERM)
-        lease = self.config()["lease"]
+        lease = self.lease()
         self.assertNotEqual(lease["owner"], "other")
         self.assertEqual(lease["pid"], 0)
 
@@ -306,7 +318,7 @@ class BalletMaestroTest(unittest.TestCase):
         with mock.patch.object(ballet_maestro.os, "kill") as kill:
             ballet_maestro.claim(take_over=True)
         kill.assert_not_called()
-        self.assertNotEqual(self.config()["lease"]["owner"], "other")
+        self.assertNotEqual(self.lease()["owner"], "other")
 
     def test_deux_claims_tour_a_tour_le_second_est_refuse(self):
         ballet_maestro.claim()
@@ -316,26 +328,26 @@ class BalletMaestroTest(unittest.TestCase):
     def test_claim_note_l_id_de_session_claude_dans_le_bail(self):
         with mock.patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "5d5057ed-f4f9"}):
             ballet_maestro.claim()
-        self.assertEqual(self.config()["lease"]["session"], "5d5057ed-f4f9")
+        self.assertEqual(self.lease()["session"], "5d5057ed-f4f9")
 
     def test_claim_hors_de_claude_laisse_la_session_vide(self):
         with mock.patch.dict("os.environ", clear=False) as environment:
             environment.pop("CLAUDE_CODE_SESSION_ID", None)
             ballet_maestro.claim()
-        self.assertEqual(self.config()["lease"]["session"], "")
+        self.assertEqual(self.lease()["session"], "")
 
     def test_take_over_note_la_session_de_la_nouvelle_proprietaire(self):
         with mock.patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "ancienne"}):
             ballet_maestro.claim()
         with mock.patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "nouvelle"}):
             ballet_maestro.claim(take_over=True)
-        self.assertEqual(self.config()["lease"]["session"], "nouvelle")
+        self.assertEqual(self.lease()["session"], "nouvelle")
 
     def test_lever_le_bail_efface_la_session(self):
         with mock.patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "ancienne"}):
             ballet_maestro.claim()
         ballet_maestro.release_lease()
-        self.assertEqual(self.config()["lease"], EMPTY_LEASE)
+        self.assertEqual(self.lease(), EMPTY_LEASE)
 
     def test_une_attente_garde_la_session_du_bail(self):
         ballet_maestro.mailbox(self.orca)
@@ -343,7 +355,7 @@ class BalletMaestroTest(unittest.TestCase):
             owner = ballet_maestro.claim().rsplit(" ", 1)[1]
         self.orca.batches = [[self.message()]]
         ballet_maestro.wait(owner, self.orca)
-        self.assertEqual(self.config()["lease"]["session"], "s-1")
+        self.assertEqual(self.lease()["session"], "s-1")
 
     # --- wait ---
 
@@ -406,12 +418,12 @@ class BalletMaestroTest(unittest.TestCase):
 
         def spying(arguments):
             if arguments[:2] == ["orchestration", "check"]:
-                seen.update(self.config()["lease"])
+                seen.update(self.lease())
             return original(arguments)
         self.orca.batches = [[self.message()]]
         ballet_maestro.wait(owner, spying)
         self.assertEqual(seen["pid"], ballet_maestro.os.getpid())
-        lease = self.config()["lease"]
+        lease = self.lease()
         self.assertEqual((lease["owner"], lease["pid"]), (owner, 0))
         self.assertGreaterEqual(lease["renewed"], seen["renewed"])
 
@@ -420,7 +432,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.wait(owner, self.orca)
-        self.assertEqual(self.config()["lease"]["pid"], 0)
+        self.assertEqual(self.lease()["pid"], 0)
 
     def test_wait_arrete_par_un_take_over_ne_touche_pas_au_nouveau_bail(self):
         owner = self.claimed()
@@ -432,7 +444,7 @@ class BalletMaestroTest(unittest.TestCase):
             return self.orca(arguments)
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.wait(owner, taken_over)
-        self.assertEqual(self.config()["lease"]["owner"], "new-owner")
+        self.assertEqual(self.lease()["owner"], "new-owner")
 
     def test_wait_refuse_une_seconde_attente_du_meme_jeton(self):
         owner = self.claimed()
@@ -447,7 +459,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.orca.batches = [[self.message(), self.message(subject="am#BUG-004 · done", sender="term_7"),
                               self.message(subject="note", sender="term_5"), self.message(kind="worker_done", sender="term_6")]]
         ballet_maestro.wait(owner, self.orca)
-        registry = json.loads((self.state / "conductors.json").read_text(encoding="utf-8"))
+        registry = ballet_conductors.read()
         self.assertEqual(sorted(registry), ["am#BUG-004", "antimurphy#12"])
         self.assertEqual(registry["antimurphy#12"]["terminal"], "term_9")
         self.assertEqual(registry["antimurphy#12"]["event"], "escalate")
@@ -467,7 +479,7 @@ class BalletMaestroTest(unittest.TestCase):
         owner = self.claimed()
         self.orca.batches = [[self.message(kind="worker_done", subject="spike ok")]]
         ballet_maestro.wait(owner, self.orca)
-        self.assertFalse((self.state / "conductors.json").exists())
+        self.assertEqual(ballet_conductors.read(), {})
 
     # --- recap ---
 
@@ -515,13 +527,11 @@ class BalletMaestroTest(unittest.TestCase):
 
     def test_recap_relit_la_run_precedente_puis_l_oublie(self):
         owner = self.claimed()
-        config = ballet_maestro.read_config()
-        config["mailbox"]["previous_run"] = "run_0"
-        ballet_maestro.write_config(config)
+        ballet_runtime.update(mailbox_previous_run="run_0")
         self.orca.history = [self.row(2, subject="am#2 · done"), self.row(1, run="run_0", subject="old#1 · escalate")]
         output = ballet_maestro.recap(owner, self.orca)
         self.assertIn("old#1 · escalate", output)
-        self.assertNotIn("previous_run", self.config()["mailbox"])
+        self.assertNotIn("previous_run", self.box())
         self.assertNotIn("old#1", ballet_maestro.recap(owner, self.orca))
 
     def test_recap_d_une_boite_vide_le_dit(self):
@@ -547,7 +557,7 @@ class BalletMaestroTest(unittest.TestCase):
         ballet_maestro.add_project("antimurphy", str(folder))
         self.open_session(folder, "#12", current="FEAT-004.1", rehearsal_status="escalated")
         self.open_session(folder, "FEAT-005")
-        (self.state / "conductors.json").write_text(json.dumps({"antimurphy#12": {"terminal": "term_9", "seen": "x", "event": "escalate"}}), encoding="utf-8")
+        self.known_conductor()
         lines = ballet_maestro.status(self.orca).splitlines()
         self.assertEqual(lines[:2], ["antimurphy  #12  FEAT-004.1  escalated  term_9",
                                      "antimurphy  FEAT-005  -  open  no terminal known"])
@@ -557,9 +567,8 @@ class BalletMaestroTest(unittest.TestCase):
         folder = self.project("antimurphy")
         ballet_maestro.add_project("antimurphy", str(folder))
         ballet_rehearsal._save_session(Session(item="#3", status="done"), folder)
-        run = folder / ".ballet" / "run"
-        (run / "workshop-OPP-12.json").write_text(json.dumps({"item": "OPP-12", "repo": "r", "status": "escalated"}), encoding="utf-8")
-        (run / "workshop-OPP-13.json").write_text(json.dumps({"item": "OPP-13", "repo": "r", "status": "done"}), encoding="utf-8")
+        ballet_store.save(folder, "workshop", {"item": "OPP-12", "repo": "r", "status": "escalated"})
+        ballet_store.save(folder, "workshop", {"item": "OPP-13", "repo": "r", "status": "done"})
         self.assertEqual(ballet_maestro.status(self.orca), "antimurphy  OPP-12  Workshop  escalated  no terminal known")
 
     def test_status_sans_session_ni_dossier_run_le_dit_et_ne_cree_rien(self):
@@ -578,8 +587,8 @@ class BalletMaestroTest(unittest.TestCase):
     # --- tell ---
 
     def known_conductor(self, handle="term_9"):
-        self.state.mkdir(exist_ok=True)
-        (self.state / "conductors.json").write_text(json.dumps({"antimurphy#12": {"terminal": handle, "seen": "x", "event": "escalate"}}), encoding="utf-8")
+        """Un Conductor que Maestro n'a pas lancé, connu par son escalade."""
+        ballet_conductors.note_events([{"type": "status", "subject": "antimurphy#12 · escalate", "from": handle}])
 
     def test_tell_ecrit_la_reponse_du_director_dans_le_terminal_du_conductor(self):
         self.known_conductor()
@@ -620,7 +629,7 @@ class BalletMaestroTest(unittest.TestCase):
         command = create[create.index("--command") + 1]
         self.assertTrue(command.startswith(f"BALLET_HOME={self.state} python3 "), command)
         self.assertTrue(command.endswith("ballet_monitor.py run"), command)
-        self.assertEqual(self.config()["monitor"], {"terminal": "term_1"})
+        self.assertEqual(self.runtime()["monitor_terminal"], "term_1")
 
     def test_monitor_sans_ballet_home_ne_transmet_rien(self):
         with mock.patch.dict("os.environ", clear=False) as environment:
@@ -638,7 +647,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(ballet_maestro.monitor(self.orca), "monitor created: terminal term_2")
 
     def test_monitor_avec_une_orca_injoignable_ne_cree_rien(self):
-        ballet_maestro.write_config({"monitor": {"terminal": "term_1"}})
+        ballet_runtime.update(monitor_terminal="term_1")
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.monitor(self.orca)
@@ -648,8 +657,8 @@ class BalletMaestroTest(unittest.TestCase):
         ballet_maestro.mailbox(self.orca)
         ballet_maestro.add_project("antimurphy", str(self.project("antimurphy")))
         ballet_maestro.monitor(self.orca)
-        config = self.config()
-        self.assertEqual((config["mailbox"], sorted(config["projects"])), ({"terminal": "term_1", "run": "run_1"}, ["antimurphy"]))
+        self.assertEqual((self.box(), sorted(self.config()["projects"])), ({"terminal": "term_1", "run": "run_1"}, ["antimurphy"]))
+        self.assertEqual(self.runtime()["monitor_terminal"], "term_2")
 
     # --- maestro (la session elle-même) ---
 
@@ -661,7 +670,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(create[create.index("--title") + 1], "maestro")
         self.assertEqual(create[create.index("--command") + 1],
                          f"BALLET_HOME={self.state} claude --remote-control 'ballet maestro' /ballet:maestro")
-        self.assertEqual(self.config()["maestro"], {"terminal": "term_1"})
+        self.assertEqual(self.runtime()["maestro_terminal"], "term_1")
 
     def test_maestro_sans_ballet_home_ne_transmet_rien(self):
         with mock.patch.dict("os.environ", clear=False) as environment:
@@ -690,17 +699,15 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertTrue(message.startswith("maestro not created: another Maestro session holds the lease"), message)
         self.assertIn("claim --take-over", message)
         self.assertEqual(self.orca.ran("terminal", "create"), [])
-        self.assertNotIn("maestro", self.config())
+        self.assertEqual(self.runtime()["maestro_terminal"], "")
 
     def test_maestro_un_bail_expire_ne_l_empeche_pas(self):
         ballet_maestro.claim()
-        config = self.config()
-        config["lease"]["renewed"] = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat(timespec="seconds")
-        ballet_maestro.write_config(config)
+        ballet_runtime.update(lease_renewed_at=(datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat(timespec="seconds"))
         self.assertEqual(ballet_maestro.maestro(self.orca), "maestro created: terminal term_1")
 
     def test_maestro_avec_une_orca_injoignable_ne_cree_rien(self):
-        ballet_maestro.write_config({"maestro": {"terminal": "term_1"}})
+        ballet_runtime.update(maestro_terminal="term_1")
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.maestro(self.orca)
@@ -710,17 +717,16 @@ class BalletMaestroTest(unittest.TestCase):
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
             ballet_maestro.maestro(self.orca)
-        self.assertNotIn("maestro", ballet_maestro.read_config())
+        self.assertEqual(self.runtime()["maestro_terminal"], "")
 
     def test_maestro_ne_touche_ni_a_la_boite_ni_au_monitor_ni_au_bail(self):
         ballet_maestro.mailbox(self.orca)
         ballet_maestro.monitor(self.orca)
-        before = self.config()
+        before = self.runtime()
         ballet_maestro.maestro(self.orca)
-        after = self.config()
-        for table in ("mailbox", "monitor", "lease", "projects"):
-            self.assertEqual(after[table], before[table], table)
-        self.assertEqual(after["maestro"], {"terminal": "term_3"})
+        after = self.runtime()
+        self.assertEqual({**after, "maestro_terminal": ""}, {**before, "maestro_terminal": ""})
+        self.assertEqual(after["maestro_terminal"], "term_3")
 
     def test_maestro_garde_les_reglages_de_sa_table(self):
         ballet_maestro.mailbox(self.orca)
@@ -728,7 +734,8 @@ class BalletMaestroTest(unittest.TestCase):
         config["maestro"] = {"restart_at_context_percent": 20, "context_window_tokens": 500000}
         ballet_maestro.write_config(config)
         ballet_maestro.maestro(self.orca)
-        self.assertEqual(self.config()["maestro"], {"restart_at_context_percent": 20, "context_window_tokens": 500000, "terminal": "term_2"})
+        self.assertEqual(self.config()["maestro"], {"restart_at_context_percent": 20, "context_window_tokens": 500000})
+        self.assertEqual(self.runtime()["maestro_terminal"], "term_2")
 
     def test_la_ligne_de_commande_maestro(self):
         code, out, _ = self.run_main("maestro")
@@ -798,12 +805,11 @@ class BalletMaestroTest(unittest.TestCase):
 
     # --- pause, resume ---
 
-    def test_pause_pose_le_drapeau_dans_le_dossier_d_etat_et_resume_le_retire(self):
-        flag = self.state / "auto_launch_paused"
+    def test_pause_se_note_dans_l_etat_et_resume_la_retire(self):
         self.assertIn("paused", ballet_maestro.pause())
-        self.assertTrue(flag.is_file())
+        self.assertTrue(self.runtime()["paused_at"])
         self.assertIn("resumed", ballet_maestro.resume())
-        self.assertFalse(flag.exists())
+        self.assertEqual(self.runtime()["paused_at"], "")
 
     def test_pause_et_resume_se_rejouent_sans_erreur(self):
         ballet_maestro.pause()
@@ -869,12 +875,9 @@ class BalletMaestroTest(unittest.TestCase):
 
     def seen_ready(self, alias, *items):
         """Ce que le Monitor a vu prêt dans un projet, dans l'ordre de la file : (numéro, type, priorité, titre)."""
-        document = json.loads((self.state / "monitor.json").read_text(encoding="utf-8")) if (self.state / "monitor.json").exists() else {"projects": {}}
-        document["projects"][alias] = {"ready": [
+        ballet_monitor._save_ready(alias, [
             {"item": f"#{number}", "number": number, "type": kind, "priority": priority, "title": title, "url": f"https://x/{number}"}
-            for number, kind, priority, title in items]}
-        self.state.mkdir(exist_ok=True)
-        (self.state / "monitor.json").write_text(json.dumps(document), encoding="utf-8")
+            for number, kind, priority, title in items], None)
 
     def test_ready_liste_les_elements_prets_dans_l_ordre_de_la_file_avec_leur_decision(self):
         self.trust("antimurphy", "Task")
@@ -885,12 +888,12 @@ class BalletMaestroTest(unittest.TestCase):
 
     def seen_with_dependencies(self, alias, number, blocked_by=(), doubt=""):
         """Ce que le Monitor a vu des dépendances d'un élément déjà noté prêt."""
-        document = json.loads((self.state / "monitor.json").read_text(encoding="utf-8"))
-        for item in document["projects"][alias]["ready"]:
+        items = ballet_monitor.read_ready()[alias]
+        for item in items:
             if item["number"] == number:
                 item["blocked_by"] = [{"item": f"#{found}", "number": found, "repo": "acme/shop", "url": f"https://x/{found}"} for found in blocked_by]
                 item["doubt"] = doubt
-        (self.state / "monitor.json").write_text(json.dumps(document), encoding="utf-8")
+        ballet_monitor._save_ready(alias, items, None)
 
     def test_ready_montre_un_element_bloque_avec_wait_meme_pour_un_type_confie_a_l_auto(self):
         self.trust("antimurphy", "Task")
@@ -903,9 +906,9 @@ class BalletMaestroTest(unittest.TestCase):
     def test_un_bloqueur_d_un_autre_repo_est_nomme_avec_son_repo_dans_wait(self):
         self.trust("antimurphy")
         self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"))
-        document = json.loads((self.state / "monitor.json").read_text(encoding="utf-8"))
-        document["projects"]["antimurphy"]["ready"][0]["blocked_by"] = [{"item": "acme/api#5", "number": 5, "repo": "acme/api", "url": "https://x/5"}]
-        (self.state / "monitor.json").write_text(json.dumps(document), encoding="utf-8")
+        items = ballet_monitor.read_ready()["antimurphy"]
+        items[0]["blocked_by"] = [{"item": "acme/api#5", "number": 5, "repo": "acme/api", "url": "https://x/5"}]
+        ballet_monitor._save_ready("antimurphy", items, None)
         self.assertIn("DECISION: wait (blocked by acme/api#5, open)", ballet_maestro.ready())
 
     def test_un_doute_de_dependance_demande_au_director_meme_pour_un_type_confie_a_l_auto(self):
@@ -1034,9 +1037,7 @@ class BalletMaestroTest(unittest.TestCase):
 
     def test_un_redemarrage_deja_demande_ne_se_redemande_pas(self):
         owner = self.claimed_in_session("s-1")
-        config = ballet_maestro.read_config()
-        config["restart"] = {"terminal": "term_7", "paused": True}
-        ballet_maestro.write_config(config)
+        ballet_runtime.update(restart_terminal="term_7", restart_owns_pause=True)
         self.orca.batches = [[self.context_message("s-1")]]
         self.assertIn("\nDECISION: wait (restart already scheduled)", ballet_maestro.wait(owner, self.orca))
 
@@ -1092,9 +1093,9 @@ class BalletMaestroTest(unittest.TestCase):
     def test_la_ligne_de_commande_ready_pause_resume_et_monitor(self):
         self.assertEqual(self.run_main("monitor")[:2], (0, "monitor created: terminal term_1\n"))
         self.assertEqual(self.run_main("pause")[0], 0)
-        self.assertTrue((self.state / "auto_launch_paused").is_file())
+        self.assertTrue(self.runtime()["paused_at"])
         self.assertEqual(self.run_main("resume")[0], 0)
-        self.assertFalse((self.state / "auto_launch_paused").exists())
+        self.assertEqual(self.runtime()["paused_at"], "")
         self.assertIn("no item is waiting", self.run_main("ready")[1])
 
     # --- ligne de commande ---

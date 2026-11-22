@@ -11,9 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ballet_conductors  # noqa: E402
+import ballet_db  # noqa: E402
 import ballet_maestro  # noqa: E402
 import ballet_monitor  # noqa: E402
 import ballet_program  # noqa: E402
+import ballet_runtime  # noqa: E402
 from test_ballet_maestro import FakeOrca  # noqa: E402
 
 
@@ -256,14 +258,14 @@ class BalletMonitorTest(unittest.TestCase):
     def test_les_transitions_vues_survivent_a_un_redemarrage_du_monitor(self):
         self.queue.queues["antimurphy"] = [item(12)]
         self.turn()
-        self.assertEqual(json.loads((self.state / "monitor.json").read_text(encoding="utf-8"))["projects"]["antimurphy"]["ready"][0]["number"], 12)
+        self.assertEqual(ballet_monitor.read_ready()["antimurphy"][0]["number"], 12)
         self.assertEqual(self.turn().told, [])
 
-    def test_monitor_json_s_ecrit_sans_temporaire_et_sous_son_propre_verrou(self):
+    def test_la_file_vue_vit_dans_la_base_sans_fichier_a_cote(self):
         self.queue.queues["antimurphy"] = [item(12)]
         self.turn()
-        self.assertEqual(sorted(path.name for path in self.state.iterdir() if path.name.startswith(".")), [])
-        self.assertTrue((self.state / "monitor.lock").exists())
+        self.assertFalse((self.state / "monitor.json").exists())
+        self.assertFalse((self.state / "monitor.lock").exists())
 
     def test_les_elements_retenus_gardent_l_ordre_de_la_file(self):
         self.queue.queues["antimurphy"] = [item(9), item(2), item(5)]
@@ -304,6 +306,7 @@ class BalletMonitorTest(unittest.TestCase):
 
     def test_sans_boite_le_monitor_le_dit_et_ne_note_rien(self):
         (self.state / "maestro.toml").unlink()
+        ballet_runtime.update(mailbox_terminal="", mailbox_run="")
         self.register("antimurphy2")
         self.queue.queues["antimurphy2"] = [item(1)]
         report = self.turn()
@@ -338,11 +341,13 @@ class BalletMonitorTest(unittest.TestCase):
     def finished_conductor(self, minutes_ago=30, key="antimurphy#12", terminal="term_9", kind="rehearsal"):
         """Un Conductor lancé (par Maestro si `kind`), fini il y a `minutes_ago` minutes, son terminal encore vivant."""
         from datetime import datetime, timedelta, timezone
-        ballet_conductors.record_launch(key, "antimurphy", key.split("#")[1], kind, terminal)
+        if kind:
+            ballet_conductors.record_launch(key, "antimurphy", key.split("#")[1], kind, terminal)
         ballet_conductors.note_events([{"type": "status", "from": terminal, "subject": f"{key} · done"}])
-        registry = ballet_conductors.read()
-        registry[key]["seen"] = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
-        ballet_conductors._write(registry, None)
+        when = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+        with ballet_db.writing() as connection:   # le `done` date de `minutes_ago`
+            connection.execute("UPDATE events SET at = ? WHERE id = (SELECT max(id) FROM events WHERE node = "
+                               "(SELECT node FROM conductors WHERE id = ?))", (when, key))
         self.orca.terminals.append(terminal)
 
     def close_after(self, minutes):
@@ -563,7 +568,7 @@ class BalletMonitorTest(unittest.TestCase):
         self.assertEqual(report.told, ["antimurphy#13 · gone"])
         self.assertIn("restart_at_context_percent", report.errors[0])
 
-    def test_la_file_et_le_contexte_gardent_chacun_leur_part_de_monitor_json(self):
+    def test_la_file_et_le_contexte_gardent_chacun_leur_part_de_l_etat(self):
         self.maestro_session("s-1", tokens=312_000)
         self.queue.queues["antimurphy"] = [item(12)]
         self.turn()

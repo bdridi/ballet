@@ -3,11 +3,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_program  # noqa: E402
 import ballet_stage  # noqa: E402
+import ballet_store  # noqa: E402
 
 ENTRY = {"at": "2026-11-16T12:34:38+00:00", "rehearsal": "FEAT-001.2", "event": "begin", "detail": {"first_role": "dancer"}}
 
@@ -26,28 +28,39 @@ class BalletStageTest(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.home = Path(self.folder.name) / "antimurphy"
-        self.run = self.home / ".ballet" / "run"
-        self.run.mkdir(parents=True)
+        self.home.mkdir()
+        environment = mock.patch.dict("os.environ", {"BALLET_HOME": str(Path(self.folder.name) / "ballet-home")})
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def _journal(self, *lines):
-        (self.run / "journal.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        """Des événements écrits par un Conductor, dans l'ordre."""
+        for entry in map(json.loads, lines):
+            ballet_store.log(self.home, "rehearsal", entry["rehearsal"], entry["event"], entry["detail"])
+
+    def _state(self, state):
+        ballet_store.save(self.home, "rehearsal", state)
+
+    def _entries(self, project):
+        """Le journal de la page, sans les dates (la base les pose)."""
+        return [{key: value for key, value in entry.items() if key != "at"} for entry in project["journal"]]
 
     def test_montre_les_etats_et_le_journal_du_projet(self):
-        (self.run / "FEAT-001.2.json").write_text(json.dumps({"id": "FEAT-001.2", "status": "done"}), encoding="utf-8")
+        self._state({"id": "FEAT-001.2", "status": "done"})
         self._journal(json.dumps(ENTRY))
         project = ballet_stage.snapshot([self.home])["projects"][0]
         self.assertEqual(project["name"], "antimurphy")
         self.assertEqual([state["status"] for state in project["rehearsals"]], ["done"])
-        self.assertEqual(project["journal"], [ENTRY])
+        self.assertEqual(self._entries(project), [{key: value for key, value in ENTRY.items() if key != "at"}])
 
     def test_donne_le_titre_de_l_issue_de_chaque_rehearsal(self):
-        (self.run / "FEAT-001.2.json").write_text(json.dumps({"id": "FEAT-001.2", "issue": "3"}), encoding="utf-8")
+        self._state({"id": "FEAT-001.2", "issue": "3"})
         self.assertEqual(ballet_stage.snapshot([self.home])["projects"][0]["titles"], {"FEAT-001.2": "FEAT-001.2 · Issue 3"})
 
     def test_ne_demande_le_titre_qu_une_fois(self):
         calls = []
         ballet_stage._read_title = lambda home, issue: calls.append(issue) or "titre"
-        (self.run / "FEAT-001.2.json").write_text(json.dumps({"id": "FEAT-001.2", "issue": "3"}), encoding="utf-8")
+        self._state({"id": "FEAT-001.2", "issue": "3"})
         ballet_stage.snapshot([self.home])
         ballet_stage.snapshot([self.home])
         self.assertEqual(calls, ["3"])
@@ -61,8 +74,7 @@ class BalletStageTest(unittest.TestCase):
         self.assertEqual((limits["max_round_trips"], limits["max_diff_lines"]), (2, 1500))
 
     def _session(self, item="FEAT-004", **session):
-        key = item.lstrip("#")
-        (self.run / f"session-{key}.json").write_text(json.dumps({"item": item, "status": "open", **session}), encoding="utf-8")
+        ballet_store.save(self.home, "session", {"item": item, "status": "open", **session})
 
     def _queue(self):
         return ballet_stage.snapshot([self.home])["projects"][0]["queue"]
@@ -122,18 +134,14 @@ class BalletStageTest(unittest.TestCase):
         self.assertEqual(sorted(session["items"] for session in queue["sessions"]), [["#35"], ["#44", "#45"]])
         self.assertEqual([item["item"] for item in queue["program"]], ["#60"])
 
-    def test_une_session_a_moitie_ecrite_n_est_pas_une_session(self):
-        (self.run / "session-3.json").write_text('{"item": "#3', encoding="utf-8")
-        self.assertEqual(self._queue()["sessions"], [])
-
     def test_l_historique_joue_vient_des_begin_du_journal(self):
         begin = {**ENTRY, "detail": {"item": "#12", "plan": "auto"}}
         self._journal(json.dumps(begin), json.dumps({**ENTRY, "event": "handoff"}))
         self.assertEqual(self._queue()["played"], [{"item": "#12", "rehearsal": "FEAT-001.2"}])
 
     def test_une_planification_absorbee_est_jouee_par_sa_slice(self):
-        (self.run / "FEAT-004.json").write_text(json.dumps({"id": "FEAT-004", "status": "done"}), encoding="utf-8")
-        (self.run / "FEAT-004.1.json").write_text(json.dumps({"id": "FEAT-004.1", "planned_by": "FEAT-004"}), encoding="utf-8")
+        self._state({"id": "FEAT-004", "status": "done"})
+        self._state({"id": "FEAT-004.1", "planned_by": "FEAT-004"})
         self._journal(json.dumps({**ENTRY, "rehearsal": "FEAT-004", "detail": {"item": "FEAT-004"}}))
         self.assertEqual(self._queue()["played"], [{"item": "FEAT-004", "rehearsal": "FEAT-004.1"}])
 
@@ -157,10 +165,6 @@ class BalletStageTest(unittest.TestCase):
         ballet_stage.PROGRAMS.clear()
         self.assertNotEqual(ballet_stage.snapshot([self.home], since=before).get("unchanged"), True)
 
-    def test_saute_une_ligne_a_moitie_ecrite(self):
-        self._journal(json.dumps(ENTRY), '{"at": "2026-11-16T12:3')
-        self.assertEqual(ballet_stage.snapshot([self.home])["projects"][0]["journal"], [ENTRY])
-
     def test_un_projet_sans_journal_est_vide(self):
         project = ballet_stage.snapshot([self.home])["projects"][0]
         self.assertEqual((project["rehearsals"], project["journal"]), ([], []))
@@ -173,14 +177,15 @@ class BalletStageTest(unittest.TestCase):
     def test_renvoie_tout_quand_le_journal_grandit(self):
         self._journal(json.dumps(ENTRY))
         version = ballet_stage.snapshot([self.home])["version"]
-        self._journal(json.dumps(ENTRY), json.dumps({**ENTRY, "event": "wait"}))
+        self._journal(json.dumps({**ENTRY, "event": "wait"}))
         self.assertEqual(len(ballet_stage.snapshot([self.home], since=version)["projects"][0]["journal"]), 2)
 
-    def test_scan_trouve_les_projets_qui_ont_un_journal(self):
+    def test_scan_trouve_les_projets_que_la_base_connait(self):
+        self._state({"id": "FEAT-001.2", "status": "done"})
         (Path(self.folder.name) / "sans-ballet").mkdir()
         self.assertEqual(ballet_stage.project_homes(self.folder.name), [self.home])
 
-    def test_refuse_un_dossier_sans_journal(self):
+    def test_refuse_un_dossier_que_la_base_ne_connait_pas(self):
         self.assertEqual(ballet_stage.main([self.folder.name]), 2)
 
     def test_refuse_un_port_invalide(self):

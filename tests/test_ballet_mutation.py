@@ -4,12 +4,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_mutation  # noqa: E402
+import ballet_store  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -199,6 +201,11 @@ class RunByHandTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.home = Path(self._tmp.name)
+        state = tempfile.TemporaryDirectory()   # le dossier d'état, hors du repo
+        self.addCleanup(state.cleanup)
+        environment = mock.patch.dict("os.environ", {"BALLET_HOME": state.name})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.git("init", "-q", "-b", "main")
         (self.home / "lib.rs").write_text("fn a() {}\n", encoding="utf-8")
         self.commit("init")
@@ -241,7 +248,8 @@ report = {{ path = "out.json", format = "cargo-mutants" }}
         code, output = self.run_by_hand()
         self.assertEqual(code, 1)
         self.assertIn("fake: red (exit 2)", output)
-        self.assertEqual((self.home / ".ballet" / "run" / "manual" / "mutation-fake.log").read_text(), "lib.rs:2-2\n")
+        self.assertEqual((ballet_store.work_dir(self.home) / "manual" / "mutation-fake.log").read_text(), "lib.rs:2-2\n")
+        self.assertFalse((self.home / ".ballet" / "run").exists())
 
     def test_un_outil_vert_sort_avec_0(self):
         self.profile("true")

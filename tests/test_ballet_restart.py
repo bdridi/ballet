@@ -12,8 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_conductors  # noqa: E402
 import ballet_maestro  # noqa: E402
+import ballet_runtime  # noqa: E402
 import ballet_rehearsal  # noqa: E402
 import ballet_restart  # noqa: E402
+import ballet_store  # noqa: E402
 from ballet_maestro import MaestroError  # noqa: E402
 from ballet_rehearsal import Rehearsal, Session  # noqa: E402
 
@@ -89,9 +91,7 @@ class BalletRestartTest(unittest.TestCase):
         return ballet_restart.run(self.orca, sleep=self.sleep, clock=lambda: self.now)
 
     def sleeping_on_wait(self, sleeping=True):
-        config = ballet_maestro.read_config()
-        config["lease"]["pid"] = WAITING_PID if sleeping else 0
-        ballet_maestro.write_config(config)
+        ballet_runtime.update(lease_pid=WAITING_PID if sleeping else 0)
 
     def conductor(self, item="12", terminal="term_9", kind="rehearsal"):
         ballet_conductors.record_launch(f"antimurphy#{item}", "antimurphy", item, kind, terminal)
@@ -101,11 +101,11 @@ class BalletRestartTest(unittest.TestCase):
         ballet_rehearsal._save_session(Session(item=item, issue=item.lstrip("#"), current=current), self.home)
         ballet_rehearsal._save(Rehearsal(id=current, issue=item, repo="repo", status=status), self.home)
 
-    def config(self):
-        return tomllib.loads((self.state / "maestro.toml").read_text(encoding="utf-8"))
+    def runtime(self):
+        return ballet_runtime.read()
 
     def paused(self):
-        return (self.state / "auto_launch_paused").exists()
+        return bool(self.runtime()["paused_at"])
 
     # --- qui travaille ---
 
@@ -125,12 +125,9 @@ class BalletRestartTest(unittest.TestCase):
 
     def test_un_workshop_en_escalade_ne_compte_pas_et_un_workshop_ouvert_si(self):
         self.conductor("BUG-004", kind="workshop")
-        run = self.home / ".ballet" / "run"
-        run.mkdir(parents=True, exist_ok=True)
-        path = run / "workshop-BUG-004.json"
-        path.write_text(json.dumps({"item": "BUG-004", "repo": "r", "status": "open"}), encoding="utf-8")
+        ballet_store.save(self.home, "workshop", {"item": "BUG-004", "repo": "r", "status": "open"})
         self.assertEqual(ballet_restart.working(self.orca), ["antimurphy#BUG-004"])
-        path.write_text(json.dumps({"item": "BUG-004", "repo": "r", "status": "escalated"}), encoding="utf-8")
+        ballet_store.save(self.home, "workshop", {"item": "BUG-004", "repo": "r", "status": "escalated"})
         self.assertEqual(ballet_restart.working(self.orca), [])
 
     def test_c_est_l_etat_de_la_rehearsal_en_cours_qui_compte_pas_celui_de_la_session(self):
@@ -178,13 +175,13 @@ class BalletRestartTest(unittest.TestCase):
         self.assertEqual(command[command.index("--title") + 1], "maestro-restart")
         self.assertIn("ballet_restart.py run", command[command.index("--command") + 1])
         self.assertIn(f"BALLET_HOME={self.state}", command[command.index("--command") + 1])
-        self.assertEqual(self.config()["restart"], {"terminal": "term_3", "paused": True})
+        self.assertEqual((self.runtime()["restart_terminal"], self.runtime()["restart_owns_pause"]), ("term_3", True))
         self.assertIn("restart scheduled", report)
 
     def test_un_drapeau_deja_pose_n_est_pas_a_lui_et_ne_sera_pas_retire(self):
         ballet_maestro.pause()
         ballet_restart.request(self.owner, self.orca)
-        self.assertEqual(self.config()["restart"]["paused"], False)
+        self.assertEqual(self.runtime()["restart_owns_pause"], False)
 
     def test_une_demande_en_cours_n_en_cree_pas_une_seconde(self):
         ballet_restart.request(self.owner, self.orca)
@@ -203,7 +200,7 @@ class BalletRestartTest(unittest.TestCase):
         with self.assertRaisesRegex(MaestroError, "create failed"):
             ballet_restart.request(self.owner, failing)
         self.assertFalse(self.paused())
-        self.assertNotIn("restart", self.config())
+        self.assertEqual(self.runtime()["restart_terminal"], "")
 
     # --- le redémarrage ---
 
@@ -215,7 +212,7 @@ class BalletRestartTest(unittest.TestCase):
     def new_session_claims_when_created(self):
         """La nouvelle session Maestro prend le bail dès que son terminal existe."""
         def claim():
-            if self.orca.ran("terminal", "create") and not ballet_maestro.read_config()["lease"]["owner"]:
+            if self.orca.ran("terminal", "create") and not self.runtime()["lease_owner"]:
                 ballet_maestro.claim()
         self.on_sleep.append(claim)
 
@@ -240,9 +237,7 @@ class BalletRestartTest(unittest.TestCase):
 
     def test_sans_session_vivante_il_remplace_tout_de_suite(self):
         self.asked()
-        config = ballet_maestro.read_config()
-        config["lease"] = {"owner": "", "pid": 0, "renewed": ""}
-        ballet_maestro.write_config(config)
+        ballet_runtime.update(**ballet_runtime.empty_lease())
         self.new_session_claims_when_created()
         self.run_restart()
         self.assertEqual(self.orca.ran("terminal", "close")[0][3], "term_2")
@@ -256,7 +251,7 @@ class BalletRestartTest(unittest.TestCase):
         self.stopped_wait.assert_called()
         created = self.orca.ran("terminal", "create")
         self.assertEqual(created[-1][created[-1].index("--title") + 1], "maestro")
-        self.assertEqual(self.config()["maestro"]["terminal"], "term_4")
+        self.assertEqual(self.runtime()["maestro_terminal"], "term_4")
         self.assertIn("Maestro restarted", report)
 
     def test_il_retire_le_drapeau_quand_la_nouvelle_session_a_pris_le_bail(self):
@@ -264,9 +259,9 @@ class BalletRestartTest(unittest.TestCase):
         self.new_session_claims_when_created()
         self.run_restart()
         self.assertFalse(self.paused())
-        self.assertNotIn("restart", self.config())
-        self.assertNotEqual(self.config()["lease"]["owner"], self.owner)
-        self.assertNotEqual(self.config()["lease"]["owner"], "")
+        self.assertEqual(self.runtime()["restart_terminal"], "")
+        self.assertNotEqual(self.runtime()["lease_owner"], self.owner)
+        self.assertNotEqual(self.runtime()["lease_owner"], "")
 
     def test_il_garde_le_drapeau_qui_n_etait_pas_a_lui(self):
         ballet_maestro.pause()
@@ -291,7 +286,7 @@ class BalletRestartTest(unittest.TestCase):
         sent = self.orca.ran("orchestration", "send")[0]
         self.assertEqual(sent[sent.index("--subject") + 1], "maestro · restart abandoned")
         self.assertIn("antimurphy#12", sent[sent.index("--body") + 1])
-        self.assertEqual(self.config()["lease"]["owner"], self.owner)
+        self.assertEqual(self.runtime()["lease_owner"], self.owner)
 
     def test_une_nouvelle_session_qui_ne_prend_pas_le_bail_est_dite_et_le_drapeau_leve(self):
         self.asked()

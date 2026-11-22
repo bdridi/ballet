@@ -53,7 +53,7 @@ It returns when a message arrives: the background command ends and wakes you. It
 2. After a `done` or a `gone`, a Conductor slot is free: run `ready`, and apply the rule to the items it lists (one that a limit refused earlier is still there).
 3. Start the wait again. Always exactly **one** wait at a time: never start a second before the first has ended.
 
-`wait` also notes the sender's terminal and the event for every `<project>#<item> · …` status (in `~/.ballet/conductors.json`, where `launch` writes its lines too): that is where `tell` writes, and a `done` closes the Conductor's line.
+`wait` also notes the sender's terminal and the event for every `<project>#<item> · …` status (in the registry of `~/.ballet/ballet.db`, where `launch` writes its lines too): that is where `tell` writes, and a `done` closes the Conductor's line.
 
 If `wait` is refused with **`this session is not Maestro anymore`** (another session took over the lease), stop everything: tell the Director, do not start another wait, do not claim again unless they ask. Any other refusal (Orca not answering, no mailbox): report it, and wait for the Director before trying again.
 
@@ -75,7 +75,7 @@ If `wait` is refused with **`this session is not Maestro anymore`** (another ses
   - Several items at once: one launch at a time, in the order of `ready`.
 - **`ready`**: run `ready` and show it.
 - **Closing a finished Conductor** (on `DECISION: close`, or on the Director's word): `python3 <path>/scripts/ballet_launch.py close <project>#<item>`. It closes only a `finished` Conductor that Maestro launched: its terminal is closed (which stops its `claude` and its Remote Control; the conversation stays resumable) and its registry line becomes `closed`. A refusal (still running, not launched by Maestro) is reported as is; never close a terminal any other way.
-- **`pause`** / **`resume`**: stop / restart the automatic launches (`ballet_maestro.py pause`, `resume`: a flag file, `~/.ballet/auto_launch_paused`). While paused, every `ready` item is `ask the Director`; Conductors already running are not touched. Confirm what the script printed.
+- **`pause`** / **`resume`**: stop / restart the automatic launches (`ballet_maestro.py pause`, `resume`: noted in `~/.ballet/ballet.db`). While paused, every `ready` item is `ask the Director`; Conductors already running are not touched. Confirm what the script printed.
 - **`launch <project> <item>`** and **`launch <project> --workshop [<item>]`**: start a Conductor **when the Director asks** (outside the rule above). `<item>` is `#12`, `12` or `FEAT-002` for a Rehearsal; `BUG-004`, or nothing (the first line of *Next up*) for an autopilot Workshop. Run:
 
   ```sh

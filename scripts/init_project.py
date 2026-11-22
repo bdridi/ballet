@@ -2,8 +2,8 @@
 
     python3 init_project.py <dossier> --specs specs/ --proof "make test" [--specs-language fr] [--repo nom] [--rules tdd,bdd] [--no-github]
 
-Ne remplace jamais un fichier existant : il le signale. Seule exception, le `.gitignore` du projet,
-complété d'une ligne qui ignore l'état des Rehearsals (`.ballet/run/`).
+Ne remplace jamais un fichier existant : il le signale. Il n'écrit rien d'autre dans le projet : l'état des Rehearsals
+vit dans la base de la machine (`~/.ballet/ballet.db`, OPP-79), pas dans le projet.
 Prépare ensuite, chez le propriétaire du repo GitHub, les types et les champs d'issue dont vit la file
 (`ballet_planning.py`), sauf avec `--no-github`.
 """
@@ -17,7 +17,6 @@ import ballet_config
 import ballet_planning
 
 DEFAULT_RULES = ("tdd", "bdd", "ddd", "clean-code")
-RUN_STATE_IGNORE = ".ballet/run/"
 
 CONFIG_TEMPLATE = """\
 # Ballet project profile. Overrides of the plugin defaults go here (see the plugin's config.toml).
@@ -58,12 +57,11 @@ def init_project(project_dir, specs, proof, repo=None, rules=DEFAULT_RULES, spec
     """Crée ce qui manque ; renvoie ce qui a été créé, complété, et ce qui existait déjà."""
     project_dir = Path(project_dir).resolve()
     repo = repo or _repo_name(project_dir)
-    report = {"created": [], "updated": [], "kept": []}
+    report = {"created": [], "kept": []}
     _write_config(project_dir, specs, proof, repo, rules, specs_language, report)
     _write_agents(project_dir, report)
     _write_claude(project_dir, report)
     _link_agent_skills(project_dir, report)
-    _ignore_run_state(project_dir, report)
     return report
 
 
@@ -129,22 +127,6 @@ def _link_agent_skills(project_dir, report):
     report["created"].append(link)
 
 
-def _ignore_run_state(project_dir, report):
-    """L'état et le journal des Rehearsals sont locaux : git ne les suit jamais."""
-    ignore = project_dir / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text(RUN_STATE_IGNORE + "\n", encoding="utf-8")
-        report["created"].append(ignore)
-        return
-    text = ignore.read_text(encoding="utf-8")
-    if RUN_STATE_IGNORE in text.splitlines():
-        report["kept"].append(ignore)
-        return
-    separator = "" if text.endswith("\n") or not text else "\n"
-    ignore.write_text(f"{text}{separator}{RUN_STATE_IGNORE}\n", encoding="utf-8")
-    report["updated"].append(ignore)
-
-
 # --- outils -----------------------------------------------------------------
 
 
@@ -185,8 +167,6 @@ def _split_rules(text):
 def _print(report):
     for path in report["created"]:
         print(f"created        {path}")
-    for path in report["updated"]:
-        print(f"completed      {path} (line {RUN_STATE_IGNORE} added)")
     for path in report["kept"]:
         print(f"already exists {path} (unchanged)")
 

@@ -1,11 +1,21 @@
 ---
 name: setup
-description: Sets up a machine for Ballet, once (installer): checks the tools (git, python3, gh, claude, orca), reinstalls the plugin from its clone, registers the Director's projects for Maestro (`~/.ballet/maestro.toml`) and in Orca, offers `/ballet:init-project` to the projects that lack a profile, creates Maestro's mailbox and the Monitor's terminal, and starts the Maestro session itself in its own terminal. Attended mode only for now (the Director's own machine, Orca desktop open). Use once per machine, or again to add a project or recreate a lost mailbox: every step is safe to rerun.
+description: Sets up a machine for Ballet, once (installer): checks the tools (git, python3, gh, claude, orca), reinstalls the plugin from its clone, registers the Director's projects for Maestro (`~/.ballet/maestro.toml`) and in Orca, offers `/ballet:init-project` to the projects that lack a profile, creates Maestro's mailbox and the Monitor's terminal, and starts the Maestro session itself in its own terminal. Attended mode only for now (the Director's own machine, Orca desktop open). Use once per machine, or again to add a project or recreate a lost mailbox: every step is safe to rerun. With `upgrade` (`/ballet:setup upgrade`): applies a new version of Ballet in one go (stops the Monitor and Maestro, reinstalls the plugin, takes over an older state, starts a new Monitor and Maestro).
 ---
 
 # setup
 
 You prepare the Director's machine for Ballet, in **attended** mode: their own machine, with the Orca desktop app open. Every step below can be rerun; none creates a thing twice. The scripts are at `../../scripts/` relative to this skill's folder (`<path>` below).
+
+## Upgrade (`/ballet:setup upgrade`)
+
+When the argument is `upgrade`, the machine is already set up and the Director wants the new version of Ballet that is in their clone (after a `git pull`). Do only this, never the steps below. Ask where the clone is, unless `<path>` is itself a clone (it has a `.git`), then run the clone's script:
+
+```sh
+python3 <clone>/scripts/ballet_upgrade.py
+```
+
+One line per step, ✓ or ✗: the Monitor and Maestro stopped (their Orca terminals closed), the plugin reinstalled, an older state taken over into `~/.ballet/ballet.db`, the lease released, the mailbox checked, a new Monitor and a new Maestro started in their terminals. Report them. The Conductors that are running are not touched (each of their calls runs the reinstalled scripts). The new Maestro takes the lease and opens with *While you were away*: nothing in the mailbox is lost. If it refuses because it runs in Maestro's own terminal, tell the Director to run `/ballet:setup upgrade` from another session. On a ✗, give its message as is; rerunning the upgrade is safe. This session keeps the plugin it loaded: tell the Director to open a new one for anything else.
 
 ## 1. The tools
 
@@ -34,6 +44,14 @@ python3 <clone>/scripts/reset_plugin.py
 ```
 
 Report each line. The open sessions keep the plugin they loaded: this one included, which is fine for the rest of the setup.
+
+Ballet's state lives in one base for the whole machine, `~/.ballet/ballet.db` (the first script creates it; the TOML files stay the config). The state of an older Ballet is taken over once, by its own command, before anything else (Maestro, the Monitor, the launches and the Conductors refuse to run while it waits):
+
+```sh
+python3 <clone>/scripts/ballet_legacy.py import
+```
+
+It takes over `~/.ballet` (`conductors.json`, `monitor.json`, the state tables of `maestro.toml`) and the `.ballet/run/` of each project of `maestro.toml`; for a project with a `.ballet/run/` that is not registered, add its home at the end of the command. Each file taken over is set aside as `*.imported`; `nothing to take over` on a new machine. Report its lines. On a machine where the Monitor and Maestro already run, prefer `/ballet:setup upgrade`: it does this and restarts them.
 
 ## 3. The projects
 
@@ -91,4 +109,4 @@ Sum up in a few lines: the tools, the plugin, the projects (registered, in Orca,
 - a Monitor that spots a Conductor that is frozen (its terminal alive, nothing said): it only sees a vanished one;
 - the headless mode (a VPS, `orca serve` under systemd, the keeper).
 
-You change nothing in the projects: only `~/.ballet/`, Orca's project list, and the mailbox, Monitor and Maestro terminals.
+You change nothing in the projects (the import only sets an old `.ballet/run/` aside as `.ballet/run.imported`): only `~/.ballet/`, Orca's project list, and the mailbox, Monitor and Maestro terminals.

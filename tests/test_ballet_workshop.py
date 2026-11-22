@@ -10,7 +10,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_maestro  # noqa: E402
+import ballet_runtime  # noqa: E402
 import ballet_rehearsal  # noqa: E402
+import ballet_store  # noqa: E402
 import ballet_workshop  # noqa: E402
 
 PROFILE = """[project]
@@ -185,11 +187,10 @@ class BalletWorkshopTest(unittest.TestCase):
         return ballet_workshop.resume(item, self.home, self.tools)
 
     def state(self, item="BUG-004"):
-        return json.loads((self.home / ".ballet" / "run" / f"workshop-{item}.json").read_text())
+        return ballet_store.load(self.home, "workshop", item)
 
     def journal(self, event=None):
-        lines = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
-        entries = [json.loads(line) for line in lines]
+        entries = ballet_store.journal(self.home, "workshop")
         return [entry for entry in entries if event in (None, entry["event"])]
 
     # --- begin ---
@@ -217,10 +218,10 @@ class BalletWorkshopTest(unittest.TestCase):
 
     def test_l_etat_est_a_part_des_sessions_et_des_rehearsals(self):
         self.begin()
-        run = self.home / ".ballet" / "run"
-        self.assertEqual(sorted(path.name for path in run.glob("*.json")), ["workshop-BUG-004.json"])
+        self.assertEqual([state["item"] for state in ballet_store.all_of(self.home, "workshop")], ["BUG-004"])
+        self.assertEqual((ballet_store.all_of(self.home, "session"), ballet_store.all_of(self.home, "rehearsal")), ([], []))
         self.assertNotIn("id", self.state())
-        self.assertEqual([entry for entry in self.journal() if "rehearsal" in entry], [])
+        self.assertEqual(ballet_store.journal(self.home, "rehearsal"), [])
         self.assertEqual({entry["workshop"] for entry in self.journal()}, {"BUG-004"})
 
     def test_le_journal_garde_le_lancement_du_dramaturg_avec_sa_mission(self):
@@ -796,7 +797,7 @@ class BalletWorkshopTest(unittest.TestCase):
         code, out, _ = self.run_main("begin")
         self.assertEqual(code, 0)
         self.assertTrue(out.endswith("NEXT: wait\n"))
-        self.assertTrue((self.home / ".ballet" / "run" / "workshop-BUG-004.json").is_file())
+        self.assertIsNotNone(self.state("BUG-004"))
 
     def test_le_statut_dit_que_l_element_a_ete_choisi(self):
         self.backlog()
@@ -834,7 +835,7 @@ class BalletWorkshopTest(unittest.TestCase):
     def test_la_meme_demande_deux_fois_prend_un_autre_slug(self):
         self.begin_request()
         self.begin_request()
-        self.assertTrue((self.home / ".ballet" / "run" / f"workshop-{self.SLUG}-2.json").is_file())
+        self.assertIsNotNone(self.state(f"{self.SLUG}-2"))
 
     def test_une_demande_sans_mot_est_refusee(self):
         with self.assertRaisesRegex(ballet_workshop.WorkshopError, "no word"):
@@ -951,7 +952,7 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertIn("NEXT: escalate no Workshop of BUG-009", out)
 
     def test_la_fin_du_workshop_est_annoncee_a_maestro_sous_le_nom_du_dossier_sans_alias(self):
-        ballet_maestro.write_config({"mailbox": {"terminal": "term_box", "run": "run_box"}})
+        ballet_runtime.update(mailbox_terminal="term_box", mailbox_run="run_box")
         self.begin()
         self.world.said("worker_done", report(), "msg_1")
         _, out, _ = self.run_main("receive", "--message", "msg_1")
@@ -961,7 +962,7 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertTrue(out.splitlines()[-1].startswith("NEXT: done"))
 
     def test_une_panne_au_demarrage_est_annoncee_a_maestro_mais_pas_celle_d_un_status(self):
-        ballet_maestro.write_config({"mailbox": {"terminal": "term_box", "run": "run_box"}})
+        ballet_runtime.update(mailbox_terminal="term_box", mailbox_run="run_box")
         self.begin()
         _, out, _ = self.run_main("begin", "BUG-004")
         self.run_main("status", "BUG-009")

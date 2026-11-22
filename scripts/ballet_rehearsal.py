@@ -15,8 +15,8 @@ Lancé depuis le home du projet. Le skill `conductor` n'a qu'à appeler ce scrip
     NEXT: done               la dernière Premiere de l'élément est faite : la session est finie
 
 Une session joue un seul élément confié : une issue `Feature`, `Bug` ou `Task` (`#12`), ou une feature prête qui
-n'a pas encore d'issue (`FEAT-002`, aussi `BUG-NNN`, `TASK-NNN`). Elle vit dans `.ballet/run/session-<élément>.json`
-(`session-12.json`, `session-FEAT-002.json`) : l'élément, ses slices dans l'ordre du plan, la Rehearsal en cours, ce qui
+n'a pas encore d'issue (`FEAT-002`, aussi `BUG-NNN`, `TASK-NNN`). Elle vit dans la base (`ballet_store.py`, table
+`sessions`, clé `#12` ou `FEAT-002`) : l'élément, ses slices dans l'ordre du plan, la Rehearsal en cours, ce qui
 est joué et le mode. Une Rehearsal à la fois dans une session ; à la Premiere d'une slice, le script ouvre lui-même la
 suivante, depuis `main`. Deux sessions peuvent tourner côte à côte, sur deux éléments ; un même élément n'a qu'une
 session ouverte. Combien de sessions à la fois, c'est l'affaire de celui qui les lance. Une escalade met la session en
@@ -88,8 +88,10 @@ Une transition qui finit en `NEXT: escalate` ou `NEXT: done` est annoncée à Ma
 Le journal garde, texte entier, chaque message reçu (`message`) et tout ce que le Conductor remet à un worker
 (`handoff` : `start`, `send`, `reply` ou `nudge`) : la Scène le lit.
 
-L'état vit dans `.ballet/run/<ID>.json`, le journal dans `.ballet/run/journal.jsonl`
-(`init-project` met `.ballet/run/` dans le `.gitignore` du projet).
+L'état et le journal vivent dans la base de la machine (`ballet_store.py`, OPP-79) : chaque événement est rangé sur son
+nœud (la Rehearsal, le tour d'un rôle, la preuve, la mutation, l'attente du Director). Les fichiers de travail (missions
+des workers, résultats de la mutation, messages à publier, message du Director à recevoir) sont dans
+`~/.ballet/projects/<alias>/` : rien n'est écrit dans le projet.
 """
 
 import json
@@ -106,15 +108,16 @@ from pathlib import Path
 import ballet_config
 import ballet_frictions
 import ballet_github
+import ballet_legacy
 import ballet_maestro
 import ballet_mutation
 import ballet_orca
 import ballet_policy
 import ballet_size
+import ballet_store
 from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
 
-RUN_DIR = Path(".ballet") / "run"
-SESSION_PREFIX = "session-"
+INBOX = "inbox.md"
 ISSUE_ITEM = re.compile(r"^#?(\d+)$")
 FEATURE_ITEM = re.compile(r"^(?:FEAT|BUG|TASK)-\d{3}$")
 QUEUED_TYPES = ("Feature", "Bug", "Task")   # ce qu'une session joue ; une `Slice` suit sa feature
@@ -339,7 +342,7 @@ def receive_from_run(rehearsal_id, run_id, home, tools):
 
 
 def receive_mutation(rehearsal_id, home, tools):
-    """La fin de la mutation en cours, sans son réveil Orca (perdu) : ses résultats sont lus dans `.ballet/run/<ID>/`."""
+    """La fin de la mutation en cours, sans son réveil Orca (perdu) : ses résultats sont lus dans `<dossier de travail>/<ID>/`."""
     config = _checked_config(home)
     rehearsal = load(rehearsal_id, home)
     try:
@@ -350,7 +353,7 @@ def receive_mutation(rehearsal_id, home, tools):
 
 
 def mutate(rehearsal_id, home, tools):
-    """La moitié en arrière-plan du nœud de mutation : les outils, leurs résultats dans `.ballet/run/<ID>/`, puis le
+    """La moitié en arrière-plan du nœud de mutation : les outils, leurs résultats dans `<dossier de travail>/<ID>/`, puis le
     réveil du Conductor. Quoi qu'il arrive, le Conductor est réveillé : une panne devient un résultat."""
     rehearsal = load(rehearsal_id, home)
     try:
@@ -426,7 +429,7 @@ def stop_session(item, reason, home, tools):
 
 
 def _escalate_current(session, reason, home):
-    if not session.current or not _state_path(session.current, home).is_file():
+    if not session.current or not _exists(session.current, home):
         return []
     rehearsal = load(session.current, home)
     if rehearsal.status == "open":
@@ -550,13 +553,13 @@ def _refuse_if_in_session(item, home):
     for session in open_sessions(home):
         if session.item == item or (number and session.issue == number):
             raise RehearsalError(f"{item} is already played by the session of {session.item} "
-                                 f"({_session_path(session.item, home)}): resume it, or delete that file first")
+                                 "(in Ballet's base): resume it, or stop it")
 
 
 def _follow_on_github(session_item, step, home, tools):
     """Le Ballet status de l'issue de la session suit chaque pas. Il n'est écrit que s'il change ; un refus de GitHub
     se dit, sans rien arrêter."""
-    session = _load_session(session_item, home) if session_item and _session_path(session_item, home).is_file() else None
+    session = _load_session(session_item, home) if session_item and _session_exists(session_item, home) else None
     if session:
         step.item = session.item
     if not session or not session.issue:
@@ -588,7 +591,7 @@ def _ballet_status_of(step, session, home):
 
 
 def _waits_for_its_plan(session, home):
-    if not session.current or not _state_path(session.current, home).is_file():
+    if not session.current or not _exists(session.current, home):
         return False
     return load(session.current, home).blocked_on == "plan"
 
@@ -612,7 +615,7 @@ def _record_frictions(rehearsal, home):
 
 def _frictions_of_played(session, home):
     played = [entry["rehearsal"] for entry in session.played]
-    return {rehearsal_id: load(rehearsal_id, home).frictions for rehearsal_id in played if _state_path(rehearsal_id, home).is_file()}
+    return {rehearsal_id: load(rehearsal_id, home).frictions for rehearsal_id in played if _exists(rehearsal_id, home)}
 
 
 def _friction_lines(session):
@@ -620,11 +623,7 @@ def _friction_lines(session):
 
 
 def _journal_of(rehearsal_id, home):
-    path = _run_dir(home) / "journal.jsonl"
-    if not path.is_file():
-        return []
-    entries = (json.loads(text) for text in path.read_text(encoding="utf-8").splitlines() if text.strip())
-    return [entry for entry in entries if entry.get("rehearsal") == rehearsal_id]
+    return ballet_store.journal_of(home, ballet_store.REHEARSAL, rehearsal_id)
 
 
 def _session_done_line(session):
@@ -1150,7 +1149,7 @@ def _launch_mutation(rehearsal, report, proof, scoped, home, tools):
     rehearsal.mutation = {"round": rehearsal.mutations, "head": ballet_policy.head(tools.git(rehearsal.worktree)),
                           "run": _conductor_run(rehearsal, tools), "report": report, "started": _now()}
     _save(rehearsal, home)
-    tools.launch([sys.executable, str(Path(__file__).resolve()), "mutate", rehearsal.id], str(Path(home).resolve()))
+    tools.launch([sys.executable, str(Path(__file__).resolve()), "mutate", rehearsal.id], str(Path(home).resolve()), _run_dir(home))
     names = ", ".join(tool.name for tool, _ in scoped)
     return Step("wait", done=[_proof_line(proof), f"mutation started in the background ({names}, round {rehearsal.mutations}): "
                               "it wakes the Conductor when it is done"])
@@ -1576,7 +1575,7 @@ def _resolve_fixed_points(rehearsal, report, home, tools):
 
 
 def _outbox(text, home):
-    """Le script GitHub publie depuis un fichier : le message passe par `.ballet/run/outbox.md`."""
+    """Le script GitHub publie depuis un fichier : le message passe par `outbox.md`, dans le dossier de travail du projet."""
     outbox = _run_dir(home) / "outbox.md"
     outbox.write_text(text, encoding="utf-8")
     return outbox
@@ -1622,68 +1621,68 @@ def _settle(rehearsal, step, home, tools):
 
 
 def _save(rehearsal, home):
-    _state_path(rehearsal.id, home).write_text(json.dumps(asdict(rehearsal), indent=2) + "\n", encoding="utf-8")
+    ballet_store.save(home, ballet_store.REHEARSAL, asdict(rehearsal))
 
 
 def load(rehearsal_id, home):
-    path = _state_path(rehearsal_id, home)
-    if not path.is_file():
-        raise RehearsalError(f"no Rehearsal {rehearsal_id} in {path.parent}")
-    return Rehearsal(**json.loads(path.read_text(encoding="utf-8")))
+    saved = ballet_store.load(home, ballet_store.REHEARSAL, rehearsal_id)
+    if saved is None:
+        raise RehearsalError(f"no Rehearsal {rehearsal_id} in project {ballet_store.project_of(home)}")
+    return Rehearsal(**saved)
+
+
+def _exists(rehearsal_id, home):
+    return ballet_store.load(home, ballet_store.REHEARSAL, rehearsal_id) is not None
 
 
 def _refuse_if_already_open(rehearsal, home):
-    path = _state_path(rehearsal.id, home)
-    if path.is_file() and json.loads(path.read_text(encoding="utf-8"))["status"] != "done":
-        raise RehearsalError(f"Rehearsal {rehearsal.id} is already open ({path})")
+    saved = ballet_store.load(home, ballet_store.REHEARSAL, rehearsal.id)
+    if saved and saved["status"] != "done":
+        raise RehearsalError(f"Rehearsal {rehearsal.id} is already open")
 
 
 def _load_session(session_item, home):
-    path = _session_path(session_item, home)
-    if not path.is_file():
-        raise RehearsalError(f"no session of {session_item} in {path.parent}")
-    return Session(**json.loads(path.read_text(encoding="utf-8")))
+    saved = ballet_store.load(home, "session", session_item)
+    if saved is None:
+        raise RehearsalError(f"no session of {session_item} in project {ballet_store.project_of(home)}")
+    return Session(**saved)
 
 
 def _save_session(session, home):
-    _session_path(session.item, home).write_text(json.dumps(asdict(session), indent=2) + "\n", encoding="utf-8")
+    ballet_store.save(home, "session", asdict(session))
+
+
+def _session_exists(session_item, home):
+    return ballet_store.load(home, "session", session_item) is not None
 
 
 def _session_of(rehearsal, home):
     """La session de la Rehearsal ; aucune pour une Rehearsal d'avant les sessions."""
-    if not rehearsal.session or not _session_path(rehearsal.session, home).is_file():
+    if not rehearsal.session or not _session_exists(rehearsal.session, home):
         return None
     return _load_session(rehearsal.session, home)
 
 
 def open_sessions(home):
-    found = [Session(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(_run_dir(home).glob(f"{SESSION_PREFIX}*.json"))]
-    return [session for session in found if session.status == "open"]
-
-
-def _session_path(session_item, home):
-    """`session-12.json` pour `#12`, `session-FEAT-002.json` pour une feature."""
-    return _run_dir(home) / f"{SESSION_PREFIX}{session_item.lstrip('#')}.json"
+    return [session for session in map(lambda saved: Session(**saved), ballet_store.all_of(home, "session")) if session.status == "open"]
 
 
 def _log(home, rehearsal, event, detail):
-    entry = {"at": _now(), "rehearsal": rehearsal.id, "event": event, "detail": detail}
-    with (_run_dir(home) / "journal.jsonl").open("a", encoding="utf-8") as journal:
-        journal.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    ballet_store.log(home, ballet_store.REHEARSAL, rehearsal.id, event, detail, conductor=rehearsal.session)
 
 
 def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _state_path(rehearsal_id, home):
-    return _run_dir(home) / f"{rehearsal_id}.json"
-
-
 def _run_dir(home):
-    folder = Path(home) / RUN_DIR
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
+    """Le dossier de travail du projet, hors du projet : `~/.ballet/projects/<alias>/`."""
+    return ballet_store.work_dir(home)
+
+
+def inbox_path(home):
+    """Où le Conductor écrit un message du Director avant de le recevoir (`receive <chemin>`)."""
+    return _run_dir(home) / INBOX
 
 
 # --- lectures -----------------------------------------------------------------
@@ -1842,9 +1841,9 @@ def _run_proof(command, cwd, timeout):
     return Proof(process.returncode == 0, output)
 
 
-def _launch_detached(argv, cwd):
+def _launch_detached(argv, cwd, work_dir):
     """Un processus qui survit à l'appel du Conductor, son environnement compris (Orca y reconnaît le Conductor)."""
-    with open(Path(cwd) / RUN_DIR / "mutation-launch.log", "a", encoding="utf-8") as log:
+    with open(Path(work_dir) / "mutation-launch.log", "a", encoding="utf-8") as log:
         subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -1863,11 +1862,12 @@ def main(argv, home=".", tools=None):
     tools = tools or Tools()
     command, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
+        ballet_legacy.refuse_if_pending(homes=[home])
         print(_shown(_command(command, arguments, home, tools), home, tools))
     except UsageError as error:
         print(error, file=sys.stderr)
         return 2
-    except (RehearsalError, ballet_github.GitHubError) as error:
+    except (RehearsalError, ballet_github.GitHubError, ballet_legacy.LegacyError) as error:
         print(_shown(Step("escalate", str(error), item=named_item(command, arguments)), home, tools))
     return 0
 
@@ -1885,6 +1885,8 @@ def _shown(result, home, tools):
     if not isinstance(result, Step):
         return result
     ballet_maestro.announce(result, home, tools.orca)
+    if result.next == "escalate":
+        result.done.append(f"a message from the Director goes to {inbox_path(home)}, then receive it")
     return result.render()
 
 
@@ -1970,7 +1972,7 @@ def _names_a_rehearsal(arguments):
 def _session_named(text, home):
     """L'élément d'une session qui existe (`#12`, `FEAT-002`) ; une session passe avant la Rehearsal du même nom."""
     item = _as_item(text)
-    return item if item and _session_path(item, home).is_file() else None
+    return item if item and _session_exists(item, home) else None
 
 
 def _only_open_session(home):

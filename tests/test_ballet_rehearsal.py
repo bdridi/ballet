@@ -11,7 +11,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_maestro  # noqa: E402
+import ballet_runtime  # noqa: E402
 import ballet_rehearsal  # noqa: E402
+import ballet_store  # noqa: E402
 
 PROFILE = """[project]
 specs = "specs/"
@@ -256,7 +258,7 @@ class BalletRehearsalTest(unittest.TestCase):
         return ballet_rehearsal.receive("FEAT-001.2", path, question_id, self.home, self.tools)
 
     def state(self):
-        return json.loads((self.home / ".ballet" / "run" / "FEAT-001.2.json").read_text())
+        return ballet_store.load(self.home, "rehearsal", "FEAT-001.2")
 
     def to_the_critic(self):
         self.begin()
@@ -314,7 +316,7 @@ class BalletRehearsalTest(unittest.TestCase):
 
     def test_begin_ouvre_le_journal_puis_journalise_le_lancement_du_premier_role(self):
         self.begin()
-        events = [json.loads(line)["event"] for line in (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()]
+        events = [entry["event"] for entry in ballet_store.journal(self.home, "rehearsal")]
         self.assertEqual(events[:2], ["begin", "handoff"])
         self.assertEqual(self.journal("begin"), [{"item": "#3", "plan": "review", "mode": "assisted", "session": "#3"}])
         start = self.journal("handoff")[0]
@@ -503,9 +505,8 @@ class BalletRehearsalTest(unittest.TestCase):
 
     def test_un_etat_d_avant_dancer_start_se_charge_et_juge_depuis_la_base(self):
         self.begin()
-        state_path = self.home / ".ballet" / "run" / "FEAT-001.2.json"
         old_state = {key: value for key, value in self.state().items() if key != "dancer_start"}
-        state_path.write_text(json.dumps(old_state), encoding="utf-8")
+        ballet_store.save(self.home, "rehearsal", old_state)
         self.world.changed_since = {"c0ffee1": ["src/a.rs"]}
         self.world.changed = ["AGENTS.md"]
         step = self.receive(message("dancer", "conductor", "report", "- Tasks: all done."))
@@ -549,7 +550,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.tools.launch = self.launch_in_place
         self.tools.mutate = self.fake_mutation
 
-    def launch_in_place(self, argv, cwd):
+    def launch_in_place(self, argv, cwd, work_dir):
         """Le processus détaché, joué sur place : il journalise, écrit ses résultats et réveille le Conductor."""
         self.launches.append((argv, cwd))
         ballet_rehearsal.mutate(argv[-1], self.home, self.tools)
@@ -575,7 +576,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
         self.assertEqual(step.next, "wait")
 
-    def launches_without_wake(self, argv, cwd):
+    def launches_without_wake(self, argv, cwd, work_dir):
         self.launches.append((argv, cwd))
 
     def wake(self, round_=1, message_id="msg_mutation"):
@@ -619,7 +620,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.mutation_profile()
         self.mutated_report()
         command, cwd, timeout = self.mutations[0]
-        diff = self.home.resolve() / ".ballet" / "run" / "FEAT-001.2" / "mutation-1-cargo-mutants.diff"
+        diff = ballet_store.work_dir(self.home).resolve() / "FEAT-001.2" / "mutation-1-cargo-mutants.diff"
         self.assertEqual((command, cwd), (f"cargo mutants --in-diff {diff} --files src/inventory.rs", "/wt/FEAT-001.2"))
         self.assertGreater(timeout, 3590)
         self.assertEqual(diff.read_text(), MUTATED_DIFF)
@@ -753,7 +754,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
 
     def test_receive_mutation_pendant_la_mutation_attend_sans_escalader(self):
         self.mutation_profile()
-        self.tools.launch = lambda argv, cwd: None
+        self.tools.launch = lambda argv, cwd, work_dir: None
         self.mutated_report()
         step = ballet_rehearsal.receive_mutation("FEAT-001.2", self.home, self.tools)
         self.assertEqual(step.next, "wait")
@@ -769,8 +770,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
     # --- la politique ---
 
     def policy_events(self):
-        journal = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
-        return [json.loads(line)["detail"] for line in journal if json.loads(line)["event"] == "policy"]
+        return [entry["detail"] for entry in ballet_store.journal(self.home, "rehearsal") if entry["event"] == "policy"]
 
     def test_chaque_passage_est_verifie_et_journalise_meme_en_regle(self):
         self.to_the_critic()
@@ -1069,8 +1069,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.escalated()
         self.world.label_event("labeled", "ballet:approved")
         self.resume()
-        journal = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
-        decisions = [json.loads(line) for line in journal if '"director-decision"' in line]
+        decisions = [entry for entry in ballet_store.journal(self.home, "rehearsal") if entry["event"] == "director-decision"]
         self.assertEqual(decisions[0]["detail"]["verdict"], "APPROVED")
 
     def test_une_approbation_du_director_sur_ci_en_cours_reste_posee(self):
@@ -1121,8 +1120,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.world.numstat = OVERSIZED_NUMSTAT
 
     def journal(self, event):
-        lines = (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()
-        return [json.loads(line)["detail"] for line in lines if json.loads(line)["event"] == event]
+        return [entry["detail"] for entry in ballet_store.journal(self.home, "rehearsal") if entry["event"] == event]
 
     def test_chaque_rapport_mesure_et_journalise_la_taille_meme_sous_le_seuil(self):
         self.to_the_critic()
@@ -1441,8 +1439,8 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
 
     def maestro_mailbox(self):
         """Une boîte de Maestro, et ce home enregistré sous l'alias `antimurphy`."""
-        ballet_maestro.write_config({"mailbox": {"terminal": "term_box", "run": "run_box"},
-                                     "projects": {"antimurphy": {"path": str(self.home)}}})
+        ballet_maestro.write_config({"projects": {"antimurphy": {"path": str(self.home)}}})
+        ballet_runtime.update(mailbox_terminal="term_box", mailbox_run="run_box")
 
     def test_une_escalade_est_annoncee_a_maestro_par_le_script(self):
         self.maestro_mailbox()
@@ -1510,9 +1508,9 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.receive(message("director", "dancer", "answer", "1. Yes."))
         self.assertEqual((self.state()["status"], self.state()["reason"]), ("open", ""))
 
-    def test_le_dossier_d_etat_n_ecrit_plus_son_propre_gitignore(self):
+    def test_rien_n_est_ecrit_dans_le_projet(self):
         self.begin()
-        self.assertFalse((self.home / ".ballet" / "run" / ".gitignore").exists())
+        self.assertFalse((self.home / ".ballet" / "run").exists())
 
 
 class SessionTest(unittest.TestCase):
@@ -1530,7 +1528,7 @@ class SessionTest(unittest.TestCase):
         }
 
     def session(self, key="3"):
-        return json.loads((self.home / ".ballet" / "run" / f"session-{key}.json").read_text())
+        return ballet_store.load(self.home, "session", f"#{key}" if key.isdigit() else key)
 
     def approve(self, rehearsal_id):
         """Le Dancer rend son rapport, le Critic approuve : la Premiere est faite."""
@@ -1574,8 +1572,7 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
 
     def test_l_issue_d_une_feature_en_session_est_refusee_aussi(self):
-        (self.home / ".ballet" / "run").mkdir(exist_ok=True)
-        (self.home / ".ballet" / "run" / "session-FEAT-002.json").write_text(json.dumps({"item": "FEAT-002", "issue": "4"}))
+        ballet_store.save(self.home, "session", {"item": "FEAT-002", "issue": "4"})
         lines = self.run_main("begin", "#4")[1]
         self.assertTrue(lines[-1].startswith("NEXT: escalate #4 is already played by the session of FEAT-002"))
 
@@ -1583,7 +1580,7 @@ class SessionTest(unittest.TestCase):
         self.world.fields = {"3": {"type": "Slice"}, "4": {"type": ""}}
         self.assertEqual(self.run_main("begin", "#3")[1][-1], "NEXT: escalate #3 is a Slice: begin its Feature, its slices follow")
         self.assertIn("an issue without a type", self.run_main("begin", "#4")[1][-1])
-        self.assertEqual(list((self.home / ".ballet" / "run").glob("session-*.json")), [])
+        self.assertEqual(ballet_store.all_of(self.home, "session"), [])
         self.assertEqual(self.world.started_roles(), [])
 
     def test_un_bug_ou_une_task_ouvrent_une_session(self):
@@ -1599,7 +1596,7 @@ class SessionTest(unittest.TestCase):
         state = self.state()
         self.assertEqual(state["frictions"]["frictions"], [])
         self.assertEqual(self.session()["frictions"], {"FEAT-001.2": state["frictions"]})
-        journal = [json.loads(line) for line in (self.home / ".ballet" / "run" / "journal.jsonl").read_text().splitlines()]
+        journal = ballet_store.journal(self.home, "rehearsal")
         self.assertEqual([entry["detail"] for entry in journal if entry["event"] == "frictions"], [state["frictions"]])
 
     def test_un_mode_inconnu_est_refuse(self):
@@ -1760,11 +1757,11 @@ class PlanningTest(unittest.TestCase):
         self.assertIn("- dancer started on issue #14", lines)
         self.assertEqual(lines[-1], "NEXT: wait")
         self.assertTrue(self.world.ran("git", "-C", "/wt/FEAT-002", "branch", "-m", "rehearsal/FEAT-002", "rehearsal/FEAT-002.1"))
-        state = json.loads((self.home / ".ballet" / "run" / "FEAT-002.1.json").read_text())
+        state = ballet_store.load(self.home, "rehearsal", "FEAT-002.1")
         self.assertEqual((state["issue"], state["worktree"], state["owned"]), ("14", "/wt/FEAT-002", ["adr1"]))
         self.assertEqual(state["dispatches"]["choreographer"], "ctx_1")
         self.assertEqual(state["planned_by"], "FEAT-002")
-        planning = json.loads((self.home / ".ballet" / "run" / "FEAT-002.json").read_text())
+        planning = ballet_store.load(self.home, "rehearsal", "FEAT-002")
         self.assertEqual((planning["status"], planning["issue"]), ("done", "13"))
         self.assertEqual(self.journal("handover"), [{"to": "FEAT-002.1", "issue": "14", "planned": "13"}])
         session = self.session("FEAT-002")
@@ -1941,7 +1938,7 @@ class PlanningTest(unittest.TestCase):
         self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-002", "Dramaturg · FEAT-002"])
 
     def state_of(self, rehearsal_id):
-        return json.loads((self.home / ".ballet" / "run" / f"{rehearsal_id}.json").read_text())
+        return ballet_store.load(self.home, "rehearsal", rehearsal_id)
 
 
 if __name__ == "__main__":
@@ -1953,9 +1950,8 @@ class LaunchDetachedTest(unittest.TestCase):
 
     def test_le_processus_lance_tourne_apres_l_appel_dans_le_home(self):
         with tempfile.TemporaryDirectory() as home:
-            (Path(home) / ".ballet" / "run").mkdir(parents=True)
             ballet_rehearsal._launch_detached([sys.executable, "-c", "import time, pathlib; time.sleep(0.3); "
-                                               "pathlib.Path('done').write_text('yes')"], home)
+                                               "pathlib.Path('done').write_text('yes')"], home, home)
             self.assertFalse((Path(home) / "done").exists())
             for _ in range(50):
                 if (Path(home) / "done").exists():

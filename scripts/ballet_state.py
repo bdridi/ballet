@@ -1,7 +1,9 @@
-"""Le dossier d'état de Ballet sur la machine (`~/.ballet`, ou `BALLET_HOME`) : où il est, comment on y écrit, comment on s'y verrouille.
+"""Le dossier d'état de Ballet sur la machine (`~/.ballet`, ou `BALLET_HOME`) : où il est, comment on y écrit un fichier,
+comment on s'y verrouille.
 
-`ballet_maestro.py` (sa config), `ballet_conductors.py` (le registre des Conductors) et `ballet_launch.py` (les lancements)
-y écrivent : ce module est ce qu'ils ont en commun. Il ne sait rien de ce qu'ils y mettent.
+La base (`ballet_db.py`) et la config de Maestro (`maestro.toml`) y vivent. Les verrous servent aux opérations longues qui
+appellent Orca (créer la boîte, lancer, fermer, arrêter un Conductor) : trop longues pour tenir une transaction de la base.
+Ce module ne sait rien de ce qu'on y met.
 """
 
 import fcntl

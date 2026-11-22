@@ -18,7 +18,7 @@ Pour chacun :
 
 Les outils passent l'un après l'autre, même après un rouge, dans un budget commun (`[mutation] timeout_seconds`).
 `[mutation] enabled = false` coupe la mutation ; `--force` la lance quand même. Le log entier, le diff, le rapport
-natif copié et le détail normalisé vont dans `.ballet/run/manual/` (dans `.ballet/run/<ID>/` pour une Rehearsal).
+natif copié et le détail normalisé vont dans `~/.ballet/projects/<alias>/manual/` (dans `…/<ID>/` pour une Rehearsal).
 Sort avec 1 si un outil est rouge, 2 sur un usage invalide.
 """
 
@@ -35,11 +35,12 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 import ballet_config
+import ballet_store
 
 BASE = "origin/main"
 SURVIVORS_IN_EVENT = 50   # les survivants au journal ; la liste entière est dans le détail
 OUTPUT_LINES = 60         # la fin de la sortie, quand le rapport ne dit rien des survivants
-MANUAL_DIR = Path(".ballet") / "run" / "manual"
+MANUAL_DIR = "manual"   # dans le dossier de travail du projet (`ballet_store.work_dir`)
 DEFAULT_PATHS = {"cargo-mutants": ["*.rs"]}   # sans `paths`, ce que le format de rapport sait muter
 NO_MUTANT_SIGNS = {"cargo-mutants": ("No mutants to filter", "No mutants found")}   # l'outil n'avait rien à muter
 NO_MUTANT = "no mutant in the diff"
@@ -237,7 +238,7 @@ def _run_by_hand(config, home, force):
     if not scoped:
         print("Mutation skipped: " + ("the diff touches no mutation tool." if repo.get("mutation") else "no mutation tool in the profile."))
         return 0
-    outcomes = run_tools(scoped, worktree, Path(home) / MANUAL_DIR, "mutation", config["mutation"]["timeout_seconds"],
+    outcomes = run_tools(scoped, worktree, ballet_store.work_dir(home) / MANUAL_DIR, "mutation", config["mutation"]["timeout_seconds"],
                          git, _print_event)
     return 0 if all(outcome.passed for outcome in outcomes) else 1
 

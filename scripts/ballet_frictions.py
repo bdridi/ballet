@@ -1,7 +1,7 @@
 """Les frictions d'une Rehearsal ou d'un Workshop : ce qui a coincé, coûté un tour de plus ou tourné en rond.
 
 Calculées sans LLM à la fin de la Rehearsal (ou du Workshop), à partir de son état et de ses entrées du journal
-(`.ballet/run/journal.jsonl`), puis gardées dans son état (`frictions`) et dans le journal (événement `frictions`) :
+(le journal de la base, `ballet_store.journal_of`), puis gardées dans son état (`frictions`) et dans le journal (événement `frictions`) :
 la Scène les montre, et le `done` de la session les donne à Maestro. Chaque friction :
 
     kind    escalation | rejections | red_proofs | red_mutations | refused_reports | nudges | policy | diff

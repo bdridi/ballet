@@ -12,6 +12,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_conductors  # noqa: E402
+import ballet_db  # noqa: E402
+import ballet_runtime  # noqa: E402
+import ballet_store  # noqa: E402
 import ballet_launch  # noqa: E402
 import ballet_maestro  # noqa: E402
 import ballet_program  # noqa: E402
@@ -127,7 +130,10 @@ class BalletLaunchTest(unittest.TestCase):
         return ballet_conductors.read()
 
     def forget_launches(self):
-        (self.state / "conductors.json").unlink(missing_ok=True)
+        with ballet_db.writing() as connection:
+            connection.execute("DELETE FROM conductors")
+            connection.execute("DELETE FROM events")
+            connection.execute("DELETE FROM nodes")
         self.orca.terminals.clear()
         self.orca.commands.clear()
 
@@ -156,7 +162,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.rehearsal("#12")
         words = shlex.split(self.option(self.create_command(), "--command"))
         self.assertEqual(words, ["claude", "--remote-control", "antimurphy#12", "/ballet:rehearsal #12",
-                                 "--allowedTools", "Bash(python3:*)", "Edit(.ballet/run/**)"])
+                                 "--allowedTools", "Bash(python3:*)", ballet_launch.work_files_rule()])
         self.assertLess(words.index("/ballet:rehearsal #12"), words.index("--allowedTools"))
 
     def test_la_commande_se_tape_telle_quelle_dans_un_shell(self):
@@ -204,7 +210,7 @@ class BalletLaunchTest(unittest.TestCase):
             self.rehearsal("#12")
         words = shlex.split(self.option(self.create_command(), "--command"))
         self.assertEqual(words, ["sh", "-c", "echo hi; exec cat", "--remote-control", "antimurphy#12",
-                                 "/ballet:rehearsal #12", "--allowedTools", "Bash(python3:*)", "Edit(.ballet/run/**)"])
+                                 "/ballet:rehearsal #12", "--allowedTools", "Bash(python3:*)", ballet_launch.work_files_rule()])
 
     # --- les garde-fous ---
 
@@ -247,9 +253,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.assertEqual(len(self.orca.ran("terminal", "create")), 1)
 
     def test_un_workshop_ouvert_dans_le_projet_est_refuse(self):
-        run = self.home / ".ballet" / "run"
-        run.mkdir(parents=True)
-        (run / "workshop-BUG-004.json").write_text(json.dumps({"item": "BUG-004", "repo": "r", "status": "escalated"}), encoding="utf-8")
+        ballet_store.save(self.home, "workshop", {"item": "BUG-004", "repo": "r", "status": "escalated"})
         self.assertRefused(lambda: self.workshop("BUG-004"), "antimurphy#BUG-004 has an open session .*state escalated")
 
     def test_le_plafond_de_conductors_simultanes_est_de_trois_par_defaut(self):
@@ -290,8 +294,9 @@ class BalletLaunchTest(unittest.TestCase):
     def test_les_lancements_d_hier_ne_comptent_pas_dans_le_jour(self):
         self.limits(max_running=99, max_per_day=1)
         yesterday = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat(timespec="seconds")
-        self.state.mkdir(exist_ok=True)
-        (self.state / "conductors.json").write_text(json.dumps({"antimurphy#1": {"terminal": "term_gone", "starts": [yesterday]}}), encoding="utf-8")
+        ballet_conductors.record_launch("antimurphy#1", "antimurphy", "1", "rehearsal", "term_gone")
+        with ballet_db.writing() as connection:   # ce lancement date d'hier
+            connection.execute("UPDATE events SET at = ? WHERE kind = 'launch'", (yesterday,))
         self.rehearsal("#2")
         self.assertRefused(lambda: self.rehearsal("#3"), "1 launch\\(es\\) today")
 
@@ -303,13 +308,13 @@ class BalletLaunchTest(unittest.TestCase):
         self.orca.unreachable = True
         with self.assertRaises(ballet_maestro.MaestroError):
             self.rehearsal()
-        self.assertFalse((self.state / "conductors.json").exists())
+        self.assertEqual(self.conductors(), {})
 
     def test_un_dossier_inconnu_d_orca_est_refuse_en_disant_comment_l_ajouter(self):
         self.orca.unknown_folder = True
         with self.assertRaisesRegex(LaunchError, "orca repo add --path"):
             self.rehearsal()
-        self.assertFalse((self.state / "conductors.json").exists())
+        self.assertEqual(self.conductors(), {})
 
     # --- le registre ---
 
@@ -319,7 +324,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.assertEqual({key: line[key] for key in ("project", "item", "kind", "terminal", "url", "seen", "event", "state")},
                          {"project": "antimurphy", "item": "12", "kind": "rehearsal", "terminal": "term_1", "url": "",
                           "seen": "", "event": "", "state": "running"})
-        self.assertEqual(line["starts"], [line["started"]])
+        self.assertTrue(line["started"])
         self.assertEqual(output, f"launched the rehearsal Conductor of antimurphy#12 in {self.home}: terminal term_1, "
                                  "Remote Control URL not found yet")
 
@@ -353,12 +358,15 @@ class BalletLaunchTest(unittest.TestCase):
         self.rehearsal("#12")
         self.assertEqual(self.conductors()["antimurphy#12"]["url"], "")
 
-    def test_un_relancement_garde_les_dates_des_lancements_precedents(self):
+    def test_un_relancement_compte_deux_lancements_et_clot_le_noeud_d_avant(self):
         self.limits(max_running=99)
         self.rehearsal("#12")
         self.orca.terminals.clear()
         self.rehearsal("#12")
-        self.assertEqual(len(self.conductors()["antimurphy#12"]["starts"]), 2)
+        self.assertEqual(ballet_conductors.launches_today(), 2)
+        with ballet_db.reading() as connection:
+            nodes = connection.execute("SELECT outcome FROM nodes WHERE kind = 'conductor' ORDER BY started_at, rowid").fetchall()
+        self.assertEqual([node["outcome"] for node in nodes], ["stopped", None])
 
     def test_wait_complete_la_ligne_du_lancement_sans_perdre_ses_champs(self):
         self.orca.screen = URL
@@ -380,14 +388,9 @@ class BalletLaunchTest(unittest.TestCase):
         self.assertEqual({key: self.conductors()["am#BUG-004"][key] for key in ("project", "item", "kind", "terminal", "state")},
                          {"project": "am", "item": "BUG-004", "kind": "", "terminal": "term_7", "state": "finished"})
 
-    def test_une_ligne_d_avant_l_etape_3_se_lit_par_son_dernier_evenement(self):
-        self.assertEqual(ballet_conductors.state_of({"terminal": "t", "event": "done"}), "finished")
-        self.assertEqual(ballet_conductors.state_of({"terminal": "t", "event": "escalate"}), "running")
-        self.assertEqual(ballet_conductors.state_of({"terminal": "t"}), "running")
-
     def test_wait_note_un_done_sur_la_ligne_lancee(self):
         owner = ballet_maestro.claim().split()[-1]
-        ballet_maestro.write_config({**ballet_maestro.read_config(), "mailbox": {"terminal": "term_box", "run": "run_1"}})
+        ballet_runtime.update(mailbox_terminal="term_box", mailbox_run="run_1")
         self.rehearsal("#12")
         message = {"type": "status", "from": "term_1", "subject": "antimurphy#12 · done", "body": "b"}
         with mock.patch.object(ballet_maestro, "_wait_for_messages", return_value=[message]):
@@ -634,8 +637,7 @@ class BalletLaunchTest(unittest.TestCase):
         self.assertEqual((rehearsal.status, rehearsal.dispatches), ("escalated", {"dancer": "ctx_dancer"}))
         self.assertIn(self.STOP_REASON, rehearsal.reason)
         self.assertEqual([session.item for session in ballet_rehearsal.open_sessions(self.home)], ["#12"])
-        journal = (self.home / ".ballet" / "run" / "journal.jsonl").read_text(encoding="utf-8")
-        self.assertIn('"event": "stopped"', journal)
+        self.assertIn("stopped", [entry["event"] for entry in ballet_store.journal(self.home, "rehearsal")])
         self.assertIn("the work is kept: state, branch and worktree are untouched", report)
 
     def test_stop_ne_touche_ni_au_worktree_ni_a_la_branche(self):
@@ -690,10 +692,8 @@ class BalletLaunchTest(unittest.TestCase):
     def test_stop_d_un_workshop_arrete_le_dramaturg_et_le_choreographer(self):
         import ballet_workshop
         self.workshop("BUG-004")
-        run = self.home / ".ballet" / "run"
-        run.mkdir(parents=True, exist_ok=True)
-        (run / "workshop-BUG-004.json").write_text(json.dumps({"item": "BUG-004", "repo": "r", "dispatch": "ctx_dramaturg",
-                                                                "advisor_dispatch": "ctx_choreographer"}), encoding="utf-8")
+        ballet_store.save(self.home, "workshop", {"item": "BUG-004", "repo": "r", "dispatch": "ctx_dramaturg",
+                                                  "advisor_dispatch": "ctx_choreographer"})
         report = self.stop("antimurphy#BUG-004")
         self.assertEqual([command[3] for command in self.orca.ran("orchestration", "worker-stop")], ["ctx_dramaturg", "ctx_choreographer"])
         workshop = ballet_workshop._load("BUG-004", self.home)

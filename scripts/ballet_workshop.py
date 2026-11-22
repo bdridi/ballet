@@ -13,8 +13,8 @@ Lancé depuis le home du projet, comme `ballet_rehearsal.py`, avec la même dern
     NEXT: done               l'issue est publiée : la session est finie
 
 Un élément confié est une ligne du backlog des specs (`OPP-12`, `FEAT-007`, `BUG-004`, `TASK-009`). Sa session vit dans
-`.ballet/run/workshop-<élément>.json` (jamais `session-…` : ce sont celles de la Rehearsal) ; ses lignes de journal portent
-la clé `workshop`. Une session par élément ; plusieurs côte à côte sont permises.
+la base (`ballet_store.py`, table `workshops`) ; son journal y est sous un nœud `workshop`, et ses fichiers de travail dans
+`~/.ballet/projects/<alias>/workshop-<élément>/`. Une session par élément ; plusieurs côte à côte sont permises.
 
 Le déroulé, sans le Director : le Dramaturg cadre l'élément dans un worktree sur `workshop/<élément>` et rend son rapport
 (le type de l'issue, ce qu'il a décidé seul, le brouillon de l'issue). Le script juge alors son passage (la politique : seul
@@ -31,7 +31,7 @@ Comme en Rehearsal, chaque message réveille le Conductor, qui lance `receive` ;
 question et chaque réponse en commentaire sur l'issue dès qu'elle existe (elle naît à la fin du Workshop).
 
 Une demande qui n'est pas encore au backlog (`--request`) nomme sa session d'un slug, ses premiers mots sans accents
-(`le-stock-passe-en-negatif`) : branche `workshop/<slug>`, état `workshop-<slug>.json`. Le Dramaturg la capture d'abord
+(`le-stock-passe-en-negatif`) : branche `workshop/<slug>`, état sous la clé `<slug>`. Le Dramaturg la capture d'abord
 (une ligne nouvelle, ou fusionnée dans une ligne existante), puis cadre cette ligne, qu'il nomme dans son rapport (`- Item:`).
 
 Le journal ne se réécrit jamais : la clé d'une session reste son élément (`BUG-004`) ou son slug du début à la fin, et l'événement
@@ -46,25 +46,24 @@ Sans élément, `begin` choisit dans le backlog : la première ligne de *Next up
 session. Ce que le Workshop choisit seul sort toujours `proposed`, quel que soit `queue_approval_skipped`.
 """
 
-import json
 import re
 import sys
 import unicodedata
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 import ballet_config
 import ballet_frictions
 import ballet_github
+import ballet_legacy
 import ballet_maestro
 import ballet_orca
 import ballet_policy
 import ballet_rehearsal
+import ballet_store
 from ballet_message import MessageError, parse_message
 from ballet_rehearsal import RehearsalError, Step, Tools, UsageError
 
-RUN_DIR = ballet_rehearsal.RUN_DIR
 WORKSHOP_PREFIX = "workshop-"
 WORKSHOP_ITEM = re.compile(r"^(?:OPP|FEAT|BUG|TASK)-\d+$")
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -97,7 +96,7 @@ class WorkshopError(Exception):
     """Le Workshop ne peut pas avancer : le Conductor escalade."""
 
 
-ERRORS = (WorkshopError, RehearsalError, ballet_github.GitHubError)   # `Tools.run` lève une RehearsalError
+ERRORS = (WorkshopError, RehearsalError, ballet_github.GitHubError, ballet_legacy.LegacyError)   # `Tools.run` lève une RehearsalError
 
 
 @dataclass
@@ -597,11 +596,7 @@ def _record_frictions(workshop, home):
 
 
 def _journal_of(item, home):
-    path = _run_dir(home) / "journal.jsonl"
-    if not path.is_file():
-        return []
-    entries = (json.loads(text) for text in path.read_text(encoding="utf-8").splitlines() if text.strip())
-    return [entry for entry in entries if entry.get("workshop") == item]
+    return ballet_store.journal_of(home, ballet_store.WORKSHOP, item)
 
 
 def _over(workshop):
@@ -609,14 +604,18 @@ def _over(workshop):
 
 
 def _save(workshop, home):
-    _state_path(workshop.item, home).write_text(json.dumps(asdict(workshop), indent=2) + "\n", encoding="utf-8")
+    ballet_store.save(home, ballet_store.WORKSHOP, asdict(workshop))
 
 
 def _load(item, home):
-    path = _state_path(item, home)
-    if not path.is_file():
-        raise WorkshopError(f"no Workshop of {item} in {path.parent}")
-    return Workshop(**json.loads(path.read_text(encoding="utf-8")))
+    saved = ballet_store.load(home, ballet_store.WORKSHOP, item)
+    if saved is None:
+        raise WorkshopError(f"no Workshop of {item} in project {ballet_store.project_of(home)}")
+    return Workshop(**saved)
+
+
+def _exists(item, home):
+    return ballet_store.load(home, ballet_store.WORKSHOP, item) is not None
 
 
 def next_item(home):
@@ -631,7 +630,7 @@ def _pick_in_backlog(config, home):
     if not backlog.is_file():
         raise WorkshopError(f"no backlog at {backlog}: nothing to pick from")
     for item in _next_up(backlog.read_text(encoding="utf-8")):
-        if not _state_path(item, home).is_file():
+        if not _exists(item, home):
             return item
     raise WorkshopError(f"*Next up* in {backlog} has no OPP, FEAT, BUG or TASK line left that has no Workshop yet: name an item")
 
@@ -643,7 +642,7 @@ def _free_slug(request, home):
     if not base:
         raise WorkshopError("the request has no word to name its session")
     slug, rank = base, 1
-    while _state_path(slug, home).is_file():
+    while _exists(slug, home):
         rank += 1
         slug = f"{base}-{rank}"
     return slug
@@ -662,9 +661,9 @@ def _next_up(text):
 
 
 def _refuse_if_open(item, home):
-    path = _state_path(item, home)
-    if path.is_file() and json.loads(path.read_text(encoding="utf-8"))["status"] != "done":
-        raise WorkshopError(f"the Workshop of {item} is already open ({path})")
+    saved = ballet_store.load(home, ballet_store.WORKSHOP, item)
+    if saved and saved["status"] != "done":
+        raise WorkshopError(f"the Workshop of {item} is already open")
 
 
 def stop(item, reason, home):
@@ -682,18 +681,12 @@ def stop(item, reason, home):
 
 
 def open_workshops(home):
-    found = [Workshop(**json.loads(path.read_text(encoding="utf-8"))) for path in sorted(_run_dir(home).glob(f"{WORKSHOP_PREFIX}*.json"))]
+    found = [Workshop(**saved) for saved in ballet_store.all_of(home, ballet_store.WORKSHOP)]
     return [workshop for workshop in found if workshop.status != "done"]
 
 
 def _log(home, workshop, event, detail):
-    entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "workshop": workshop.item, "event": event, "detail": detail}
-    with (_run_dir(home) / "journal.jsonl").open("a", encoding="utf-8") as journal:
-        journal.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-
-def _state_path(item, home):
-    return _run_dir(home) / f"{WORKSHOP_PREFIX}{item}.json"
+    ballet_store.log(home, ballet_store.WORKSHOP, workshop.item, event, detail)
 
 
 def _folder(workshop, home):
@@ -703,9 +696,8 @@ def _folder(workshop, home):
 
 
 def _run_dir(home):
-    folder = Path(home) / RUN_DIR
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
+    """Le dossier de travail du projet, hors du projet : `~/.ballet/projects/<alias>/`."""
+    return ballet_store.work_dir(home)
 
 
 def _checked_config(home):
@@ -791,6 +783,7 @@ def main(argv, home=".", tools=None):
     tools = tools or Tools()
     command, arguments = (argv[1], argv[2:]) if len(argv) > 1 else (None, [])
     try:
+        ballet_legacy.refuse_if_pending(homes=[home])
         step = _command(command, arguments, home, tools)
         ballet_maestro.announce(step, home, tools.orca)
         print(step.render())
@@ -850,7 +843,7 @@ def _item(text):
 
 def _item_and_rest(arguments, home):
     """L'élément (ou le slug d'une session) nommé en tête des arguments, sinon la seule session ouverte."""
-    if arguments and (WORKSHOP_ITEM.match(arguments[0]) or (SLUG.match(arguments[0]) and _state_path(arguments[0], home).is_file())):
+    if arguments and (WORKSHOP_ITEM.match(arguments[0]) or (SLUG.match(arguments[0]) and _exists(arguments[0], home))):
         return arguments[0], arguments[1:]
     return _only_open_workshop(home), arguments
 
