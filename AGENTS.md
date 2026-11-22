@@ -18,5 +18,5 @@ Un seul nom par concept, celui de la section 3 du PRD, partout : doc, skills, cl
 ## Versions
 
 - Chaque version du plugin (`.claude-plugin/plugin.json`) a son entrée en tête de `release.md` : une ligne par fonctionnalité ou changement, et les opportunités qu'elle traite (`OPP-NN`).
-- Une opportunité traitée passe de 🆕 à ✅ dans `opportunities.md`, avec sa version ; un nouveau sujet y entre en 🆕, avec le numéro suivant.
+- Une opportunité traitée sort de `opportunities.md` : son numéro reste dans l'entrée de sa version, dans `release.md`. Un nouveau sujet y entre en 🆕, avec le numéro suivant le plus grand des deux fichiers.
 - La version est commitée puis taguée `vX.Y.Z`.

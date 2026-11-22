@@ -1,6 +1,6 @@
 # Ballet — releases
 
-Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (`opportunities.md`, cochées ✅ là-bas).
+Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
 ## 0.38.0 — 2026-11-22 · `v0.38.0`
 
