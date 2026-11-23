@@ -21,6 +21,7 @@ from ballet_rehearsal import Rehearsal, Session, Step  # noqa: E402
 from ballet_workshop import Workshop  # noqa: E402
 
 
+LEAN_OPTIONS = "--strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --tools Bash,Read,Skill"
 EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": "", "session": ""}
 
 
@@ -669,19 +670,29 @@ class BalletMaestroTest(unittest.TestCase):
         create = self.orca.ran("terminal", "create")[0]
         self.assertEqual(create[create.index("--title") + 1], "maestro")
         self.assertEqual(create[create.index("--command") + 1],
-                         f"BALLET_HOME={self.state} claude --remote-control 'ballet maestro' /ballet:maestro")
+                         f"BALLET_HOME={self.state} CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' /ballet:maestro "
+                         f"{LEAN_OPTIONS}")
         self.assertEqual(self.runtime()["maestro_terminal"], "term_1")
 
     def test_maestro_sans_ballet_home_ne_transmet_rien(self):
         with mock.patch.dict("os.environ", clear=False) as environment:
             environment.pop("BALLET_HOME")
             environment.pop("BALLET_MAESTRO_COMMAND", None)
-            self.assertEqual(ballet_maestro._maestro_command(), "claude --remote-control 'ballet maestro' /ballet:maestro")
+            self.assertEqual(ballet_maestro._maestro_command(),
+                             f"CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' /ballet:maestro {LEAN_OPTIONS}")
 
     def test_maestro_le_prompt_vient_avant_toute_option(self):
         with mock.patch.dict("os.environ", {"BALLET_MAESTRO_COMMAND": "echo fake-maestro"}):
             words = shlex.split(ballet_maestro._maestro_command())
-        self.assertEqual(words[1:], ["echo", "fake-maestro", "--remote-control", "ballet maestro", "/ballet:maestro"])
+        self.assertEqual(words[2:7], ["echo", "fake-maestro", "--remote-control", "ballet maestro", "/ballet:maestro"])
+        self.assertEqual(words[1], "CLAUDE_CODE_PROMPT_CACHE_TTL=1h")
+
+    def test_maestro_ne_charge_aucun_serveur_mcp_et_garde_ses_skills(self):
+        with mock.patch.dict("os.environ", {"BALLET_MAESTRO_COMMAND": "claude"}):
+            words = shlex.split(ballet_maestro._maestro_command())
+        self.assertIn("--strict-mcp-config", words)
+        self.assertEqual(json.loads(words[words.index("--mcp-config") + 1]), {"mcpServers": {}})
+        self.assertEqual(words[words.index("--tools") + 1].split(","), ["Bash", "Read", "Skill"])
 
     def test_maestro_est_idempotent_tant_que_le_terminal_vit(self):
         ballet_maestro.maestro(self.orca)

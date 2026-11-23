@@ -49,7 +49,7 @@ A capture is not an interview: one question at most, when the entry cannot be re
    - **opportunity**: a problem for someone, restated as such (who, what goes wrong), with its proof as the Director gives it, nothing made up;
    - **bug**: a gap between a spec (`@FEAT-NNN-Cn` or a rule) and the product;
    - **task**: work with no new visible behaviour.
-2. Look for duplicates and neighbours, and propose **one** route: a new line (next free number), a merge into an existing line, already covered by a feature (say which one and which criterion), or a rejection with its reason.
+2. Look for duplicates and neighbours, and propose **one** route: a new line (next free number; for a `TASK-NNN`, also past the issue titles: a technical debt issue takes one), a merge into an existing line, already covered by a feature (say which one and which criterion), or a rejection with its reason.
 3. Show the line as it will be written, then write it after a yes. Commit `docs(backlog): <ID> <slug>`.
 
 ### Triage — test feedback

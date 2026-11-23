@@ -1,9 +1,13 @@
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import ballet_cost
 import ballet_frictions
 
 
@@ -15,8 +19,9 @@ class FrictionsTest(unittest.TestCase):
     def test_une_rehearsal_sans_accroc_n_a_aucune_friction_et_garde_sa_duree(self):
         entries = [entry("begin"), entry("done", at="2026-11-21T21:42:00+00:00")]
         record = ballet_frictions.of_rehearsal({}, entries)
-        self.assertEqual(record, {"seconds": 2520, "frictions": []})
-        self.assertEqual(ballet_frictions.line("FEAT-007", record), "frictions of FEAT-007 (42 min): none")
+        self.assertEqual(record["seconds"], 2520)
+        self.assertEqual(record["frictions"], [])
+        self.assertEqual(ballet_frictions.line("FEAT-007", {**record, "cost": {}}), "frictions of FEAT-007 (42 min): none")
 
     def test_chaque_accroc_devient_une_friction_lisible(self):
         state = {"round_trips": 2, "red_proofs": 1, "red_mutations": 0, "refused_reports": 1,
@@ -55,6 +60,36 @@ class FrictionsTest(unittest.TestCase):
         one = ballet_frictions.of_workshop({}, [entry("idle")])["frictions"]
         self.assertEqual([friction["text"] for friction in one], ["silent 1 time: Monitor idle notice"])
         self.assertEqual(ballet_frictions.of_workshop({}, [entry("begin")])["frictions"], [])
+
+    def test_le_cout_d_une_rehearsal_vient_des_journaux_de_son_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / "-orca-rehearsal-FEAT-007"
+            folder.mkdir()
+            records = [{"type": "user", "message": {"content": "You are the Ballet Dancer of Rehearsal FEAT-007"}},
+                       {"type": "assistant", "timestamp": "2026-11-21T21:10:00Z",
+                        "message": {"id": "m1", "model": "claude-sonnet-5-5", "usage": {"output_tokens": 1_000_000}}}]
+            (folder / "aaaa1111.jsonl").write_text("\n".join(json.dumps(record) for record in records))
+            state = {"worktree": "/orca/rehearsal-FEAT-007", "repo": "/work/demo", "session": "#7"}
+            with mock.patch.object(ballet_cost, "PROJECTS", Path(directory)):
+                record = ballet_frictions.of_rehearsal(state, [entry("begin"), entry("done", at="2026-11-21T21:42:00+00:00")])
+                self.assertEqual(ballet_frictions.line("FEAT-007", record),
+                                 "frictions of FEAT-007 (42 min): none | cost ~$10.00 API equivalent (1.0M tokens, 0k from cache): "
+                                 "Dancer $10.00; Conductor not counted: no session of /ballet:rehearsal #7 in the project's journals")
+
+    def test_un_workshop_a_son_cout_comme_une_rehearsal(self):
+        record = ballet_frictions.of_workshop({"worktree": "/orca/workshop-X", "item": "X"}, [entry("begin")])
+        self.assertIn("no Claude Code journal activity for workshop-X", record["cost"]["missing"])
+
+    def test_un_etat_sans_worktree_ou_un_journal_illisible_ne_fait_jamais_echouer_la_fin(self):
+        record = ballet_frictions.of_rehearsal({}, [entry("begin")])
+        self.assertEqual(record["cost"], {"missing": "no worktree in its state"})
+        self.assertEqual(ballet_frictions.line("FEAT-007", record), "frictions of FEAT-007 (0 min): none | cost: not available (no worktree in its state)")
+        with mock.patch.object(ballet_cost, "of_work", side_effect=PermissionError("denied")):
+            record = ballet_frictions.of_rehearsal({"worktree": "/w"}, [entry("begin")])
+        self.assertEqual(record["cost"], {"missing": "journals unreadable: PermissionError"})
+
+    def test_un_ancien_enregistrement_sans_cout_garde_sa_ligne(self):
+        self.assertEqual(ballet_frictions.line("FEAT-007", {"seconds": 60, "frictions": []}), "frictions of FEAT-007 (1 min): none")
 
 
 if __name__ == "__main__":

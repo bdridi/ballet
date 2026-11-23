@@ -8,10 +8,15 @@ la Scène les montre, et le `done` de la session les donne à Maestro. Chaque fr
     count   combien de fois
     text    la ligne lisible, en anglais (les agents la lisent)
 
+À côté des frictions, le coût (`cost`, de `ballet_cost`) : les tokens des sessions du worktree et du Conductor, et leur équivalent
+au prix de l'API. Des journaux illisibles ne font jamais échouer la fin : le coût est dit absent.
+
 Le module ne lit et n'écrit rien lui-même : on lui passe l'état et les entrées du journal.
 """
 
 from datetime import datetime
+
+import ballet_cost
 
 ESCALATION_TEXT_LIMIT = 200
 
@@ -27,7 +32,8 @@ def of_rehearsal(state, entries):
     frictions += _idle(entries)
     frictions += _policy(state.get("violations", {}))
     frictions += _oversized(state.get("size", {}))
-    return {"seconds": _seconds(entries), "frictions": frictions}
+    cost = _cost_of(state, entries, command="ballet:rehearsal", item=state.get("session", ""))
+    return {"seconds": _seconds(entries), "frictions": frictions, "cost": cost}
 
 
 def of_workshop(state, entries):
@@ -37,13 +43,15 @@ def of_workshop(state, entries):
     frictions += _nudges(entries)
     frictions += _idle(entries)
     frictions += _policy({"dramaturg": state.get("violations", 0)})
-    return {"seconds": _seconds(entries), "frictions": frictions}
+    cost = _cost_of(state, entries, command="ballet:workshop", item=state.get("item", ""))
+    return {"seconds": _seconds(entries), "frictions": frictions, "cost": cost}
 
 
 def line(name, record):
-    """Une ligne pour le `done` : `frictions of FEAT-007 (42 min): escalated: …; 1 red proof`, ou `…: none`."""
+    """Une ligne pour le `done` : `frictions of FEAT-007 (42 min): escalated: …; 1 red proof | cost ~$8.65 …`, ou `…: none`."""
     listed = "; ".join(friction["text"] for friction in record.get("frictions", [])) or "none"
-    return f"frictions of {name} ({_duration(record.get('seconds', 0))}): {listed}"
+    cost = f" | {ballet_cost.line_of(record['cost'])}" if record.get("cost") else ""
+    return f"frictions of {name} ({_duration(record.get('seconds', 0))}): {listed}{cost}"
 
 
 # --- détails ------------------------------------------------------------------
@@ -88,13 +96,29 @@ def _oversized(size):
     return [{"kind": "diff", "count": 1, "text": f"diff {size['counted']} lines over the {size['limit']} limit"}]
 
 
-def _seconds(entries):
-    """Du premier `begin` à la dernière entrée du journal."""
+def _cost_of(state, entries, command, item):
+    """Le coût des sessions du worktree et du Conductor ; jamais une erreur : un journal illisible le rend absent."""
+    window = _window(entries)
+    if not state.get("worktree"):
+        return {"missing": "no worktree in its state"}
+    try:
+        return ballet_cost.of_work(state["worktree"], state.get("repo", ""), command, item, window)
+    except Exception as error:   # le coût est un confort : il ne doit jamais empêcher la fin
+        return {"missing": f"journals unreadable: {type(error).__name__}"}
+
+
+def _window(entries):
+    """Du premier `begin` à la dernière entrée du journal : (début, fin), ou `None` sans entrée datée."""
     stamps = [datetime.fromisoformat(entry["at"]) for entry in entries if entry.get("at")]
     begins = [datetime.fromisoformat(entry["at"]) for entry in entries if entry.get("event") == "begin" and entry.get("at")]
     if not stamps:
-        return 0
-    return max(0, round((max(stamps) - (min(begins) if begins else min(stamps))).total_seconds()))
+        return None
+    return (min(begins) if begins else min(stamps)), max(stamps)
+
+
+def _seconds(entries):
+    window = _window(entries)
+    return max(0, round((window[1] - window[0]).total_seconds())) if window else 0
 
 
 def _duration(seconds):

@@ -8,9 +8,12 @@
 Maestro seul l'appelle (sur la demande du Director, ou quand sa règle `auto_launch` le décide pour un élément que le Monitor
 a vu passer `ready`) : c'est le seul lanceur de Ballet.
 
-Le Conductor est `claude --remote-control '<projet>#<élément>' '<prompt>' --allowedTools 'Bash(python3:*)' 'Edit(~/.ballet/projects/**)'`, lancé par
-`orca terminal create --worktree path:<projet> --command …`. Le prompt vient avant les options : `--allowedTools` prend
-tout ce qui la suit pour ses valeurs. Un Conductor ne lance que les scripts de Ballet (`python3`) : `gh`, `git` et `orca`
+Le Conductor est `CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control '<projet>#<élément>' '<prompt>' --model haiku
+--strict-mcp-config --mcp-config '{"mcpServers":{}}' --tools Bash,Read,Write,Edit,Skill --allowedTools 'Bash(python3:*)'
+'Edit(~/.ballet/projects/**)'`, lancé par `orca terminal create --worktree path:<projet> --command …`. Le prompt vient avant
+les options : `--allowedTools` prend tout ce qui la suit pour ses valeurs. Le modèle est celui de `[conductor] model` du
+profil du projet (`haiku` : il ne fait que relayer des scripts) ; le socle allégé et le cache d'une heure sont ceux de
+`ballet_session.py`. Un Conductor ne lance que les scripts de Ballet (`python3`) : `gh`, `git` et `orca`
 sont appelés par ces scripts, jamais par l'agent. Il n'écrit qu'un fichier, le message Ballet du Director
 (`inbox.md`, dans le dossier de travail du projet, sous `~/.ballet/projects/`) : `Edit(~/.ballet/projects/**)` (le dossier
 d'état réel, `BALLET_HOME` compris) le laisse faire sans demande de permission, quel que soit le mode. `BALLET_CONDUCTOR_COMMAND` remplace `claude` (un autre agent, ou une
@@ -56,11 +59,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ballet_conductors
+import ballet_config
 import ballet_db
 import ballet_legacy
 import ballet_maestro
 import ballet_program
 import ballet_rehearsal
+import ballet_session
 import ballet_state
 import ballet_store
 import ballet_workshop
@@ -381,9 +386,25 @@ def _open_terminal(launch, orca):
 
 
 def _conductor_command(launch):
-    """`<agent> --remote-control <nom> <prompt> --allowedTools …` : le prompt avant les options."""
+    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control <nom> <prompt> --model <modèle> <socle allégé> --allowedTools …` :
+    le prompt avant les options, et `--allowedTools` en dernier (il prend tout ce qui le suit)."""
     agent = shlex.split(os.environ.get(COMMAND_VARIABLE) or DEFAULT_AGENT)
-    return shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--allowedTools", RUN_PYTHON, work_files_rule()])
+    command = shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--model", _conductor_model(launch.home),
+                          *ballet_session.lean_options(ballet_session.CONDUCTOR_TOOLS),
+                          "--allowedTools", RUN_PYTHON, work_files_rule()])
+    return ballet_session.with_environment(command, {})
+
+
+def _conductor_model(home):
+    """Le modèle du Conductor : `[conductor] model` du profil du projet (`haiku` par défaut), il ne fait que relayer des scripts."""
+    try:
+        settings = ballet_config.effective_config(home).get("conductor")
+    except ballet_config.ConfigError as error:
+        raise LaunchError(f"cannot read the profile of {home}: {error}") from error
+    model = settings.get("model") if isinstance(settings, dict) else None
+    if not isinstance(model, str) or not model.strip():
+        raise LaunchError(f"[conductor] model in the profile of {home} must be a model name (haiku, sonnet…), not {model!r}")
+    return model
 
 
 def work_files_rule():

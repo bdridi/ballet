@@ -144,10 +144,12 @@ class FakeWorld:
         if arguments[:2] == ["issue", "view"]:
             return json.dumps({"title": "FEAT-001.2 · Inventory model", "body": self.issue_body, "state": self.issue_state})
         if arguments[:2] == ["issue", "list"]:
-            return json.dumps([{"number": int(number), "body": issue["body"]} for number, issue in self.issues.items()
-                               if issue.get("state", "OPEN") == "OPEN"])
+            return json.dumps([{"number": int(number), "title": issue.get("title", ""), "body": issue["body"]}
+                               for number, issue in self.issues.items() if issue.get("state", "OPEN") == "OPEN"])
         if arguments[:2] == ["pr", "create"]:
             return "https://github.com/o/r/pull/8\n"
+        if arguments[:2] == ["issue", "create"]:
+            return "https://github.com/o/r/issues/30\n"
         if arguments[:2] == ["pr", "view"] and arguments[-1] == "labels":
             return json.dumps({"labels": [{"name": name} for name in sorted(self.labels())]})
         if arguments[:2] == ["pr", "view"]:
@@ -415,11 +417,12 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(self.journal("proof-reused"), [{"command": "pnpm proof", "head": "c0ffee1"}])
         self.assertIn("round 2", self.last_send_body()[1])
 
-    def test_le_critic_sait_que_la_preuve_et_la_mutation_ont_deja_tourne(self):
+    def test_le_critic_sait_que_la_preuve_a_tourne_et_que_la_mutation_tourne_a_cote(self):
         self.to_the_critic()
         assignment = self.journal("handoff")[-1]["text"]
         self.assertIn("Ballet already ran the proof (`pnpm proof`) on c0ffee1, green", assignment)
-        self.assertIn("do not run them again", assignment)
+        self.assertIn("runs alongside your review", assignment)
+        self.assertIn("run neither", assignment)
 
     # --- le rouge de chaque tâche, dans le rapport du Dancer ---
 
@@ -722,15 +725,16 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertIn("mutation skipped: the diff touches no mutation tool", step.done)
         self.assertEqual(self.journal("mutation-skipped"), [{"reason": "the diff touches no mutation tool"}])
 
-    def test_la_preuve_verte_lance_la_mutation_en_arriere_plan_sans_pousser_ni_lancer_le_critic(self):
+    def test_la_preuve_verte_lance_la_mutation_en_arriere_plan_et_le_critic_en_meme_temps(self):
         self.mutation_profile()
         step = self.mutated_report()
-        self.assertEqual((step.next, step.done), ("wait", ["proof green", "mutation started in the background "
-                                                           "(cargo-mutants, round 1): it wakes the Conductor when it is done"]))
+        self.assertEqual(step.next, "wait")
+        self.assertEqual(step.done[:2], ["proof green", "mutation started in the background (cargo-mutants, round 1), "
+                                                        "alongside the Critic: it wakes the Conductor when it is done"])
         argv, cwd = self.launches[0]
         self.assertEqual((argv[-2:], cwd), (["mutate", "FEAT-001.2"], str(self.home.resolve())))
-        self.assertFalse(self.world.ran("git", "-C", str(self.home.resolve()), "push", "--set-upstream", "origin", "rehearsal/FEAT-001.2"))
-        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+        self.assertTrue(self.world.ran("git", "-C", str(self.home.resolve()), "push", "--set-upstream", "origin", "rehearsal/FEAT-001.2"))
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
 
     def test_la_mutation_recoit_son_perimetre_dans_le_worktree_avec_le_budget_du_profil(self):
         self.mutation_profile()
@@ -759,17 +763,72 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertEqual(json.loads(send[send.index("--payload") + 1]), {"ballet": "mutation", "rehearsal": "FEAT-001.2", "round": 1})
         self.assertEqual(self.journal("mutation-wake"), [{"round": 1, "sent": True}])
 
-    def test_une_mutation_verte_pousse_publie_le_rapport_du_dancer_et_lance_le_critic(self):
+    def test_une_mutation_verte_avant_le_verdict_attend_le_critic(self):
         self.mutation_profile()
-        self.mutation_result = (0, False, CARGO_REPORT.replace('"missed": 7', '"missed": 0'))
+        self.mutation_result = (0, False, self.green_report())
         self.mutated_report("- Tasks: all done, mutation pending.")
-        step = self.wake()
-        self.assertEqual(step.next, "wait")
-        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0)")
         comment = self.world.ran("gh", "pr", "comment")[0]
         self.assertIn("- Tasks: all done, mutation pending.", comment[comment.index("--body") + 1])
-        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        step = self.wake()
+        self.assertEqual((step.next, step.done), ("wait", ["mutation green: cargo-mutants (6 killed, 0 survived, score 1.0): "
+                                                           "waiting for the Critic's verdict"]))
         self.assertEqual(self.state()["mutation"], {})
+        self.assertEqual(self.critic_says("APPROVED").next, "done")
+
+    def test_un_verdict_rendu_pendant_la_mutation_attend_sa_fin_puis_merge(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, self.green_report())
+        self.mutated_report()
+        step = self.critic_says("APPROVED")
+        self.assertEqual(step.next, "wait")
+        self.assertIn("verdict APPROVED held until the mutation (round 1) is done", step.done)
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        self.assertIn("the Critic's verdict (APPROVED) waits for it",
+                      " ".join(ballet_rehearsal.status("FEAT-001.2", self.home, self.tools).done))
+        step = self.wake()
+        self.assertEqual(step.next, "done")
+        self.assertTrue(self.world.ran("gh", "pr", "merge"))
+
+    def test_une_escalade_du_critic_n_attend_pas_la_mutation(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.mutated_report()
+        self.assertEqual(self.critic_says("ESCALATE").next, "escalate")
+        step = self.wake()
+        self.assertEqual((step.next, step.reason, step.done), ("escalate", "the Critic escalates: see its review",
+                                                               ["mutation red: cargo-mutants"]))
+        self.assertEqual(len(self.state()["mutation_red"]), 1)
+
+    def test_une_mutation_qui_ne_prouve_rien_pendant_une_escalade_garde_son_motif(self):
+        self.mutation_profile()
+        self.mutated_report()
+        self.critic_says("ESCALATE")
+        step = self.wake()
+        self.assertEqual(step.reason, "the Critic escalates: see its review")
+        self.assertTrue(step.done[-1].startswith("also: mutation proved nothing: cargo-mutants (report missing)"))
+
+    def test_le_director_n_approuve_pas_pendant_que_la_mutation_tourne(self):
+        self.mutation_profile()
+        self.tools.launch = self.launches_without_wake
+        self.mutated_report()
+        self.critic_says("ESCALATE")
+        self.world.label_event("labeled", "ballet:approved")
+        step = ballet_rehearsal.resume("FEAT-001.2", self.home, self.tools)
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("the mutation (round 1) is still running", step.reason)
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+
+    def test_le_director_qui_rejette_apres_une_escalade_porte_aussi_les_survivants(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.mutated_report()
+        self.critic_says("ESCALATE")
+        self.wake()
+        self.world.label_event("labeled", "ballet:rejected")
+        self.world.pull_request["comments"] = [{"body": "Rename it.", "createdAt": "2026-11-16T13:00:00Z", "author": {"login": "director"}}]
+        step = ballet_rehearsal.resume("FEAT-001.2", self.home, self.tools)
+        self.assertIn("with the mutation's survivors", step.done[0])
+        self.assertIn("replace rank -> u8 with 1", self.last_send_body()[1])
 
     def test_la_mutation_suivante_part_du_commit_de_la_derniere_mutation_verte(self):
         self.mutation_profile()
@@ -790,7 +849,6 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertTrue(step.reason.startswith("mutation proved nothing: cargo-mutants (no viable mutant (8 unviable)), its log: "))
         self.assertTrue(step.reason.endswith("mutation-1-cargo-mutants.log"))
         self.assertEqual(len(self.journal("mutation-inconclusive")), 1)
-        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
 
     def test_un_tour_partiel_sans_mutant_viable_est_relance_sur_toute_la_branche(self):
         self.mutation_profile()
@@ -804,14 +862,13 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertEqual(self.state()["mutation"]["whole"], True)
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])   # pas de nouveau Critic
 
-    def test_la_relance_sur_toute_la_branche_verte_pousse_la_branche(self):
+    def test_la_relance_sur_toute_la_branche_verte_attend_le_verdict(self):
         self.mutation_profile()
         self.partial_round_without_viable_mutant()
         self.mutation_result = (0, False, self.green_report())
         ballet_rehearsal.mutate("FEAT-001.2", self.home, self.tools)
         step = self.wake(round_=3, message_id="msg_3")
-        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0)")
-        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0): waiting for the Critic's verdict")
         self.assertEqual(self.state()["mutated"], "beef002")
 
     def test_la_relance_sur_toute_la_branche_qui_ne_prouve_rien_escalade(self):
@@ -844,28 +901,50 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.tools.mutate = self.mutation_saying_nothing_to_mutate
         self.mutated_report()
         step = self.wake()
-        self.assertEqual(step.done[0], "mutation green: cargo-mutants (report no mutant in the diff)")
-        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (report no mutant in the diff): waiting for the Critic's verdict")
         self.assertEqual(self.journal("mutation-inconclusive"), [])
 
     def mutation_saying_nothing_to_mutate(self, command, cwd, timeout, log_path):
         Path(log_path).write_text("No mutants to filter\n", encoding="utf-8")
         return 0, False
 
-    def test_une_mutation_rouge_n_est_pas_poussee_et_renvoie_les_survivants_au_dancer(self):
+    def test_une_mutation_rouge_et_un_refus_reviennent_au_dancer_en_un_seul_tour(self):
         self.mutation_profile()
         self.mutation_result = (2, False, CARGO_REPORT)
         self.mutated_report()
         step = self.wake()
-        self.assertEqual((step.next, step.done), ("wait", ["mutation red (cargo-mutants), nothing pushed: dancer asked to kill "
-                                                           "the survivors (1/2)"]))
-        self.assertFalse(self.world.ran("gh", "pr", "create"))
-        body = self.world.ran("orca", "orchestration", "send")[-1]
-        body = body[body.index("--body") + 1]
+        self.assertEqual((step.next, step.done), ("wait", ["mutation red: cargo-mutants: waiting for the Critic's verdict"]))
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.assertIn("dancer asked to fix the Critic's points and mutation red (cargo-mutants, 1/2), round 2", step.done)
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 2)   # le réveil de la mutation, puis un seul envoi au Dancer
+        to, body = self.last_send_body()
+        self.assertEqual(to, "dispatch:ctx_1")
+        self.assertIn("fix each blocking point", body)
         self.assertIn("src/lib.rs:2:5: replace rank -> u8 with 1", body)
         self.assertIn("mutation-1-cargo-mutants.log", body)
         self.assertIn("Equivalents go in `.cargo/mutants.toml`", body)
         self.assertIn("never an end-to-end test", body)
+
+    def test_approuve_avec_une_mutation_rouge_revient_au_dancer_puis_au_critic(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.mutated_report()
+        self.critic_says("APPROVED", "- Cache the key.")
+        step = self.wake()
+        self.assertEqual(step.next, "wait")
+        self.assertIn("approved, but mutation red (cargo-mutants, 1/2): ballet:rejected, dancer asked to kill the survivors, "
+                      "then the Critic reviews again", step.done)
+        self.assertIn("ballet:rejected", self.world.labels())
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        self.assertFalse(self.world.ran("gh", "issue", "create"))
+        body = self.last_send_body()[1]
+        self.assertIn("the Critic reviews again after your fix", body)
+        self.assertIn("replace rank -> u8 with 1", body)
+        self.assertEqual(self.state()["round_trips"], 0)
+        self.world.head = "beef002"
+        self.mutation_result = (0, False, self.green_report())
+        step = self.receive(message("dancer", "conductor", "report", "- Survivors killed.", round_=2))
+        self.assertIn("critic asked to review #8, round 2", step.done)
 
     def test_sans_rapport_lisible_le_dancer_recoit_la_fin_de_la_sortie(self):
         self.mutation_profile()
@@ -873,6 +952,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.mutated_report()
         self.assertTrue(self.journal("mutation-end")[0]["report"].startswith("unreadable: JSONDecodeError"))
         self.wake()
+        self.critic_says("APPROVED")
         body = self.world.ran("orca", "orchestration", "send")[-1]
         body = body[body.index("--body") + 1]
         self.assertIn("No survivor list (report: unreadable: JSONDecodeError", body)
@@ -885,7 +965,8 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.begin()
         for round_ in (1, 2, 3):
             self.receive(message("dancer", "conductor", "report", "- Done."))
-            step = self.wake(round_, f"msg_{round_}")
+            self.wake(round_, f"msg_{round_}")
+            step = self.critic_says("APPROVED")
         self.assertEqual((step.next, step.reason), ("escalate", "mutation: red 3 times, over max_round_trips (cargo-mutants)"))
 
     def test_une_mutation_trop_longue_escalade(self):
@@ -923,8 +1004,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.mutation_result = (0, False, self.green_report())
         self.mutated_report()
         step = ballet_rehearsal.receive_mutation("FEAT-001.2", self.home, self.tools)
-        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0)")
-        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0): waiting for the Critic's verdict")
 
     def test_receive_mutation_pendant_la_mutation_attend_sans_escalader(self):
         self.mutation_profile()
@@ -1350,8 +1430,9 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertEqual(self.reminders(), [])
         self.assertEqual(self.state()["status"], "escalated")
 
-    def test_nudge_n_envoie_rien_pendant_une_mutation(self):
-        self.waiting_on(mutation={"round": 2, "head": "abc", "run": "run_1", "report": "x", "started": "2026-11-23T10:00:00+00:00"})
+    def test_nudge_n_envoie_rien_quand_le_verdict_attend_la_mutation(self):
+        self.waiting_on(mutation={"round": 2, "head": "abc", "run": "run_1", "started": "2026-11-23T10:00:00+00:00"},
+                        held_verdict={"verdict": "APPROVED", "text": "VERDICT: APPROVED"})
         step = self.nudge()
         self.assertEqual(step.next, "wait")
         self.assertIn("mutation", step.done[0])
@@ -1462,46 +1543,57 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         send = self.world.ran("orca", "orchestration", "send")[-1]
         return send[send.index("--to") + 1], send[send.index("--body") + 1]
 
-    def test_approuve_avec_des_notes_le_dancer_les_prend_en_un_commit(self):
+    def debt_issue(self, status="proposed", body="Intro.\n\n### From #5 · FEAT-001.1\n\n- [ ] Old note.\n\n## Plan\n\n_x_\n"):
+        self.world.issues["21"] = {"title": "TASK-007 · Technical debt · notes of the Critic", "body": body, "state": "OPEN"}
+        self.world.fields["21"] = {"type": "Task", "status": status}
+
+    def test_approuve_avec_des_notes_merge_et_ouvre_l_issue_de_dette_technique(self):
         self.to_the_critic()
         step = self.critic_says("APPROVED", "- `a.rs:1`: private fields.\n- Cache the key.")
-        self.assertEqual(step.next, "wait")
-        self.assertFalse(self.world.ran("gh", "pr", "merge"))
-        to, body = self.last_send_body()
-        self.assertEqual(to, "dispatch:ctx_1")
-        self.assertIn("one single commit", body)
-        self.assertIn("approved with 2 note(s): dancer asked to take them in one commit", step.done)
-
-    def test_des_notes_toutes_declinees_mergent_sans_preuve_ni_critic(self):
-        self.to_the_critic()
-        self.critic_says("APPROVED", "- Cache the key.")
-        step = self.receive(message("dancer", "conductor", "report", "- Notes.\n\n## Notes declined\n\n- Cache: out of scope.", round_=2))
         self.assertEqual(step.next, "done")
-        self.assertIn("notes declined, nothing committed: Dancer report published on #8", step.done)
-        self.assertEqual(len(self.world.proofs), 1)
+        self.assertIn("2 note(s) of the Critic filed in new technical debt issue #30 (proposed)", step.done)
+        create = self.world.ran("gh", "issue", "create")[0]
+        body = create[create.index("--body") + 1]
+        self.assertIn("### From #8 · FEAT-001.2\n\n- [ ] `a.rs:1`: private fields.\n- [ ] Cache the key.", body)
+        self.assertEqual((create[create.index("--type") + 1], create[create.index("--label") + 1]), ("Task", "technical-debt"))
+        self.assertEqual(create[create.index("--title") + 1], "TASK-001 · Technical debt · notes of the Critic")
+        self.assertIn(("30", "proposed"), self.world.statuses)
+        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 0)
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
-        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 1)
-        self.assertEqual(self.state()["round_trips"], 0)
-
-    def test_le_commit_des_notes_passe_la_preuve_puis_merge_sans_nouveau_tour_du_critic(self):
-        self.to_the_critic()
-        self.critic_says("APPROVED", "- Cache the key.")
-        self.world.head = "beef002"
-        step = self.receive(message("dancer", "conductor", "report", "- Notes taken.\n\n## Fixed\n\n- Note: beef002", round_=2))
-        self.assertEqual(step.next, "done")
-        self.assertEqual(len(self.world.proofs), 2)
-        self.assertIn("notes round without a new Critic round: ballet:approved renewed on #8", step.done)
-        self.assertEqual(len(self.world.ran("orca", "orchestration", "send")), 1)
         self.assertTrue(self.world.ran("gh", "pr", "merge"))
 
-    def test_un_commit_des_notes_qui_casse_la_preuve_revient_au_dancer(self):
+    def test_les_notes_s_ajoutent_a_l_issue_de_dette_qui_attend_encore_le_director(self):
+        self.debt_issue()
         self.to_the_critic()
-        self.critic_says("APPROVED", "- Cache the key.")
-        self.world.head = "beef002"
-        self.world.proof = ballet_rehearsal.Proof(False, "FAIL\n")
-        step = self.receive(message("dancer", "conductor", "report", "- Notes taken.", round_=2))
-        self.assertEqual(step.done, ["proof red, nothing pushed: dancer asked to fix it (1/2)"])
-        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        step = self.critic_says("APPROVED", "- Cache the key.")
+        self.assertIn("1 note(s) of the Critic filed in technical debt issue #21", step.done)
+        self.assertFalse(self.world.ran("gh", "issue", "create"))
+        edit = self.world.ran("gh", "issue", "edit", "21")[0]
+        self.assertEqual(edit[edit.index("--body") + 1], "Intro.\n\n### From #5 · FEAT-001.1\n\n- [ ] Old note.\n\n"
+                                                         "### From #8 · FEAT-001.2\n\n- [ ] Cache the key.\n\n## Plan\n\n_x_\n")
+
+    def test_une_issue_de_dette_deja_acceptee_ne_recoit_plus_de_notes(self):
+        self.debt_issue(status="ready")
+        self.to_the_critic()
+        step = self.critic_says("APPROVED", "- Cache the key.")
+        self.assertIn("1 note(s) of the Critic filed in new technical debt issue #30 (proposed)", step.done)
+        self.assertFalse(self.world.ran("gh", "issue", "edit", "21"))
+        create = self.world.ran("gh", "issue", "create")[0]
+        self.assertEqual(create[create.index("--title") + 1], "TASK-008 · Technical debt · notes of the Critic")
+
+    def test_une_note_none_n_ouvre_pas_de_dette(self):
+        self.to_the_critic()
+        step = self.critic_says("APPROVED", "- none")
+        self.assertEqual(step.next, "done")
+        self.assertFalse(self.world.ran("gh", "issue", "create"))
+
+    def test_un_refus_de_github_sur_la_dette_n_empeche_pas_la_premiere(self):
+        self.to_the_critic()
+        with mock.patch.object(ballet_rehearsal.ballet_github, "file_technical_debt",
+                               side_effect=ballet_rehearsal.ballet_github.GitHubError("no Task type")):
+            step = self.critic_says("APPROVED", "- Cache the key.")
+        self.assertEqual(step.next, "done")
+        self.assertIn("1 note(s) of the Critic not filed in technical debt: no Task type", step.done)
 
     def test_une_rehearsal_rejetee_puis_approuvee_garde_le_refus_dans_ses_frictions(self):
         self.to_the_critic()
@@ -1920,7 +2012,7 @@ class SessionTest(unittest.TestCase):
         self.run_main("begin", "#3")
         lines = self.approve("FEAT-001.2")[1]
         friction_line = next(line for line in lines if line.startswith("- frictions of FEAT-001.2 ("))
-        self.assertTrue(friction_line.endswith("): none"))
+        self.assertIn("): none | cost: ", friction_line)
         state = self.state()
         self.assertEqual(state["frictions"]["frictions"], [])
         self.assertEqual(self.session()["frictions"], {"FEAT-001.2": state["frictions"]})

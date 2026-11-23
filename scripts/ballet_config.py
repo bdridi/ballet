@@ -39,6 +39,7 @@ def find_problems(config, plugin_root=PLUGIN_ROOT):
         + _critic_dancer_problems(config)
         + _rehearsal_problems(config)
         + _workshop_problems(config)
+        + _conductor_problems(config)
         + _threshold_problems(config)
         + _mutation_problems(config)
         + _policy_problems(config)
@@ -200,6 +201,13 @@ def _workshop_problems(config):
     skipped = _table(config, "workshop").get("queue_approval_skipped")
     if not isinstance(skipped, list) or any(issue_type not in QUEUED_TYPES for issue_type in skipped):
         return [f"[workshop] queue_approval_skipped must be a list of issue types among {', '.join(QUEUED_TYPES)}"]
+    return []
+
+
+def _conductor_problems(config):
+    model = _table(config, "conductor").get("model")
+    if not isinstance(model, str) or not model.strip():
+        return ["[conductor] model must be a model name (haiku, sonnet…)"]
     return []
 
 

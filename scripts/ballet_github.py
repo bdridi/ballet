@@ -53,6 +53,9 @@ en minuscules d'une demande hors backlog) : le Workshop
 n'a pas de Critic, la politique a jugé la branche (l'espace specs seul) avant son push ; la CI n'est pas attendue (pas de code, et
 le projet peut ne pas la lancer). Sa PR ne ferme
 aucune issue : l'issue de la feature n'est publiée qu'après le merge de ses specs.
+Les notes d'une approbation ne retournent pas au Dancer : le Conductor les range (`file_technical_debt`, sans commande) dans
+l'issue de dette technique du projet, une Task `proposed` au libellé `technical-debt`, une section par PR ; tant qu'elle
+reste `proposed`, les suivantes s'y ajoutent, sinon une nouvelle s'ouvre.
 `close` ne se fie pas au `Closes #N` de la PR (implicite, et absent d'une PR ouverte à la main) : il ferme lui-même.
 Une slice se reconnaît à sa première ligne, `Part of #<parente>` (posée par `slice`).
 """
@@ -133,6 +136,11 @@ VERDICT_LABELS = {
 OVERSIZED = ("ballet:oversized", "e99695", "Ballet: the diff is over max_diff_lines")
 SIZE_ACCEPTED = ("ballet:size-accepted", "c5def5", "Ballet: the Director accepts the size of the diff")
 DECIDED_ALONE = ("ballet:decided-alone", "bfd4f2", "Ballet: the Dramaturg decided without the Director, its decisions are in the issue")
+TECHNICAL_DEBT = ("technical-debt", "d4c5f9", "Ballet: notes of the Critic left for later, one section per pull request")
+TECHNICAL_DEBT_TITLE = "Technical debt · notes of the Critic"   # après son `TASK-NNN · `, qu'une Rehearsal exige
+TASK_ID = re.compile(r"\bTASK-(\d+)\b")
+TECHNICAL_DEBT_INTRO = ("Notes the Critic left on approved pull requests, for later. Strike what is not worth doing, then set "
+                        "this issue `ready` to play it as one Rehearsal. Once it leaves `proposed`, new notes go to a new issue.")
 
 
 class GitHubError(Exception):
@@ -202,6 +210,26 @@ def mark_decided_alone(number, run=None):
     number = _issue_number(number)
     _ensure_labels([DECIDED_ALONE], run)
     run(["issue", "edit", number, "--add-label", DECIDED_ALONE[0]])
+
+
+def file_technical_debt(pr_number, rehearsal_id, notes, run=None):
+    """Range les notes d'une approbation dans l'issue de dette technique du projet : celle qui attend encore le Director
+    (`proposed`), sinon une nouvelle (Task, `proposed`, `technical-debt`). Une seule issue grossit, une section par PR.
+    Rend son numéro, et si elle vient d'être créée."""
+    run = run or _run_gh
+    section = _debt_section(pr_number, rehearsal_id, notes)
+    waiting = _proposed_debt(run)
+    if waiting:
+        number, body = waiting
+        _edit_issue(number, _with_debt_section(body, section), run)
+        return number, False
+    _ensure_labels([TECHNICAL_DEBT], run)
+    body = _with_plan_section(f"{TECHNICAL_DEBT_INTRO}\n\n{section}")
+    title = f"{_next_task_id(run)} · {TECHNICAL_DEBT_TITLE}"
+    url = run(["issue", "create", "--title", title, "--body", body, "--type", "Task", "--label", TECHNICAL_DEBT[0]])
+    number = url.strip().rsplit("/", 1)[-1]
+    _set_after_creation(number, STATUS_FIELD, "proposed", run)
+    return number, True
 
 
 def set_status(number, status, run=None):
@@ -732,6 +760,46 @@ def _with_plan_section(body):
     if PLAN_HEADING in body.splitlines():
         return body
     return f"{body.rstrip()}\n\n{PLAN_HEADING}\n\n{PLAN_PLACEHOLDER}\n"
+
+
+def _debt_section(pr_number, rehearsal_id, notes):
+    items = "\n".join(f"- [ ] {note}" for note in notes)
+    return f"### From #{_issue_number(pr_number)} · {rehearsal_id}\n\n{items}\n"
+
+
+def _proposed_debt(run):
+    """L'issue de dette technique ouverte qui attend encore le Director (`proposed`) : numéro et corps ; `None` sinon."""
+    listed = json.loads(run(["issue", "list", "--state", "open", "--label", TECHNICAL_DEBT[0], "--json", "number,body"]))
+    for issue in sorted(listed, key=lambda issue: issue["number"]):
+        if queue_fields(issue["number"], run)["status"] == "proposed":
+            return str(issue["number"]), issue["body"]
+    return None
+
+
+def _next_task_id(run, specs=None):
+    """Le `TASK-NNN` suivant le plus grand connu, dans les titres d'issues et dans l'espace specs (backlog, features)."""
+    numbers = [int(found) for issue in _all_issues(run) for found in TASK_ID.findall(issue.get("title", ""))]
+    numbers += _task_numbers_in_specs(specs)
+    return f"TASK-{max(numbers, default=0) + 1:03d}"
+
+
+def _task_numbers_in_specs(specs):
+    folder = Path(specs) if specs else _project_specs()
+    if not folder or not folder.is_dir():
+        return []
+    texts = [path.name for path in (folder / "features").glob("TASK-*.md")]
+    backlog = folder / "backlog.md"
+    if backlog.is_file():
+        texts.append(backlog.read_text(encoding="utf-8"))
+    return [int(found) for text in texts for found in TASK_ID.findall(text)]
+
+
+def _with_debt_section(body, section):
+    """La nouvelle section va avant `## Plan`, que le Choreographer écrira quand l'issue sera jouée."""
+    before, heading, after = body.partition(f"\n{PLAN_HEADING}\n")
+    if not heading:
+        return f"{body.rstrip()}\n\n{section}"
+    return f"{before.rstrip()}\n\n{section}{heading}{after}"
 
 
 def _edit_issue(number, body, run):

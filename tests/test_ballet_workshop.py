@@ -547,7 +547,7 @@ class BalletWorkshopTest(unittest.TestCase):
         step = self.reports()
         self.assertEqual(step.next, "done")
         self.assertTrue(step.done[-1].startswith("frictions of Workshop BUG-004 ("))
-        self.assertTrue(step.done[-1].endswith("): none"))
+        self.assertIn("): none | cost: ", step.done[-1])
         self.assertEqual(self.journal("frictions")[0]["detail"], self.state()["frictions"])
 
     def test_les_specs_sont_mergees_sans_lire_ni_attendre_la_ci(self):

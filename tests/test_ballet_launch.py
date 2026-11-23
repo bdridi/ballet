@@ -143,6 +143,12 @@ class BalletLaunchTest(unittest.TestCase):
     def option(self, command, name):
         return command[command.index(name) + 1]
 
+    def command_words(self):
+        """Les mots de la commande tapée dans le terminal, sans l'affectation d'environnement du cache qui la précède."""
+        words = shlex.split(self.option(self.create_command(), "--command"))
+        self.assertEqual(words[0], "CLAUDE_CODE_PROMPT_CACHE_TTL=1h")
+        return words[1:]
+
     def assertRefused(self, launch, pattern):
         created = len(self.orca.ran("terminal", "create"))
         with self.assertRaisesRegex(LaunchError, pattern):
@@ -160,10 +166,39 @@ class BalletLaunchTest(unittest.TestCase):
 
     def test_la_commande_met_le_prompt_avant_les_options_et_n_autorise_que_python(self):
         self.rehearsal("#12")
-        words = shlex.split(self.option(self.create_command(), "--command"))
+        words = self.command_words()
         self.assertEqual(words, ["claude", "--remote-control", "antimurphy#12", "/ballet:rehearsal #12",
+                                 "--model", "haiku", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                                 "--tools", "Bash,Read,Write,Edit,Skill",
                                  "--allowedTools", "Bash(python3:*)", ballet_launch.work_files_rule()])
         self.assertLess(words.index("/ballet:rehearsal #12"), words.index("--allowedTools"))
+
+    def test_le_conductor_tourne_sur_haiku_par_defaut_et_le_profil_du_projet_change_son_modele(self):
+        self.rehearsal("#12")
+        self.assertEqual(self.option(self.command_words(), "--model"), "haiku")
+        self.forget_launches()
+        (self.home / ".ballet").mkdir()
+        (self.home / ".ballet" / "config.toml").write_text(PROFILE + '\n[conductor]\nmodel = "sonnet"\n', encoding="utf-8")
+        self.rehearsal("#13")
+        self.assertEqual(self.option(self.command_words(), "--model"), "sonnet")
+
+    def test_un_modele_de_conductor_qui_n_est_pas_un_nom_refuse_le_lancement(self):
+        (self.home / ".ballet").mkdir()
+        (self.home / ".ballet" / "config.toml").write_text(PROFILE + '\n[conductor]\nmodel = 3\n', encoding="utf-8")
+        self.assertRefused(self.rehearsal, "must be a model name")
+
+    def test_le_conductor_ne_charge_aucun_serveur_mcp_et_garde_les_skills_de_ballet(self):
+        self.rehearsal("#12")
+        words = self.command_words()
+        self.assertIn("--strict-mcp-config", words)
+        self.assertEqual(json.loads(self.option(words, "--mcp-config")), {"mcpServers": {}})
+        self.assertIn("Skill", self.option(words, "--tools").split(","))
+        self.assertNotIn("--disable-slash-commands", words)
+
+    def test_le_cache_du_conductor_dure_une_heure(self):
+        self.rehearsal("#12")
+        command = self.option(self.create_command(), "--command")
+        self.assertTrue(command.startswith("CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude "), command)
 
     def test_la_commande_se_tape_telle_quelle_dans_un_shell(self):
         self.rehearsal("#12")
@@ -176,18 +211,18 @@ class BalletLaunchTest(unittest.TestCase):
         for text in ("12", "#12"):
             self.forget_launches()
             self.rehearsal(text)
-            words = shlex.split(self.option(self.create_command(), "--command"))
+            words = self.command_words()
             self.assertEqual(words[3], "/ballet:rehearsal #12")
             self.assertEqual(self.option(self.create_command(), "--title"), "antimurphy#12")
 
     def test_une_feature_sans_issue_se_lance_par_son_identifiant(self):
         self.rehearsal("FEAT-002")
-        words = shlex.split(self.option(self.create_command(), "--command"))
+        words = self.command_words()
         self.assertEqual(words[2:4], ["antimurphy#FEAT-002", "/ballet:rehearsal FEAT-002"])
 
     def test_le_workshop_se_lance_en_autopilot_sur_son_element(self):
         self.workshop("BUG-004")
-        words = shlex.split(self.option(self.create_command(), "--command"))
+        words = self.command_words()
         self.assertEqual(words[2:4], ["antimurphy#BUG-004", "/ballet:workshop --autopilot BUG-004"])
 
     def test_le_workshop_sans_element_prend_la_premiere_ligne_de_next_up(self):
@@ -197,7 +232,7 @@ class BalletLaunchTest(unittest.TestCase):
         (self.home / "specs" / "backlog.md").write_text(BACKLOG, encoding="utf-8")
         output = self.workshop()
         self.assertIn("antimurphy#BUG-004", output)
-        words = shlex.split(self.option(self.create_command(), "--command"))
+        words = self.command_words()
         self.assertEqual(words[3], "/ballet:workshop --autopilot BUG-004")
 
     def test_le_workshop_sans_element_refuse_un_projet_sans_backlog(self):
@@ -208,9 +243,10 @@ class BalletLaunchTest(unittest.TestCase):
     def test_la_variable_d_environnement_remplace_l_agent_et_garde_les_arguments(self):
         with mock.patch.dict("os.environ", {"BALLET_CONDUCTOR_COMMAND": "sh -c 'echo hi; exec cat'"}):
             self.rehearsal("#12")
-        words = shlex.split(self.option(self.create_command(), "--command"))
-        self.assertEqual(words, ["sh", "-c", "echo hi; exec cat", "--remote-control", "antimurphy#12",
-                                 "/ballet:rehearsal #12", "--allowedTools", "Bash(python3:*)", ballet_launch.work_files_rule()])
+        words = self.command_words()
+        self.assertEqual(words[:7], ["sh", "-c", "echo hi; exec cat", "--remote-control", "antimurphy#12",
+                                     "/ballet:rehearsal #12", "--model"])
+        self.assertEqual(words[-3:], ["--allowedTools", "Bash(python3:*)", ballet_launch.work_files_rule()])
 
     # --- les garde-fous ---
 

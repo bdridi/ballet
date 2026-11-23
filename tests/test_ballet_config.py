@@ -216,6 +216,21 @@ class ConfigTest(unittest.TestCase):
                 self.write_project_config(VALID_PROJECT + f"\n[workshop]\nqueue_approval_skipped = {value}\n")
                 self.assertProblem("[workshop] queue_approval_skipped must be a list of issue types among Feature, Bug, Task")
 
+    def test_par_defaut_le_conductor_tourne_sur_haiku(self):
+        self.write_project_config(VALID_PROJECT)
+        self.assertEqual(ballet_config.effective_config(self.project)["conductor"]["model"], "haiku")
+
+    def test_un_projet_choisit_le_modele_de_son_conductor(self):
+        self.write_project_config(VALID_PROJECT + '\n[conductor]\nmodel = "sonnet"\n')
+        config = ballet_config.effective_config(self.project)
+        self.assertEqual((config["conductor"]["model"], ballet_config.find_problems(config)), ("sonnet", []))
+
+    def test_un_modele_de_conductor_vide_ou_qui_n_est_pas_un_texte_est_refuse(self):
+        for value in ('""', "3", "true"):
+            with self.subTest(value=value):
+                self.write_project_config(VALID_PROJECT + f"\n[conductor]\nmodel = {value}\n")
+                self.assertProblem("[conductor] model must be a model name")
+
     def test_exclusions_qui_ne_sont_pas_une_liste_sont_refusees(self):
         self.write_project_config(VALID_PROJECT + '\n[escalation]\ndiff_exclude = "*.lock"\n')
         self.assertProblem("diff_exclude must be a list of globs")

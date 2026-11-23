@@ -20,6 +20,9 @@ model = "sonnet"                 # Critic ≠ Dancer : même CLI, modèles expli
 cli = "claude"
 model = "opus"
 
+[conductor]
+model = "haiku"                  # le modèle des sessions Conductor : il relaie des scripts déterministes, il ne pense pas
+
 [policy]
 # Une zone est un glob fnmatch (`*` traverse les `/`) : sans `/`, il vaut à toute profondeur ; avec, il part de la racine.
 # Une liste surchargée remplace celle du plugin : la recopier pour y ajouter.
@@ -107,7 +110,8 @@ diff_exclude = ["*.lock", "pnpm-lock.yaml", "package-lock.json"]   # hors du com
 #   config = ".cargo/mutants.toml"                            # où s'excluent les équivalents, chacun avec sa raison
 #   report = { path = "mutants.out/outcomes.json", format = "cargo-mutants" }
 #   paths = ["crates/*"]                                      # facultatif : le diff filtré (fnmatch, `*` traverse les `/`)
-# Sans entrée, le nœud est sauté.
+# Sans entrée, le nœud est sauté. L'outil tourne en même temps que le Critic, dans le même worktree : il ne mute pas les
+# sources en place (cargo-mutants copie l'arbre par défaut ; jamais `--in-place`), et ce qu'il y écrit est ignoré par git.
 [mutation]
 enabled = true                   # false : le nœud ne lance rien (`mutation-skipped`), les entrées du profil restent
 timeout_seconds = 3600           # le budget de tous les outils, lancés en arrière-plan ; encore en cours après, escalade

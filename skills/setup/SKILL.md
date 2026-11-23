@@ -100,7 +100,7 @@ Maestro's own context is watched too: when it passes `restart_at_context_percent
 python3 <path>/scripts/ballet_maestro.py maestro
 ```
 
-It prints `maestro created: terminal <handle>` or `maestro already there: …`. An Orca terminal titled `maestro` runs `claude --remote-control 'ballet maestro' '/ballet:maestro'`: a real Claude session, which takes the lease on the mailbox and sleeps on it, reachable from the Claude app (Mac or phone) under the name **ballet maestro** (Remote Control). Run this step after the mailbox and the Monitor. It creates nothing when its terminal is alive, **and nothing either when a Maestro session already holds a live lease** (it says so: two sessions would fight over the mailbox). Relay that message; never `claim --take-over` yourself, that is the Director's yes to give. Run it only on a machine where `claude` is installed and logged in (step 1 checked it).
+It prints `maestro created: terminal <handle>` or `maestro already there: …`. An Orca terminal titled `maestro` runs `claude --remote-control 'ballet maestro' '/ballet:maestro'` with a lean base (no MCP server, only the tools it needs, a one-hour prompt cache): a real Claude session, which takes the lease on the mailbox and sleeps on it, reachable from the Claude app (Mac or phone) under the name **ballet maestro** (Remote Control). Run this step after the mailbox and the Monitor. It creates nothing when its terminal is alive, **and nothing either when a Maestro session already holds a live lease** (it says so: two sessions would fight over the mailbox). Relay that message; never `claim --take-over` yourself, that is the Director's yes to give. Run it only on a machine where `claude` is installed and logged in (step 1 checked it).
 
 ## 7. Report
 

@@ -71,8 +71,10 @@ rôle attendu d'envoyer son message), `DECISION: ask the Director (still idle af
 ou `DECISION: wait (<élément> is <état> now)` quand le Conductor n'est plus `running` (il a fini, ou a été arrêté entre-temps).
 
 `maestro` lance la session Maestro elle-même, comme `monitor` lance le Monitor : un terminal Orca `maestro` où tourne
-`claude --remote-control 'ballet maestro' '/ballet:maestro'` (le prompt avant les options ; `BALLET_MAESTRO_COMMAND` remplace
-`claude`, pour essayer sans tokens ; `BALLET_HOME` est transmis s'il est posé). Il ne fait rien quand le terminal noté vit
+`CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' '/ballet:maestro' --strict-mcp-config --mcp-config
+'{"mcpServers":{}}' --tools Bash,Read,Skill` (le prompt avant les options ; le socle allégé et le cache d'une heure viennent
+de `ballet_session.py` ; `BALLET_MAESTRO_COMMAND` remplace `claude`, pour essayer sans tokens ; `BALLET_HOME` est transmis
+s'il est posé). Il ne fait rien quand le terminal noté vit
 encore, ni quand une session Maestro tient un bail vivant (deux sessions se disputeraient la boîte : il le dit et ne crée
 rien). La session créée prend elle-même le bail (`claim`) ; la rouvrir ailleurs se heurte à ce bail, et `--take-over` ne
 se fait que sur le oui du Director.
@@ -113,6 +115,7 @@ import ballet_db
 import ballet_legacy
 import ballet_program
 import ballet_runtime
+import ballet_session
 import ballet_state
 
 CONFIG_NAME = "maestro.toml"
@@ -216,12 +219,13 @@ def maestro(orca, state=None):
 
 
 def _maestro_command():
-    """`<agent> --remote-control 'ballet maestro' '/ballet:maestro'` : le prompt avant les options, comme pour un Conductor ;
-    avec `BALLET_HOME` quand il est posé : la session lit le même dossier d'état."""
+    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control 'ballet maestro' '/ballet:maestro' <socle allégé>` : le prompt avant
+    les options, comme pour un Conductor ; avec `BALLET_HOME` quand il est posé : la session lit le même dossier d'état."""
     agent = shlex.split(os.environ.get(MAESTRO_COMMAND_VARIABLE) or DEFAULT_AGENT)
-    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT])
+    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT,
+                          *ballet_session.lean_options(ballet_session.MAESTRO_TOOLS)])
     home = os.environ.get("BALLET_HOME")
-    return f"BALLET_HOME={shlex.quote(home)} {command}" if home else command
+    return ballet_session.with_environment(command, {"BALLET_HOME": home} if home else {})
 
 
 def add_project(alias, path, state=None):

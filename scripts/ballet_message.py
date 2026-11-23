@@ -41,11 +41,12 @@ def verdict_of(text):
 
 
 def notes_of(text):
-    """Les notes d'un verdict : les points de sa section `## Notes`, que le Dancer prend en un commit."""
+    """Les notes d'un verdict : les points de sa section `## Notes` (« none » n'en est pas une)."""
     section = re.search(r"^## Notes[ \t]*\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
     if not section:
         return []
-    return [item.strip() for item in re.findall(r"^(?:-|\d+\.)\s+(.+)$", section.group(1), re.MULTILINE)]
+    items = [item.strip() for item in re.findall(r"^(?:-|\d+\.)\s+(.+)$", section.group(1), re.MULTILINE)]
+    return [item for item in items if item.strip(" .*_").lower() != "none"]
 
 
 def main(argv):
