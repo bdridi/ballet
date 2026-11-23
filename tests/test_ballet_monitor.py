@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -16,6 +17,7 @@ import ballet_maestro  # noqa: E402
 import ballet_monitor  # noqa: E402
 import ballet_program  # noqa: E402
 import ballet_runtime  # noqa: E402
+import ballet_store  # noqa: E402
 from test_ballet_maestro import FakeOrca  # noqa: E402
 
 
@@ -440,6 +442,190 @@ class BalletMonitorTest(unittest.TestCase):
         self.turn()
         self.running_conductor(terminal="term_10")
         self.assertEqual(self.turn().told, ["antimurphy#12 · gone"])
+
+    # --- un Conductor qui n'écrit plus ---
+
+    def play(self, minutes_ago=0, scope="rehearsal", key="antimurphy#12", name="FEAT-001.1"):
+        """Un Conductor `running` qui joue une Rehearsal (ou un Workshop) ouverte depuis `minutes_ago` : le tour du Dancer commence."""
+        self.running_conductor(key)
+        self.orca.terminals.append("term_9")
+        self.at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+        self.item = "#" + key.partition("#")[2]
+        self.log(scope, name, "begin", {"item": "#12"})
+        self.log(scope, name, "handoff", {"role": "dancer", "how": "start", "text": "go"})
+
+    def log(self, scope, name, event, detail=None, minutes_ago=None):
+        when = self.at if minutes_ago is None else datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+        with ballet_db.writing() as connection:
+            ballet_store.log_in(connection, "antimurphy", scope, name, event, detail or {}, conductor=self.item,
+                                at=when.isoformat(timespec="seconds"))
+
+    def age(self, minutes):
+        """Tout le journal vieillit de `minutes` : le temps passe sans rien écrire."""
+        with ballet_db.writing() as connection:
+            for row in connection.execute("SELECT id, at FROM events").fetchall():
+                older = datetime.fromisoformat(row["at"]) - timedelta(minutes=minutes)
+                connection.execute("UPDATE events SET at = ? WHERE id = ?", (older.isoformat(timespec="seconds"), row["id"]))
+
+    def idle_marks(self):
+        with ballet_db.reading() as connection:
+            return [json.loads(row["data"]) for row in connection.execute("SELECT data FROM events WHERE kind = 'idle' ORDER BY id")]
+
+    def idle_after(self, minutes):
+        config = ballet_maestro.read_config()
+        config["conductors"] = {"idle_after_minutes": minutes}
+        ballet_maestro.write_config(config)
+
+    def test_pas_d_avis_avant_le_seuil(self):
+        self.play(minutes_ago=19)
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(self.idle_marks(), [])
+
+    def test_l_avis_1_dit_les_faits_en_normal_et_laisse_une_marque_au_journal(self):
+        self.play(minutes_ago=25)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+        subject, priority, body = self.sent()[0]
+        self.assertEqual((subject, priority), ("antimurphy#12 · idle", "normal"))
+        self.assertRegex(body, r"^Rehearsal FEAT-001\.1 · idle notice 1 of 2 · no event for 25 min since \S+ "
+                               r"· waiting on the dancer \(turn started \S+\)$")
+        self.assertEqual(self.idle_marks(), [{"notice": 1, "silent_minutes": 25, "since": self.at.isoformat(timespec="seconds"),
+                                              "role": "dancer"}])
+
+    def test_le_corps_ne_donne_aucune_instruction(self):
+        self.play(minutes_ago=25)
+        self.turn()
+        for word in ("nudge", "remind", "stop", "ask"):
+            self.assertNotIn(word, self.sent()[0][2].casefold())
+
+    def test_pas_de_doublon_au_tour_suivant(self):
+        self.play(minutes_ago=25)
+        self.turn()
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(len(self.idle_marks()), 1)
+
+    def test_l_avis_2_vient_un_intervalle_apres_l_avis_1_en_haute_priorite(self):
+        self.play(minutes_ago=25)
+        self.turn()
+        self.age(10)
+        self.assertEqual(self.turn().told, [])
+        self.age(11)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+        subject, priority, body = self.sent()[1]
+        self.assertEqual(priority, "high")
+        self.assertIn("idle notice 2 of 2 · no event for 46 min", body)
+
+    def test_jamais_plus_de_deux_avis_par_episode(self):
+        self.play(minutes_ago=25)
+        self.turn()
+        self.age(21)
+        self.turn()
+        self.age(60)
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual([mark["notice"] for mark in self.idle_marks()], [1, 2])
+
+    def test_une_preuve_ouverte_n_est_pas_un_silence(self):
+        self.play(minutes_ago=25)
+        self.log("rehearsal", "FEAT-001.1", "proof-start", {"command": "make test"}, minutes_ago=24)
+        self.assertEqual(self.turn().told, [])
+
+    def test_une_mutation_ouverte_n_est_pas_un_silence(self):
+        self.play(minutes_ago=25)
+        self.log("rehearsal", "FEAT-001.1", "mutation-start", {"tool": "mutmut"}, minutes_ago=24)
+        self.assertEqual(self.turn().told, [])
+
+    def test_l_attente_du_director_n_est_pas_un_silence(self):
+        self.play(minutes_ago=25)
+        self.log("rehearsal", "FEAT-001.1", "escalate", {"reason": "Which name?"}, minutes_ago=24)
+        self.assertEqual(self.turn().told, [])
+
+    def test_la_preuve_finie_le_silence_compte_de_nouveau(self):
+        self.play(minutes_ago=60)
+        self.log("rehearsal", "FEAT-001.1", "proof-start", {"command": "make test"}, minutes_ago=59)
+        self.log("rehearsal", "FEAT-001.1", "proof-end", {"passed": True}, minutes_ago=30)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+        self.assertIn("no event for 30 min", self.sent()[0][2])
+
+    def test_une_nouvelle_activite_rearme_l_episode(self):
+        self.play(minutes_ago=25)
+        self.turn()
+        self.age(5)
+        self.log("rehearsal", "FEAT-001.1", "message", {"from": "dancer", "type": "question", "to": "choreographer"}, minutes_ago=0)
+        self.assertEqual(self.turn().told, [])
+        self.age(25)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+        self.assertIn("idle notice 1 of 2", self.sent()[1][2])
+        self.assertEqual([mark["notice"] for mark in self.idle_marks()], [1, 1])
+
+    def test_une_relance_n_est_pas_de_l_activite(self):
+        self.play(minutes_ago=25)
+        self.turn()
+        self.age(21)
+        self.log("rehearsal", "FEAT-001.1", "handoff", {"role": "dancer", "how": "nudge", "text": "hurry"}, minutes_ago=1)
+        self.log("rehearsal", "FEAT-001.1", "nudge", {"role": "dancer"}, minutes_ago=1)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+        self.assertIn("idle notice 2 of 2 · no event for 46 min", self.sent()[1][2])
+
+    def test_l_activite_d_un_enfant_compte(self):
+        self.play(minutes_ago=60)
+        self.log("rehearsal", "FEAT-001.1", "message", {"from": "dancer", "type": "question", "to": "choreographer"}, minutes_ago=5)
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_seuil_de_zero_ne_dit_jamais_rien(self):
+        self.play(minutes_ago=600)
+        self.idle_after(0)
+        self.assertEqual(self.turn().told, [])
+
+    def test_le_seuil_vient_de_la_config(self):
+        self.play(minutes_ago=5)
+        self.idle_after(3)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+
+    def test_un_seuil_invalide_est_une_erreur_du_tour_qui_n_arrete_pas_le_reste(self):
+        self.play(minutes_ago=25)
+        self.idle_after(-2)
+        report = self.turn()
+        self.assertEqual(report.told, [])
+        self.assertIn("idle_after_minutes", report.errors[0])
+
+    def test_sans_tour_ouvert_le_corps_dit_qu_aucun_worker_n_est_attendu(self):
+        self.play(minutes_ago=25)
+        self.log("rehearsal", "FEAT-001.1", "message", {"from": "dancer", "type": "report"}, minutes_ago=24)
+        self.turn()
+        self.assertTrue(self.sent()[0][2].endswith("waiting on no worker"))
+
+    def test_le_role_attendu_est_celui_du_tour_ouvert_le_plus_recent(self):
+        self.play(minutes_ago=40)
+        self.log("rehearsal", "FEAT-001.1", "message", {"from": "dancer", "type": "report"}, minutes_ago=30)
+        self.log("rehearsal", "FEAT-001.1", "handoff", {"role": "critic", "how": "start", "text": "review"}, minutes_ago=29)
+        self.turn()
+        self.assertRegex(self.sent()[0][2], r"waiting on the critic \(turn started ")
+
+    def test_un_workshop_idle_est_signale_comme_tel(self):
+        self.play(minutes_ago=25, scope="workshop", name="OPP-75")
+        self.turn()
+        self.assertTrue(self.sent()[0][2].startswith("Workshop OPP-75 · idle notice 1 of 2"))
+
+    def test_un_conductor_qui_ne_tourne_plus_n_est_pas_surveille(self):
+        self.play(minutes_ago=25)
+        ballet_conductors.note_events([{"type": "status", "from": "term_9", "subject": "antimurphy#12 · done"}])
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_conductor_sans_jeu_ouvert_n_est_pas_signale(self):
+        self.running_conductor()
+        self.orca.terminals.append("term_9")
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_envoi_qui_echoue_n_est_pas_note_et_revient_au_tour_suivant(self):
+        self.play(minutes_ago=25)
+        self.orca.send_failures = 1
+        self.assertEqual(len(self.turn().errors), 1)
+        self.assertEqual(self.idle_marks(), [])
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+
+    def test_chaque_conductor_idle_a_son_avis(self):
+        self.play(minutes_ago=25)
+        self.play(minutes_ago=25, scope="workshop", key="antimurphy#OPP-9", name="OPP-9")
+        self.assertEqual(sorted(self.turn().told), ["antimurphy#12 · idle", "antimurphy#OPP-9 · idle"])
 
     # --- le contexte de Maestro ---
 

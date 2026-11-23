@@ -53,6 +53,38 @@ def worker_dispatch(message):
     return payload(message).get("dispatchId") or ""
 
 
+def worker_role(message, dispatches, handles):
+    """Le rôle du worker qui a écrit le message, vide s'il n'est pas l'un des siens (`dispatches` et `handles` : rôle → dispatch,
+    rôle → handle). Orca rouvre un worker qui a fini sous un nouveau dispatch à chaque message qu'on lui envoie (vu sur
+    FEAT-009, Orca 1.4.259) : le dispatch ne suffit pas. On le reconnaît donc à son dispatch, sinon à son handle, qui ne change
+    pas, sinon à la signature Ballet d'un rôle qui a un worker ici et dont le handle connu n'est pas un autre."""
+    dispatch, handle = worker_dispatch(message), worker_handle(message)
+    found = _key_of(dispatches, dispatch) or _key_of(handles, handle)
+    if found:
+        return found
+    signed = ballet_sender(message)
+    if signed in dispatches and dispatches[signed] and (not handle or handles.get(signed, "") in ("", handle)):
+        return signed
+    return ""
+
+
+def worker_handle(message):
+    """Le handle stable du worker qui écrit (`structworker_…`) ; vide pour un message écrit au nom d'un dispatch, d'un Run
+    ou d'un terminal (une question posée par `ask`, le réveil de la mutation)."""
+    handle = message.get("from_handle") or ""
+    return "" if handle.startswith(("dispatch:", "run:", "term_")) else handle
+
+
+def ballet_sender(message):
+    """Le rôle qui signe le message Ballet (le `from` de sa ligne d'en-tête), vide sans en-tête Ballet."""
+    first = (message.get("body") or "").split("\n", 1)[0]
+    try:
+        header = json.loads(first)
+    except json.JSONDecodeError:
+        return ""
+    return header.get("from", "") if isinstance(header, dict) and header.get("ballet") == "message" else ""
+
+
 def payload(message):
     """Orca rend le payload en JSON dans une chaîne, ou déjà décodé, ou pas du tout."""
     found = message.get("payload")
@@ -91,6 +123,10 @@ def _worktree_of(branch, porcelain):
         elif line == f"branch refs/heads/{branch}":
             return path
     return None
+
+
+def _key_of(mapping, value):
+    return next((key for key, known in mapping.items() if value and known == value), "")
 
 
 def _by_id(messages, message_id):

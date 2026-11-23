@@ -990,6 +990,85 @@ class BalletMaestroTest(unittest.TestCase):
             with self.subTest(value=wrong), self.assertRaises(ballet_maestro.MaestroError):
                 ballet_maestro.close_delay_minutes({"conductors": {"close_finished_after_minutes": wrong}})
 
+    # --- un Conductor qui n'écrit plus ---
+
+    def idle_message(self, notice=1, key="antimurphy#12"):
+        return {"type": "status", "subject": f"{key} · idle", "from": "term_monitor",
+                "body": f"Rehearsal FEAT-001.1 · idle notice {notice} of 2 · no event for 25 min since x · waiting on the dancer (turn started y)"}
+
+    def running_conductor(self, kind="rehearsal", terminal="term_9"):
+        ballet_conductors.record_launch("antimurphy#12", "antimurphy", "12", kind, terminal)
+
+    def test_l_avis_1_d_un_conductor_idle_se_relance(self):
+        owner = self.claimed()
+        self.running_conductor()
+        self.orca.batches = [[self.idle_message(1)]]
+        self.assertTrue(ballet_maestro.wait(owner, self.orca).endswith("waiting on the dancer (turn started y)\nDECISION: nudge"))
+
+    def test_l_avis_2_demande_au_director_et_lui_propose_d_arreter_le_conductor(self):
+        self.running_conductor()
+        self.assertEqual(ballet_maestro.idle_decision("antimurphy#12", self.idle_message(2)["body"]),
+                         "ask the Director (still idle after a reminder: offer to stop it)")
+
+    def test_un_conductor_qui_ne_tourne_plus_n_est_pas_relance(self):
+        self.running_conductor()
+        ballet_conductors.note_events([{"type": "status", "from": "term_9", "subject": "antimurphy#12 · done"}])
+        self.assertEqual(ballet_maestro.idle_decision("antimurphy#12", self.idle_message(1)["body"]),
+                         "wait (antimurphy#12 is finished now)")
+        self.assertEqual(ballet_maestro.idle_decision("antimurphy#99", self.idle_message(1)["body"]),
+                         "wait (antimurphy#99 is not in the registry anymore)")
+
+    def test_la_decision_idle_s_ecrit_aussi_dans_le_recap(self):
+        owner = self.claimed()
+        self.running_conductor()
+        self.orca.history = [{**self.idle_message(2), "id": "m1", "run_id": self.runtime()["mailbox_run"], "sequence": 1}]
+        self.assertIn("DECISION: ask the Director (still idle after a reminder", ballet_maestro.recap(owner, self.orca))
+
+    def test_nudge_tape_le_texte_fixe_dans_le_terminal_d_une_rehearsal(self):
+        self.running_conductor("rehearsal")
+        self.orca.terminals.append("term_9")
+        self.assertEqual(ballet_maestro.nudge("antimurphy#12", self.orca), "nudged antimurphy#12 (terminal term_9)")
+        send = self.orca.ran("terminal", "send")[0]
+        script = Path(ballet_maestro.__file__).resolve().with_name("ballet_rehearsal.py")
+        self.assertEqual(send[send.index("--terminal") + 1], "term_9")
+        self.assertEqual(send[send.index("--text") + 1],
+                         f"Ballet: your Rehearsal has been idle for a while. Run `python3 {script} nudge` now, then follow its NEXT.")
+        self.assertIn("--enter", send)
+
+    def test_nudge_d_un_workshop_vise_le_script_du_workshop(self):
+        self.running_conductor("workshop")
+        self.orca.terminals.append("term_9")
+        ballet_maestro.nudge("antimurphy#12", self.orca)
+        text = (lambda send: send[send.index("--text") + 1])(self.orca.ran("terminal", "send")[0])
+        self.assertIn("your Workshop has been idle", text)
+        self.assertIn("ballet_workshop.py nudge", text)
+
+    def test_nudge_refuse_un_conductor_inconnu_sans_genre_ou_au_terminal_mort(self):
+        with self.assertRaises(ballet_maestro.MaestroError):
+            ballet_maestro.nudge("antimurphy#12", self.orca)
+        self.known_conductor()
+        with self.assertRaisesRegex(ballet_maestro.MaestroError, "not a Conductor Maestro launched"):
+            ballet_maestro.nudge("antimurphy#12", self.orca)
+        self.running_conductor()
+        with self.assertRaisesRegex(ballet_maestro.MaestroError, "is gone"):
+            ballet_maestro.nudge("antimurphy#12", self.orca)
+        self.assertEqual(self.orca.ran("terminal", "send"), [])
+
+    def test_la_ligne_de_commande_nudge(self):
+        self.running_conductor()
+        self.orca.terminals.append("term_9")
+        self.assertEqual(self.run_main("nudge", "antimurphy#12")[0], 0)
+        self.assertEqual(len(self.orca.ran("terminal", "send")), 1)
+        self.assertEqual(self.run_main("nudge")[0], 2)
+
+    def test_le_delai_d_inactivite_est_un_entier_positif_ou_nul_et_20_par_defaut(self):
+        self.assertEqual(ballet_maestro.idle_minutes({}), 20)
+        self.assertEqual(ballet_maestro.idle_minutes({"conductors": {"idle_after_minutes": 0}}), 0)
+        for wrong in (-1, "20", True, 2.5):
+            with self.subTest(value=wrong), self.assertRaises(ballet_maestro.MaestroError) as refused:
+                ballet_maestro.idle_minutes({"conductors": {"idle_after_minutes": wrong}})
+            self.assertIn("idle_after_minutes", str(refused.exception))
+
     # --- le contexte de Maestro ---
 
     def test_le_seuil_de_redemarrage_est_un_pourcentage_de_0_a_100_et_30_par_defaut(self):

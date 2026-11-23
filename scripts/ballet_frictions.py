@@ -4,7 +4,7 @@ Calculées sans LLM à la fin de la Rehearsal (ou du Workshop), à partir de son
 (le journal de la base, `ballet_store.journal_of`), puis gardées dans son état (`frictions`) et dans le journal (événement `frictions`) :
 la Scène les montre, et le `done` de la session les donne à Maestro. Chaque friction :
 
-    kind    escalation | rejections | red_proofs | red_mutations | refused_reports | nudges | policy | diff
+    kind    escalation | rejections | red_proofs | red_mutations | refused_reports | nudges | idle | policy | diff
     count   combien de fois
     text    la ligne lisible, en anglais (les agents la lisent)
 
@@ -24,6 +24,7 @@ def of_rehearsal(state, entries):
     frictions += _counted("red_mutations", state.get("red_mutations", 0), "red mutation")
     frictions += _counted("refused_reports", state.get("refused_reports", 0), "Dancer report refused", plural="Dancer reports refused")
     frictions += _nudges(entries)
+    frictions += _idle(entries)
     frictions += _policy(state.get("violations", {}))
     frictions += _oversized(state.get("size", {}))
     return {"seconds": _seconds(entries), "frictions": frictions}
@@ -34,6 +35,7 @@ def of_workshop(state, entries):
     frictions = _escalations(entries)
     frictions += _counted("refused_reports", state.get("refused_reports", 0), "Dramaturg report refused", plural="Dramaturg reports refused")
     frictions += _nudges(entries)
+    frictions += _idle(entries)
     frictions += _policy({"dramaturg": state.get("violations", 0)})
     return {"seconds": _seconds(entries), "frictions": frictions}
 
@@ -62,6 +64,14 @@ def _counted(kind, count, singular, plural=None):
 def _nudges(entries):
     count = sum(1 for entry in entries if entry.get("event") == "handoff" and entry.get("detail", {}).get("how") == "nudge")
     return _counted("nudges", count, "worker reminded to send its worker_done", plural="workers reminded to send their worker_done")
+
+
+def _idle(entries):
+    """Les avis `idle` du Monitor : le Conductor est resté sans nouvelles (marques `idle` du journal)."""
+    count = sum(1 for entry in entries if entry.get("event") == "idle")
+    if not count:
+        return []
+    return [{"kind": "idle", "count": count, "text": f"silent {count} time{'s' if count > 1 else ''}: Monitor idle notice{'s' if count > 1 else ''}"}]
 
 
 def _policy(violations):

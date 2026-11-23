@@ -12,6 +12,7 @@
     python3 ballet_maestro.py ready                          # les éléments prêts sans Conductor, dans l'ordre de la file, avec la décision
     python3 ballet_maestro.py pause | resume                 # plus rien ne part seul (`~/.ballet/auto_launch_paused`) | tout repart
     python3 ballet_maestro.py tell <projet>#<élément> <texte>   # la réponse du Director, au terminal du Conductor
+    python3 ballet_maestro.py nudge <projet>#<élément>       # relance un Conductor silencieux : il lance `nudge` sur sa Rehearsal ou son Workshop
 
 La config vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier) ; seuls `project add` et le Director
 l'écrivent :
@@ -23,6 +24,7 @@ l'écrivent :
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
     auto_launch = ["Task", "Bug"]    les types que Maestro lance seul ; vide ou absent : il demande toujours
+    max_running = 2                  Conductors vivants de ce projet (facultatif ; absent : seul le plafond global compte)
 
     [limits]                  les plafonds de `ballet_launch.py` (facultatif ; ces valeurs par défaut)
     max_running = 3           Conductors vivants en même temps, tous projets confondus
@@ -31,6 +33,8 @@ l'écrivent :
     [conductors]              (facultatif ; cette valeur par défaut)
     close_finished_after_minutes = 10   un Conductor fini dont le terminal reste ouvert au-delà : le Monitor le signale
                                         (`<projet>#<élément> · finished`) et Maestro le ferme ; 0 : jamais
+    idle_after_minutes = 20             un Conductor dont la Rehearsal (ou le Workshop) n'a rien écrit depuis ce temps : le
+                                        Monitor le signale (`<projet>#<élément> · idle`), au plus deux fois ; 0 : jamais
 
 L'état, lui, vit dans la base (`ballet_runtime.py`, OPP-79) : la boîte (un terminal Orca vide, à elle seule, et la Run
 créée `--from` lui ; la Run d'une boîte recréée, que `recap` relit une dernière fois puis oublie), le bail, les terminaux de
@@ -59,6 +63,12 @@ fois (par session) `maestro · context over threshold`, des faits seulement ; `w
 `DECISION: wait (restart already scheduled)` quand un redémarrage est déjà demandé, ou `DECISION: wait (it was about
 session <id>, Maestro is session <id> now)` pour l'événement d'une session qui n'est plus Maestro (un `recap` relit celui
 qui a causé le redémarrage).
+
+Sous chaque `status` `<projet>#<élément> · idle` du Monitor (un Conductor dont la Rehearsal ou le Workshop n'écrit plus, OPP-75),
+`wait` et `recap` écrivent `DECISION: nudge` à l'avis 1 (Maestro lance `ballet_maestro.py nudge <projet>#<élément>` : un texte
+fixe tapé dans le terminal du Conductor, qui lance alors la commande `nudge` de son script, déterministe : elle rappelle au
+rôle attendu d'envoyer son message), `DECISION: ask the Director (still idle after a reminder: offer to stop it)` à l'avis 2,
+ou `DECISION: wait (<élément> is <état> now)` quand le Conductor n'est plus `running` (il a fini, ou a été arrêté entre-temps).
 
 `maestro` lance la session Maestro elle-même, comme `monitor` lance le Monitor : un terminal Orca `maestro` où tourne
 `claude --remote-control 'ballet maestro' '/ballet:maestro'` (le prompt avant les options ; `BALLET_MAESTRO_COMMAND` remplace
@@ -111,10 +121,13 @@ MAILBOX_TITLE = "maestro-mailbox"
 MAILBOX_OBJECTIVE = "Maestro's mailbox: the Conductors and the Monitor write here, Maestro reads"
 ANNOUNCED = ("escalate", "done")
 DEFAULT_CLOSE_MINUTES = 10
+DEFAULT_IDLE_MINUTES = 20
 DEFAULT_RESTART_PERCENT = 30
 DEFAULT_CONTEXT_WINDOW = 1_000_000   # mesuré par `claude -p` pour les modèles 5.5 (spike 0003) ; le transcript ne la dit pas
 SESSION_VARIABLE = "CLAUDE_CODE_SESSION_ID"
 FINISHED_SUBJECT = re.compile(r"^(\S+#\S+) · finished$")   # le Monitor : un Conductor fini, terminal encore ouvert
+IDLE_SUBJECT = re.compile(r"^(\S+#\S+) · idle$")               # le Monitor : la Rehearsal ou le Workshop d'un Conductor n'écrit plus
+IDLE_NOTICE = re.compile(r"\bidle notice (\d+) of \d+")
 CONTEXT_SUBJECT = "maestro · context over threshold"          # le Monitor : le contexte de Maestro a passé le seuil
 SESSION_IN_BODY = re.compile(r"\bsession (\S+)\s*$")
 TERMINAL_IN_BODY = re.compile(r"\bterminal (term_\S+?)[,.\s]")
@@ -132,8 +145,9 @@ MAESTRO_NAME = "ballet maestro"          # le nom Remote Control de la session, 
 MAESTRO_PROMPT = "/ballet:maestro"
 MAESTRO_COMMAND_VARIABLE = "BALLET_MAESTRO_COMMAND"
 DEFAULT_AGENT = "claude"
+NUDGEABLE = ("rehearsal", "workshop")   # les genres de Conductor qui ont une commande `nudge`
 USAGE = ("usage: mailbox | monitor | maestro | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
-         "| recap --owner <token> | status | ready | pause | resume | tell <project>#<item> <text>")
+         "| recap --owner <token> | status | ready | pause | resume | tell <project>#<item> <text> | nudge <project>#<item>")
 
 
 class MaestroError(Exception):
@@ -461,11 +475,33 @@ def _is_running(line):
 def tell(target, text, orca, state=None):
     """La réponse du Director, tapée dans le terminal du Conductor de `<projet>#<élément>` : le Conductor l'écrit en
     message Ballet et la reçoit lui-même. Un élément inconnu, ou un terminal disparu, est refusé."""
+    return _type_into_terminal(target, f"Director answers: {text}", orca, state)
+
+
+def nudge(target, orca, state=None):
+    """Relance un Conductor silencieux : un texte fixe, tapé dans son terminal, lui dit de lancer la commande `nudge` du
+    script de son jeu (la Rehearsal ou le Workshop). C'est la commande qui, de façon déterministe, rappelle au rôle attendu
+    d'envoyer son message. Un élément que Maestro n'a pas lancé (son genre est inconnu) est refusé."""
+    line = ballet_conductors.read(state).get(target)
+    script = _script_of(target, line)
+    text = (f"Ballet: your {line['kind'].capitalize()} has been idle for a while. "
+            f"Run `python3 {script} nudge` now, then follow its NEXT.")
+    return _type_into_terminal(target, text, orca, state, verb="nudged")
+
+
+def _script_of(target, line):
+    """Le script de Conductor du genre de la ligne, par son chemin absolu."""
+    if not line or line.get("kind") not in NUDGEABLE:
+        raise MaestroError(f"cannot nudge {target}: it is not a Conductor Maestro launched (kind rehearsal or workshop)")
+    return Path(__file__).resolve().with_name(f"ballet_{line['kind']}.py")
+
+
+def _type_into_terminal(target, text, orca, state, verb="told"):
     handle = _known_terminal(target, ballet_conductors.read(state))
     if not _terminal_alive(handle, orca):
         raise MaestroError(f"the terminal {handle} of {target} is gone: the Conductor is not running anymore")
-    orca(["terminal", "send", "--terminal", handle, "--text", f"Director answers: {text}", "--enter"])
-    return f"told {target} (terminal {handle})"
+    orca(["terminal", "send", "--terminal", handle, "--text", text, "--enter"])
+    return f"{verb} {target} (terminal {handle})"
 
 
 def _known_terminal(target, registry):
@@ -669,7 +705,8 @@ def _message_text(message, config, state, tag=""):
 
 def _body_with_decisions(message, config, state):
     """Le corps du message ; sous chaque élément d'un `status` `· ready` du Monitor, la décision de la règle de lancement ;
-    sous un `· finished`, celle de fermer le Conductor ; sous un `context over threshold`, celle de redémarrer."""
+    sous un `· finished`, celle de fermer le Conductor ; sous un `· idle`, celle de le relancer ; sous un `context over
+    threshold`, celle de redémarrer."""
     import ballet_monitor
     body = message.get("body", "")
     if message.get("type") == "status" and message.get("subject") == CONTEXT_SUBJECT:
@@ -677,6 +714,9 @@ def _body_with_decisions(message, config, state):
     finished = FINISHED_SUBJECT.match(message.get("subject", ""))
     if message.get("type") == "status" and finished:
         return f"{body}\nDECISION: {close_decision(finished.group(1), _terminal_named(body), state)}"
+    idle = IDLE_SUBJECT.match(message.get("subject", ""))
+    if message.get("type") == "status" and idle:
+        return f"{body}\nDECISION: {idle_decision(idle.group(1), body, state)}"
     project = ballet_monitor.project_of_ready_subject(message.get("subject", ""))
     if message.get("type") != "status" or not project:
         return body
@@ -703,6 +743,21 @@ def close_decision(key, terminal, state=None):
     if line["terminal"] != terminal:
         return f"ask the Director ({key} now runs in {line['terminal']}, not {terminal})"
     return "close"
+
+
+def idle_decision(key, body, state=None):
+    """`nudge` à l'avis 1, `ask the Director (…)` à l'avis 2, `wait (<raison>)` quand le Conductor ne tourne plus. C'est ici
+    que cela se décide : l'agent ne fait que relayer le verdict."""
+    line = ballet_conductors.read(state).get(key)
+    if not line:
+        return f"wait ({key} is not in the registry anymore)"
+    current = ballet_conductors.state_of(line)
+    if current != ballet_conductors.RUNNING:
+        return f"wait ({key} is {current} now)"
+    found = IDLE_NOTICE.search(body)
+    if found and found.group(1) == "1":
+        return "nudge"
+    return "ask the Director (still idle after a reminder: offer to stop it)"
 
 
 def restart_decision(body, runtime):
@@ -739,6 +794,14 @@ def close_delay_minutes(config):
     value = config.get("conductors", {}).get("close_finished_after_minutes", DEFAULT_CLOSE_MINUTES)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise MaestroError(f"[conductors] close_finished_after_minutes in {CONFIG_NAME} must be a whole number, 0 or more, not {value!r}")
+    return value
+
+
+def idle_minutes(config):
+    """`[conductors] idle_after_minutes` : un entier, 0 ou plus ; 20 sans la clé."""
+    value = config.get("conductors", {}).get("idle_after_minutes", DEFAULT_IDLE_MINUTES)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise MaestroError(f"[conductors] idle_after_minutes in {CONFIG_NAME} must be a whole number, 0 or more, not {value!r}")
     return value
 
 
@@ -963,6 +1026,8 @@ def _command(arguments, orca):
         return resume()
     if arguments[:1] == ["tell"] and len(arguments) >= 3:
         return tell(arguments[1], " ".join(arguments[2:]), orca)
+    if arguments[:1] == ["nudge"] and len(arguments) == 2:
+        return nudge(arguments[1], orca)
     raise UsageError(USAGE)
 
 

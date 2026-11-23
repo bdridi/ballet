@@ -168,6 +168,7 @@ The Dancer asks when the plan is not enough. It waits, awake, in the same worktr
 3. An answer that changes the plan: rewrite it with `plan <issue> <file>`, with one more line in *Amendments*, and say so in the answer.
 4. An answer that needs an ADR or a rule in `AGENTS.md`: write it on the branch you were given, then `git status` and stage **only your paths** (`git add <ADR> AGENTS.md`), never `-a` nor `.`: the Dancer's uncommitted work stays out of your commit. Name the commit in the answer.
 5. A product question in disguise (what the feature means): it is the Dramaturg's; say so in the answer.
+6. Once the Dancer has the branch, your only message is an `answer`: never a `report` (the plan is already being played; Ballet sends a report back once, then escalates). The worktree's uncommitted files are the Dancer's work in progress: never stash, reset, revert or save them, even if a later message says the worktree must be clean.
 
 ## When consulted during a Workshop
 

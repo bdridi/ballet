@@ -22,7 +22,11 @@ n'est pas atteint ; le plafond de lancements du jour non plus ; aucun bloqueur d
 « Blocked by » de GitHub, lus par `ballet_program.dependencies_of` : un élément ne part que si tous ses bloqueurs sont
 fermés, même sur la demande du Director). `--ignore-blockers` passe outre, sur le oui explicite du Director seulement ;
 il ne s'applique qu'à un élément-issue (`#12`) : `FEAT-002`, sans issue, n'a pas de lien à lire. Les plafonds sont ceux
-de la table `[limits]` de `maestro.toml` (`max_running`, `max_per_day`).
+de la table `[limits]` de `maestro.toml` (`max_running`, `max_per_day`) ; une clé facultative `max_running` dans
+`[projects.<alias>]` borne en plus les Conductors vivants de ce projet (OPP-84 : un projet dont les preuves se disputent
+une ressource peut la fixer à 1 sans freiner les autres), et le refus nomme les Conductors du projet qui tournent.
+Les Rehearsals d'un même projet peuvent tourner en parallèle : leurs preuves passent l'une après l'autre (verrou
+`proof.lock`, `ballet_rehearsal.py`).
 
 Le lancement écrit sa ligne dans le registre (`ballet_conductors.py`) : projet, élément, genre, terminal, début. L'URL
 Remote Control de la session s'y ajoute si on la lit dans le terminal dans les secondes qui suivent ; sinon elle reste vide.
@@ -241,6 +245,7 @@ def _check_guardrails(launch, orca, state):
     _refuse_if_running_in_registry(launch, registry, alive)
     _refuse_if_session_open(launch)
     _refuse_if_too_many_running(registry, alive, config)
+    _refuse_if_too_many_running_in_project(launch, registry, alive, config)
     _refuse_if_too_many_today(state, config)
     _refuse_if_blocked(launch)
 
@@ -278,6 +283,17 @@ def _refuse_if_too_many_running(registry, alive, config):
                           f"([limits] max_running in {ballet_maestro.CONFIG_NAME})")
 
 
+def _refuse_if_too_many_running_in_project(launch, registry, alive, config):
+    """Le plafond propre au projet (`[projects.<alias>] max_running`, OPP-84), en plus du plafond global."""
+    limit = _project_limit(config, launch.project)
+    if limit is None:
+        return
+    running = sorted(key for key, line in registry.items() if line["project"] == launch.project and _is_running(line, alive))
+    if len(running) >= limit:
+        raise LaunchError(f"{len(running)} Conductor(s) of {launch.project} already running ({', '.join(running) or 'none'}): "
+                          f"the limit is {limit} ([projects.{launch.project}] max_running in {ballet_maestro.CONFIG_NAME})")
+
+
 def _refuse_if_too_many_today(state, config):
     limit = _limit(config, "max_per_day")
     today = ballet_conductors.launches_today(state)
@@ -307,8 +323,20 @@ def _is_running(line, alive):
 
 def _limit(config, name):
     value = config.get("limits", {}).get(name, DEFAULT_LIMITS[name])
+    return _whole_number(value, f"[limits] {name}")
+
+
+def _project_limit(config, project):
+    """Le `max_running` facultatif de `[projects.<alias>]` ; `None` quand le projet n'en pose pas."""
+    value = config["projects"].get(project, {}).get("max_running")
+    if value is None:
+        return None
+    return _whole_number(value, f"[projects.{project}] max_running")
+
+
+def _whole_number(value, where):
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise LaunchError(f"[limits] {name} in {ballet_maestro.CONFIG_NAME} must be a whole number, not {value!r}")
+        raise LaunchError(f"{where} in {ballet_maestro.CONFIG_NAME} must be a whole number, not {value!r}")
     return value
 
 

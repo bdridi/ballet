@@ -300,6 +300,53 @@ class BalletLaunchTest(unittest.TestCase):
         self.rehearsal("#2")
         self.assertRefused(lambda: self.rehearsal("#3"), "1 launch\\(es\\) today")
 
+    def project_limit(self, project, value):
+        config = ballet_maestro.read_config()
+        config["projects"][project]["max_running"] = value
+        ballet_maestro.write_config(config)
+
+    def test_le_plafond_du_projet_atteint_refuse_et_nomme_ses_conductors(self):
+        self.project_limit("antimurphy", 1)
+        self.rehearsal("#1")
+        self.assertRefused(lambda: self.rehearsal("#2"),
+                           "1 Conductor\\(s\\) of antimurphy already running \\(antimurphy#1\\): the limit is 1 "
+                           "\\(\\[projects.antimurphy\\] max_running")
+
+    def test_le_plafond_d_un_projet_ne_freine_pas_les_autres(self):
+        self.project("beta")
+        self.project_limit("antimurphy", 1)
+        self.rehearsal("#1")
+        ballet_launch.launch_rehearsal("beta", "#2", self.orca, url_wait=0)
+        ballet_launch.launch_rehearsal("beta", "#3", self.orca, url_wait=0)
+        self.assertEqual(sorted(self.conductors()), ["antimurphy#1", "beta#2", "beta#3"])
+
+    def test_le_plafond_global_compte_encore_avec_un_plafond_de_projet(self):
+        self.limits(max_running=1)
+        self.project_limit("antimurphy", 5)
+        self.rehearsal("#1")
+        self.assertRefused(lambda: self.rehearsal("#2"), "limit is 1 .*\\[limits\\] max_running")
+
+    def test_les_conductors_morts_ne_comptent_pas_dans_le_plafond_du_projet(self):
+        self.project_limit("antimurphy", 1)
+        self.rehearsal("#1")
+        self.orca.terminals.clear()
+        self.rehearsal("#2")
+        self.assertEqual(self.conductors()["antimurphy#2"]["terminal"], "term_2")
+
+    def test_un_plafond_de_projet_a_zero_refuse_tout_lancement_du_projet(self):
+        self.project_limit("antimurphy", 0)
+        self.assertRefused(self.rehearsal, "0 Conductor\\(s\\) of antimurphy already running \\(none\\): the limit is 0")
+
+    def test_un_plafond_de_projet_mal_ecrit_est_refuse(self):
+        for value in ("beaucoup", True, -1):
+            self.project_limit("antimurphy", value)
+            self.assertRefused(self.rehearsal, "\\[projects.antimurphy\\] max_running in maestro.toml must be a whole number")
+
+    def test_sans_plafond_de_projet_seule_la_globale_compte(self):
+        for number in (1, 2, 3):
+            self.rehearsal(f"#{number}")
+        self.assertRefused(lambda: self.rehearsal("#4"), "3 Conductor\\(s\\) already running .*\\[limits\\] max_running")
+
     def test_un_plafond_mal_ecrit_est_refuse(self):
         self.limits(max_running="beaucoup")
         self.assertRefused(self.rehearsal, "max_running .* must be a whole number")

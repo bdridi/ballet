@@ -104,6 +104,17 @@ class ReportTest(unittest.TestCase):
         self.assertTrue(outcome.tested_nothing())
         self.assertFalse(ballet_mutation.Outcome("rust", True, False, 0, 50, "h", "l", "d", "missing").tested_nothing())
 
+    def test_un_outil_vert_ne_prouve_rien_sans_mutant_viable_ou_sans_rapport_lu(self):
+        def outcome(report):
+            return ballet_mutation.Outcome("rust", True, False, 0, 50, "h", "l", "d", report)
+        nothing = ballet_mutation._normalized(killed=0, survived=0, invalid=8, timeouts=0, survivors=[])
+        proved = ballet_mutation._normalized(killed=6, survived=0, invalid=2, timeouts=0, survivors=[])
+        self.assertTrue(outcome(nothing).proves_nothing())
+        self.assertTrue(outcome("missing").proves_nothing())
+        self.assertTrue(outcome("unreadable: KeyError: 'outcomes'").proves_nothing())
+        self.assertFalse(outcome(proved).proves_nothing())
+        self.assertFalse(outcome(ballet_mutation.NO_MUTANT).proves_nothing())
+
     def test_un_rapport_absent_ne_bloque_pas(self):
         self.assertEqual(ballet_mutation.read_report(self.folder / "none.json", "cargo-mutants"), "missing")
 

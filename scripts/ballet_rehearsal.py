@@ -8,6 +8,7 @@
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI rouge ou trop longue)
     python3 ballet_rehearsal.py resume   <ID> | <élément>                          # applique la décision du Director (libellé de la PR)
     python3 ballet_rehearsal.py status   <ID> | <élément> [--json]                 # où en est la Rehearsal, ou la session
+    python3 ballet_rehearsal.py nudge    [<ID>]                                    # rappelle au rôle attendu d'envoyer son message (OPP-75)
 
 Lancé depuis le home du projet. Le skill `conductor` n'a qu'à appeler ce script et lire sa dernière ligne :
     NEXT: wait               un worker travaille ; Orca réveillera le Conductor
@@ -20,8 +21,12 @@ n'a pas encore d'issue (`FEAT-002`, aussi `BUG-NNN`, `TASK-NNN`). Elle vit dans 
 est joué et le mode. Une Rehearsal à la fois dans une session ; à la Premiere d'une slice, le script ouvre lui-même la
 suivante, depuis `main`. Deux sessions peuvent tourner côte à côte, sur deux éléments ; un même élément n'a qu'une
 session ouverte. Combien de sessions à la fois, c'est l'affaire de celui qui les lance. Une escalade met la session en
-pause : `resume` reprend la Rehearsal, puis la session. `<ID>` est facultatif pour `receive`, `premiere`, `resume` et
-`status` quand une seule session est ouverte.
+pause : `resume` reprend la Rehearsal, puis la session. `<ID>` est facultatif pour `receive`, `premiere`, `resume`,
+`status` et `nudge` quand une seule session est ouverte.
+
+`nudge` (OPP-75) répond à un Conductor que Maestro relance parce que la Rehearsal n'écrit plus : le rôle attendu (le
+destinataire de la question en attente, sinon celui du dernier `handoff`) reçoit `IDLE_REMINDER` dans sa session, et le
+rappel est journalisé en relance. Le Director qu'on attend, ou une mutation en cours : rien n'est envoyé.
 
 Le mode est le champ `Rehearsal mode` de l'issue (vide : `assisted`). En `assisted`, le plan attend le Director selon
 le champ `Plan approval` de l'issue (`required`, `skipped`), sinon selon le profil (`[rehearsal] plan_approval`, `true`
@@ -58,8 +63,10 @@ trop long pour un appel du Conductor, il part en arrière-plan (`mutate <ID>`, i
 mobilisé, le Dancer reprend avec les survivants ; au-delà de `max_round_trips` mutations rouges, ou après
 `[mutation] timeout_seconds`, la Rehearsal escalade. `[mutation] enabled = false`, aucune entrée, ou un diff qui ne
 touche aucun outil : le nœud est sauté (`mutation-skipped` au journal). Après une mutation verte, la suivante ne porte
-que sur ce qui a changé depuis son commit. Un outil vert qui n'a testé aucun mutant viable ne prouve rien : il ne
-bloque pas, il se signale (`mutation-inconclusive`).
+que sur ce qui a changé depuis son commit. Un outil vert qui ne prouve rien (aucun mutant viable testé, rapport
+absent ou illisible ; « no mutant in the diff » reste vert) n'est pas vert (`mutation-inconclusive`) : si la mutation
+ne couvrait que les derniers changements, elle est relancée une fois sur toute la branche depuis son point de départ ;
+sinon, ou si cette relance ne prouve rien non plus, la Rehearsal escalade.
 
 Une approbation avec des notes renvoie au Dancer seul : il les prend en un commit, ou les décline. Rien de commité :
 la Premiere tout de suite ; sinon la politique, la preuve et la mutation, puis `ballet:approved` reposé et la
@@ -94,6 +101,8 @@ des workers, résultats de la mutation, messages à publier, message du Director
 `~/.ballet/projects/<alias>/` : rien n'est écrit dans le projet.
 """
 
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -118,6 +127,7 @@ import ballet_store
 from ballet_message import MessageError, notes_of, parse_message, read_message, verdict_of
 
 INBOX = "inbox.md"
+PROOF_LOCK = "proof.lock"
 ISSUE_ITEM = re.compile(r"^#?(\d+)$")
 FEATURE_ITEM = re.compile(r"^(?:FEAT|BUG|TASK)-\d{3}$")
 QUEUED_TYPES = ("Feature", "Bug", "Task")   # ce qu'une session joue ; une `Slice` suit sa feature
@@ -135,12 +145,15 @@ STEP_OF_STATUS = {status: step for step, status in STATUS_OF_STEP.items()}
 CI_POLL_SECONDS = 15
 MAX_NUDGES = 1
 MAX_POLICY_RESENDS = 1
+MAX_MISPLACED = 1         # un `report` mal placé du Choreographer est renvoyé une fois, puis escalade
 PROOF_OUTPUT_LINES = 60   # la fin de la sortie d'une preuve rouge, remise au Dancer
 ANSWERING_ROLES = ("choreographer", "dramaturg")   # vérifiés à chaque réponse, sur la branche de Rehearsal
 MAX_SLICES = 3            # au plus, par feature : une slice par critère, ou par groupe de critères
 TASK_LINE = re.compile(r"^- \[([ xX])\]\s*(.+?)(?:\s+—\s+.*)?$")   # une tâche du rapport du Dancer
 RED_LINE = re.compile(r"^- Red:\s*\S")                                 # son rouge, sous elle
 RENAMED_TEST = re.compile(r"^\s*- Renamed test:\s*(.+?)\s*(?:→|->)\s*(.+?)\s*$", re.MULTILINE)
+IDLE_REMINDER = ("Ballet has received nothing from you for a while. If you already sent your message (report, answer, verdict or "
+                 "question), send it again now, whole, header line first, as your worker_done; otherwise finish your work and send it.")
 REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
 
 
@@ -161,7 +174,9 @@ class Rehearsal:
     pull_request: str = ""
     round_trips: int = 0
     rounds: dict = field(default_factory=dict)       # "sujet|de>à" → dernier round vu
-    dispatches: dict = field(default_factory=dict)   # rôle → dispatch Orca de son worker
+    dispatches: dict = field(default_factory=dict)   # rôle → dispatch Orca de son worker (le dernier : Orca en rouvre un à chaque envoi)
+    handles: dict = field(default_factory=dict)      # rôle → handle Orca de son worker, qui ne change pas d'un dispatch à l'autre
+    misplaced: dict = field(default_factory=dict)    # rôle → messages renvoyés parce que mal typés (un `report` au lieu d'une `answer`)
     pending: list = field(default_factory=list)      # questions en attente : {id, from, to}
     status: str = "open"                             # open | escalated | done
     reason: str = ""                                 # le motif de la dernière escalade, ou de la fin
@@ -177,7 +192,7 @@ class Rehearsal:
     red_proofs: int = 0                              # rapports du Dancer dont la preuve, lancée par le script, était rouge
     mutations: int = 0                               # mutations lancées : le tour de la dernière
     red_mutations: int = 0                           # mutations rouges
-    mutation: dict = field(default_factory=dict)     # la mutation en cours : {round, head, run, report, started}
+    mutation: dict = field(default_factory=dict)     # la mutation en cours : {round, head, run, report, started, whole}
     plan: str = ""                                   # review (le Director approuve le plan) | auto
     feature: str = ""                                # la feature d'une Rehearsal de planification, sans issue au départ
     plan_issue: str = ""                             # l'issue dont le plan est en review
@@ -401,6 +416,38 @@ def status(rehearsal_id, home, tools):
     summary += _mutation_lines(rehearsal)
     summary += _pending_lines(rehearsal) + _workers_line(rehearsal) + _session_lines(_session_of(rehearsal, home), rehearsal.id)
     return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, summary)
+
+
+def nudge(rehearsal_id, home, tools):
+    """Le Monitor a vu la Rehearsal sans nouvelles (OPP-75) : le rôle qu'elle attend reçoit un rappel de son dispatch.
+    Rien n'est envoyé quand c'est le Director qu'on attend, ou pendant une mutation. Le rappel est une relance au journal
+    (`handoff` `nudge`) ; un pas `wait` n'est pas journalisé : ce n'est pas de l'activité, et le Monitor la verrait."""
+    rehearsal = load(rehearsal_id, home)
+    if rehearsal.status != "open":
+        return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, [f"nothing to remind: Rehearsal {rehearsal.id} is {rehearsal.status}"])
+    if rehearsal.mutation:
+        return Step("wait", done=[f"the mutation (round {rehearsal.mutation['round']}) is running in the background: nobody to remind"])
+    role = _awaited_role(rehearsal, home)
+    if role == "director":
+        return _settle(rehearsal, Step("escalate", "waiting on the Director: answer the pending question with an `answer` message, from the director"), home, tools)
+    if not role or role not in rehearsal.dispatches:
+        return Step("wait", done=[f"nobody to remind: no worker of Rehearsal {rehearsal.id} is known to be awaited"])
+    _remind(rehearsal, role, home, tools)
+    return Step("wait", done=[f"the {role} reminded: Ballet was waiting for it"])
+
+
+def _awaited_role(rehearsal, home):
+    """Le rôle à qui la question en attente est adressée, sinon celui du dernier `handoff` du journal ; vide sans rien."""
+    if rehearsal.pending:
+        return rehearsal.pending[-1]["to"]
+    handoffs = [entry for entry in _journal_of(rehearsal.id, home) if entry["event"] == "handoff"]
+    return handoffs[-1]["detail"]["role"] if handoffs else ""
+
+
+def _remind(rehearsal, role, home, tools):
+    tools.orca(["orchestration", "send", "--to", f"dispatch:{rehearsal.dispatches[role]}",
+                "--subject", f"{rehearsal.id} · {role}: Ballet is waiting for you", "--body", IDLE_REMINDER])
+    _log_handoff(rehearsal, role, "nudge", IDLE_REMINDER, home)
 
 
 def status_session(session_item, home, tools):
@@ -650,6 +697,8 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
         return _relay_question(rehearsal, header, text, question_id, config, home, tools)
     if kind == "answer":
         return _relay_answer(rehearsal, header, text, config, home, tools)
+    if kind == "report" and sender == "choreographer" and rehearsal.dancer_start:
+        return _misplaced_report(rehearsal, sender, config, home, tools)
     if kind == "report" and sender == "choreographer":
         return _after_plan(rehearsal, text, config, home, tools)
     if kind == "report" and sender == "dancer":
@@ -665,7 +714,7 @@ def _worker_stopped(rehearsal, message, home, tools):
     """Un worker a fini son tour sans `worker_done` : relancé pour envoyer son rapport, une fois ; ensuite, ou s'il
     est tombé en erreur, c'est au Director."""
     payload = ballet_orca.payload(message)
-    role = next((role for role, dispatch in rehearsal.dispatches.items() if dispatch == payload.get("dispatchId")), None)
+    role = _worker_role(rehearsal, message)
     if not role or payload.get("stopReason") != "finished" or rehearsal.nudges.get(role, 0) >= MAX_NUDGES:
         raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
     rehearsal.nudges[role] = rehearsal.nudges.get(role, 0) + 1
@@ -714,6 +763,33 @@ def _relay_answer(rehearsal, header, text, config, home, tools):
     rehearsal.pending.remove(question)
     step.done.append(f"answer handed back to the {header['to']}")
     return step
+
+
+def _misplaced_report(rehearsal, role, config, home, tools):
+    """Un `report` du Choreographer une fois le Dancer lancé : son plan est déjà joué. Avec une question en attente, c'est sa
+    réponse mal typée ; sinon rien ne lui était demandé. Renvoyé une fois sans passer par la politique (le worktree porte
+    alors le travail en cours du Dancer, qui n'est pas le sien) et sans rien replanifier ; la deuxième fois, escalade."""
+    rehearsal.misplaced[role] = rehearsal.misplaced.get(role, 0) + 1
+    if rehearsal.misplaced[role] > MAX_MISPLACED:
+        return Step("escalate", f"the {role} sent a report again while the Dancer has the branch: see its message")
+    question = next((pending for pending in rehearsal.pending if pending["to"] == role), None)
+    body = _answer_expected(question) if question else NOTHING_ASKED
+    tools.orca(["orchestration", "send", "--to", f"dispatch:{rehearsal.dispatches[role]}",
+                "--subject", f"{rehearsal.id} · {role}: message not expected", "--body", body])
+    _log_handoff(rehearsal, role, "send", body, home)
+    expected = f"an answer to the {question['from']}" if question else "nothing"
+    return Step("wait", done=[f"the {role} sent a report while the Dancer has the branch: sent back, {expected} expected, "
+                              "nothing replanned, no policy check"])
+
+
+def _answer_expected(question):
+    return (f"Your plan is already being played: Ballet expects no report from you now. The {question['from']} asked you a question: "
+            f"answer it with one Ballet message `type: answer`, `from: choreographer`, `to: {question['from']}`, point by point, "
+            "as your worker_done. Do not touch the worktree's uncommitted files: they are the Dancer's work in progress.")
+
+
+NOTHING_ASKED = ("Your plan is already being played and nothing is asked of you: Ballet expects no report from you now. "
+                 "Do not touch the worktree: its uncommitted files are the Dancer's work in progress. Stay idle.")
 
 
 def _after_plan(rehearsal, report, config, home, tools):
@@ -872,7 +948,7 @@ def _proven_then_mutated(rehearsal, report, config, home, tools):
         return _refused_by_proof(rehearsal, proof, config, home, tools)
     scoped = _mutated_tools(rehearsal, config, tools)
     if scoped:
-        return _launch_mutation(rehearsal, report, proof, scoped, home, tools)
+        return _launch_mutation(rehearsal, report, [_proof_line(proof)], scoped, home, tools)
     return _publish_code(rehearsal, report, Step("wait", done=[_proof_line(proof), _skip_mutation(rehearsal, config, home)]),
                          config, home, tools)
 
@@ -1076,15 +1152,17 @@ def _refused_by_policy(rehearsal, role, found, config, home, tools):
 def _prove(rehearsal, config, home, tools):
     """Lance la preuve du repo dans le worktree, journalisée à son début (`proof-start`) et à sa fin (`proof-end`,
     avec son statut et sa durée) ; une preuve qui salit le worktree n'est pas verte. Déjà verte sur ce commit, elle
-    ne repasse pas (`proof-reused`)."""
+    ne repasse pas (`proof-reused`). Une seule preuve à la fois par projet (OPP-84) : les Rehearsals en parallèle se
+    disputent le port du serveur de dev et `target/`, la seconde attend (`proof-waiting`) que la première rende le verrou."""
     command, head = _proof_command(config), ballet_policy.head(tools.git(rehearsal.worktree))
     if head == rehearsal.proven:
         _log(home, rehearsal, "proof-reused", {"command": command, "head": head})
         return Proof(True, reused=True)
-    _log(home, rehearsal, "proof-start", {"command": command, "head": head})
-    started = time.monotonic()
-    proof = tools.prove(command, rehearsal.worktree, config["escalation"]["proof_timeout_seconds"])
-    seconds = round(time.monotonic() - started)
+    with _proof_lock(home, rehearsal, command):
+        _log(home, rehearsal, "proof-start", {"command": command, "head": head})
+        started = time.monotonic()
+        proof = tools.prove(command, rehearsal.worktree, config["escalation"]["proof_timeout_seconds"])
+        seconds = round(time.monotonic() - started)
     dirty = ballet_policy.dirty_files(tools.git(rehearsal.worktree)) if proof.passed else []
     if dirty:
         proof = Proof(False, "The proof left the worktree dirty:\n" + "\n".join(dirty))
@@ -1093,6 +1171,22 @@ def _prove(rehearsal, config, home, tools):
     if proof.passed:
         rehearsal.proven = head
     return proof
+
+
+@contextlib.contextmanager
+def _proof_lock(home, rehearsal, command):
+    """Le verrou exclusif de preuve du projet (`proof.lock`, dans son dossier de travail) : pris sans attendre quand il
+    est libre, sinon `proof-waiting` au journal puis attente ; rendu à la sortie, même sur une erreur."""
+    with open(_run_dir(home) / PROOF_LOCK, "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            _log(home, rehearsal, "proof-waiting", {"command": command})
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _proof_line(proof):
@@ -1142,23 +1236,25 @@ def _skip_mutation(rehearsal, config, home):
     return f"mutation skipped: {reason}"
 
 
-def _launch_mutation(rehearsal, report, proof, scoped, home, tools):
+def _launch_mutation(rehearsal, report, done, scoped, home, tools, whole=False):
     """Trop long pour un appel du Conductor : la mutation part en arrière-plan, et le réveille par Orca à sa fin.
-    Le rapport du Dancer attend avec elle, pour être publié avec la branche."""
+    Le rapport du Dancer attend avec elle, pour être publié avec la branche. `done` : les lignes déjà à afficher ;
+    `whole` : la mutation porte sur toute la branche, pas seulement sur ce qui a changé depuis la dernière verte."""
     rehearsal.mutations += 1
     rehearsal.mutation = {"round": rehearsal.mutations, "head": ballet_policy.head(tools.git(rehearsal.worktree)),
-                          "run": _conductor_run(rehearsal, tools), "report": report, "started": _now()}
+                          "run": _conductor_run(rehearsal, tools), "report": report, "started": _now(), "whole": whole}
     _save(rehearsal, home)
     tools.launch([sys.executable, str(Path(__file__).resolve()), "mutate", rehearsal.id], str(Path(home).resolve()), _run_dir(home))
     names = ", ".join(tool.name for tool, _ in scoped)
-    return Step("wait", done=[_proof_line(proof), f"mutation started in the background ({names}, round {rehearsal.mutations}): "
-                              "it wakes the Conductor when it is done"])
+    return Step("wait", done=done + [f"mutation started in the background ({names}, round {rehearsal.mutations}): "
+                                     "it wakes the Conductor when it is done"])
 
 
 def _mutate_each_tool(rehearsal, config, home, tools):
     """Le même chemin que `ballet_mutation.py run`, journalisé dans la Rehearsal (`mutation-start`, `mutation-end`)."""
     git = tools.git(rehearsal.worktree)
-    scoped = ballet_mutation.scopes_of(_mutation_tools(config), git, since=rehearsal.mutated)
+    since = "" if rehearsal.mutation.get("whole") else rehearsal.mutated
+    scoped = ballet_mutation.scopes_of(_mutation_tools(config), git, since=since)
     folder, prefix = _run_dir(home) / rehearsal.id, f"mutation-{rehearsal.mutation['round']}"
 
     def journal(event, detail):
@@ -1205,20 +1301,33 @@ def _after_mutation(rehearsal, round_, config, home, tools):
     red = [outcome for outcome in outcomes if not outcome.passed]
     if red:
         return _refused_by_mutation(rehearsal, red, config, home, tools)
+    unproven = [outcome for outcome in outcomes if outcome.proves_nothing()]
+    if unproven:
+        return _refused_as_unproven(rehearsal, unproven, pending, config, home, tools)
     rehearsal.mutated = pending["head"]
-    step = Step("wait", done=[_mutation_green_line(outcomes)] + _inconclusive_lines(rehearsal, outcomes, home))
+    step = Step("wait", done=[_mutation_green_line(outcomes)])
     return _publish_code(rehearsal, pending["report"], step, config, home, tools)
 
 
-def _inconclusive_lines(rehearsal, outcomes, home):
-    """Un outil vert qui n'a testé aucun mutant viable ne prouve rien : il ne bloque pas, il se signale au Director."""
-    lines = []
-    for outcome in outcomes:
-        if outcome.tested_nothing():
-            _log(home, rehearsal, "mutation-inconclusive", {"tool": outcome.tool, "log": outcome.log})
-            lines.append(f"mutation inconclusive: {outcome.tool} tested no viable mutant ({outcome.report['invalid']} "
-                         f"unviable): it proves nothing; check the tool, its log: {outcome.log}")
-    return lines
+def _refused_as_unproven(rehearsal, unproven, pending, config, home, tools):
+    """Vert par son code de sortie mais sans preuve : une mutation partielle est relancée une fois sur toute la
+    branche ; sinon (déjà sur toute la branche, ou relance qui ne prouve rien non plus), escalade."""
+    for outcome in unproven:
+        _log(home, rehearsal, "mutation-inconclusive", {"tool": outcome.tool, "log": outcome.log})
+    whys = ", ".join(f"{outcome.tool}: {_unproven_reason(outcome)}" for outcome in unproven)
+    if rehearsal.mutated and not pending.get("whole"):
+        scoped = ballet_mutation.scopes_of(_mutation_tools(config), tools.git(rehearsal.worktree))
+        line = f"mutation proved nothing on the last changes ({whys}): run again on the whole branch"
+        return _launch_mutation(rehearsal, pending["report"], [line], scoped, home, tools, whole=True)
+    details = "; ".join(f"{outcome.tool} ({_unproven_reason(outcome)}), its log: {outcome.log}" for outcome in unproven)
+    return Step("escalate", f"mutation proved nothing: {details}")
+
+
+def _unproven_reason(outcome):
+    """Pourquoi un outil vert ne prouve rien, en une expression."""
+    if isinstance(outcome.report, dict):
+        return f"no viable mutant ({outcome.report['invalid']} unviable)"
+    return "report missing" if outcome.report == "missing" else outcome.report
 
 
 def _refused_by_mutation(rehearsal, red, config, home, tools):
@@ -1783,6 +1892,7 @@ def _step_of_message(rehearsal, message, config, home, tools):
         rehearsal.received.append(message["id"])
     if _is_mutation_wake(message):
         return _after_mutation(rehearsal, ballet_orca.payload(message).get("round"), config, home, tools)
+    _follow_worker(rehearsal, message, home)
     if message.get("type") == "escalation":
         return _worker_stopped(rehearsal, message, home, tools)
     header, text = _parsed(message.get("body", ""))
@@ -1803,7 +1913,25 @@ def _is_new_for(rehearsal, message):
         return False
     if _is_mutation_wake(message):
         return ballet_orca.payload(message).get("rehearsal") == rehearsal.id
-    return ballet_orca.worker_dispatch(message) in rehearsal.dispatches.values()
+    return bool(_worker_role(rehearsal, message))
+
+
+def _worker_role(rehearsal, message):
+    return ballet_orca.worker_role(message, rehearsal.dispatches, rehearsal.handles)
+
+
+def _follow_worker(rehearsal, message, home):
+    """Le worker reconnu garde son handle, et son dernier dispatch : Orca le rouvre sous un nouveau à chaque envoi (journal
+    `dispatch-moved`). C'est ce dispatch que `worker-show`, `stop` et le rappel visent ensuite."""
+    role = _worker_role(rehearsal, message)
+    if not role:
+        return
+    handle, dispatch = ballet_orca.worker_handle(message), ballet_orca.worker_dispatch(message)
+    if handle and not rehearsal.handles.get(role):
+        rehearsal.handles[role] = handle
+    if dispatch and dispatch != rehearsal.dispatches.get(role):
+        _log(home, rehearsal, "dispatch-moved", {"role": role, "from": rehearsal.dispatches.get(role, ""), "to": dispatch})
+        rehearsal.dispatches[role] = dispatch
 
 
 def _nothing_new(rehearsal, run_id, ignored):
@@ -1892,7 +2020,7 @@ def _shown(result, home, tools):
 
 USAGE = ("usage: begin <item> | receive [<ID>] --run <run-id> | receive [<ID>] --message <msg-id> | receive [<ID>] --dispatch <ctx-id> "
          "| receive [<ID>] <message.md> [--question <msg-id>] | receive [<ID>] --mutation | premiere [<ID>] "
-         "| resume [<ID> | <item>] | status [<ID> | <item>] | status <ID> --json   (an item: #<issue> (a Feature, a Bug or a Task) "
+         "| resume [<ID> | <item>] | status [<ID> | <item>] | status <ID> --json | nudge [<ID>]   (an item: #<issue> (a Feature, a Bug or a Task) "
          "or a ready FEAT-NNN; no <ID>: the Rehearsal of the only open session)")
 
 
@@ -1907,7 +2035,7 @@ def _command(command, arguments, home, tools):
         session_item = _session_named(arguments[0], home) if arguments else _only_open_session(home)
         if session_item or not arguments:
             return _session_command(command, session_item, home, tools)
-    if command in ("receive", "premiere", "resume", "status") and not _names_a_rehearsal(arguments):
+    if command in ("receive", "premiere", "resume", "status", "nudge") and not _names_a_rehearsal(arguments):
         arguments = [_current_rehearsal(home), *arguments]
     return _rehearsal_command(command, arguments, home, tools)
 
@@ -1932,6 +2060,8 @@ def _rehearsal_command(command, arguments, home, tools):
         return receive_from_orca(arguments[0], arguments[2], home, tools, by=arguments[1][2:])
     if command == "receive" and len(arguments) in (2, 4) and arguments[2:3] in ([], ["--question"]):
         return receive(arguments[0], arguments[1], arguments[3] if len(arguments) == 4 else None, home, tools)
+    if command == "nudge" and len(arguments) == 1:
+        return nudge(arguments[0], home, tools)
     if command == "premiere" and len(arguments) == 1:
         return premiere(arguments[0], home, tools)
     if command == "resume" and len(arguments) == 1:

@@ -86,6 +86,13 @@ class Outcome:
         report = self.report
         return isinstance(report, dict) and report["killed"] + report["survived"] == 0 and report["invalid"] > 0
 
+    def proves_nothing(self):
+        """Vert par son code de sortie, mais sans preuve : aucun mutant viable testé, ou un rapport ni lu ni déclaré
+        sans mutant (`missing`, `unreadable: …`). `no mutant in the diff` reste légitime : l'outil n'avait rien à muter."""
+        if self.tested_nothing():
+            return True
+        return not isinstance(self.report, dict) and self.report != NO_MUTANT
+
     def report_status(self):
         """`read` pour un rapport lu ; sinon sa raison (`missing`, `no mutant in the diff`, `unreadable: …`)."""
         return "read" if isinstance(self.report, dict) else self.report

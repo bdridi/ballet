@@ -1,15 +1,19 @@
+import fcntl
 import io
 import json
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import asdict
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import ballet_config  # noqa: E402
 import ballet_maestro  # noqa: E402
 import ballet_runtime  # noqa: E402
 import ballet_rehearsal  # noqa: E402
@@ -532,6 +536,91 @@ class BalletRehearsalTest(unittest.TestCase):
         send = world.ran("orca", "orchestration", "send")[-1]
         self.assertIn("The proof left the worktree dirty:\ncoverage/report.json", send[send.index("--body") + 1])
 
+    # --- le verrou de preuve du projet (OPP-84) ---
+
+    def two_rehearsals(self):
+        self.begin()
+        first = ballet_rehearsal.load("FEAT-001.2", self.home)
+        second = ballet_rehearsal.Rehearsal(**{**asdict(first), "id": "FEAT-001.3"})
+        ballet_rehearsal._save(second, self.home)
+        return first, second
+
+    def prove(self, rehearsal):
+        config = ballet_config.effective_config(self.home)
+        return ballet_rehearsal._prove(rehearsal, config, self.home, self.tools)
+
+    def test_deux_preuves_du_meme_projet_ne_se_chevauchent_pas(self):
+        first, second = self.two_rehearsals()
+        events, in_first, release = [], threading.Event(), threading.Event()
+
+        def slow_proof(command, cwd, timeout):
+            events.append(f"start {cwd}")
+            in_first.set()
+            if cwd == first.worktree:
+                release.wait(5)
+            events.append(f"end {cwd}")
+            return ballet_rehearsal.Proof(True)
+        self.tools.prove = slow_proof
+        first.worktree, second.worktree = "/wt/one", "/wt/two"
+        threads = [threading.Thread(target=self.prove, args=(first,))]
+        threads[0].start()
+        self.assertTrue(in_first.wait(5))
+        threads.append(threading.Thread(target=self.prove, args=(second,)))
+        threads[1].start()
+        self._wait_for(lambda: self.journal("proof-waiting"))
+        self.assertEqual(events, ["start /wt/one"])          # la seconde attend : rien n'a démarré
+        release.set()
+        for thread in threads:
+            thread.join(5)
+        self.assertEqual(events, ["start /wt/one", "end /wt/one", "start /wt/two", "end /wt/two"])
+
+    def test_la_preuve_qui_attend_le_verrou_le_journalise_avant_de_demarrer(self):
+        first, second = self.two_rehearsals()
+        holder = open(ballet_store.work_dir(self.home) / ballet_rehearsal.PROOF_LOCK, "a")
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        thread = threading.Thread(target=self.prove, args=(second,))
+        thread.start()
+        self._wait_for(lambda: self.journal("proof-waiting"))
+        self.assertEqual(self.journal("proof-waiting"), [{"command": "pnpm proof"}])
+        self.assertEqual(self.journal("proof-start"), [])
+        fcntl.flock(holder, fcntl.LOCK_UN)
+        holder.close()
+        thread.join(5)
+        self.assertEqual(len(self.journal("proof-start")), 1)
+        self.assertEqual(first.id, "FEAT-001.2")
+
+    def test_une_preuve_qui_trouve_le_verrou_libre_ne_journalise_pas_d_attente(self):
+        first, _ = self.two_rehearsals()
+        self.prove(first)
+        self.assertEqual(self.journal("proof-waiting"), [])
+        self.assertEqual(len(self.journal("proof-start")), 1)
+
+    def test_le_verrou_est_rendu_apres_une_preuve_qui_leve(self):
+        first, _ = self.two_rehearsals()
+
+        def broken_proof(command, cwd, timeout):
+            raise OSError("shell vanished")
+        self.tools.prove = broken_proof
+        with self.assertRaises(OSError):
+            self.prove(first)
+        with open(ballet_store.work_dir(self.home) / ballet_rehearsal.PROOF_LOCK, "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)       # lève si le verrou est resté pris
+
+    def test_une_preuve_reutilisee_ne_prend_pas_le_verrou(self):
+        first, _ = self.two_rehearsals()
+        first.proven = "c0ffee1"
+        with open(ballet_store.work_dir(self.home) / ballet_rehearsal.PROOF_LOCK, "a") as holder:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            proof = self.prove(first)                               # bloquerait si elle prenait le verrou
+        self.assertTrue(proof.reused)
+        self.assertEqual(self.journal("proof-waiting"), [])
+
+    def _wait_for(self, condition, seconds=5):
+        deadline = time.monotonic() + seconds
+        while not condition() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(condition())
+
     # --- la mutation, lancée en arrière-plan par le script ---
 
     def mutation_profile(self, extra="", paths=""):
@@ -566,6 +655,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
     def test_le_reveil_de_mutation_se_lit_aussi_par_le_run(self):
         self.mutation_profile()
         self.tools.launch = self.launches_without_wake
+        self.mutation_result = (0, False, self.green_report())
         self.mutated_report()
         ballet_rehearsal.mutate("FEAT-001.2", self.home, self.tools)
         wake = self.world.ran("orca", "orchestration", "send")[-1]
@@ -578,6 +668,32 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
 
     def launches_without_wake(self, argv, cwd, work_dir):
         self.launches.append((argv, cwd))
+
+    def green_report(self):
+        return CARGO_REPORT.replace('"missed": 7', '"missed": 0')
+
+    def unviable_report(self):
+        """Un rapport cargo-mutants où aucun mutant n'est viable : 0 tué, 0 survivant, 8 invalides."""
+        unviable = json.loads(CARGO_REPORT)
+        unviable.update({"caught": 0, "missed": 0, "unviable": 8})
+        unviable["outcomes"] = [outcome for outcome in unviable["outcomes"] if outcome["summary"] != "MissedMutant"]
+        return json.dumps(unviable)
+
+    def whole_branch_diffs(self):
+        """Les diffs lus depuis le point de départ de la branche (et non depuis la dernière mutation verte)."""
+        return [command for command in self.world.ran("git", "-C", "/wt/FEAT-001.2", "diff", "--no-color", "--no-ext-diff")
+                if command[-2:] == ["base", "HEAD"]]
+
+    def partial_round_without_viable_mutant(self):
+        """Une première mutation verte, un renvoi du Critic, puis un tour partiel dont le seul mutant est invalide."""
+        self.mutation_result = (0, False, self.green_report())
+        self.mutated_report()
+        self.wake()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED\n\n## Blocking\n\n1. Fix."))
+        self.world.head = "beef002"
+        self.mutation_result = (0, False, self.unviable_report())
+        self.receive(message("dancer", "conductor", "report", "- Fixed.", round_=2))
+        return self.wake(round_=2, message_id="msg_2")
 
     def wake(self, round_=1, message_id="msg_mutation"):
         """Le réveil envoyé par la mutation, reçu comme tout message Orca."""
@@ -665,18 +781,76 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.receive(message("dancer", "conductor", "report", "- Fixed.", round_=2))
         self.assertTrue(self.world.ran("git", "-C", "/wt/FEAT-001.2", "diff", "--no-color", "--no-ext-diff", "c0ffee1", "HEAD"))
 
-    def test_une_mutation_sans_mutant_viable_se_signale_sans_bloquer(self):
+    def test_une_mutation_sans_mutant_viable_sur_toute_la_branche_escalade(self):
         self.mutation_profile()
-        unviable = json.loads(CARGO_REPORT)
-        unviable.update({"caught": 0, "missed": 0, "unviable": 8})
-        unviable["outcomes"] = [outcome for outcome in unviable["outcomes"] if outcome["summary"] != "MissedMutant"]
-        self.mutation_result = (0, False, json.dumps(unviable))
+        self.mutation_result = (0, False, self.unviable_report())
         self.mutated_report()
         step = self.wake()
-        self.assertTrue(any(line.startswith("mutation inconclusive: cargo-mutants tested no viable mutant (8 unviable)")
-                            for line in step.done))
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("mutation proved nothing: cargo-mutants (no viable mutant (8 unviable)), its log: "))
+        self.assertTrue(step.reason.endswith("mutation-1-cargo-mutants.log"))
         self.assertEqual(len(self.journal("mutation-inconclusive")), 1)
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+
+    def test_un_tour_partiel_sans_mutant_viable_est_relance_sur_toute_la_branche(self):
+        self.mutation_profile()
+        step = self.partial_round_without_viable_mutant()
+        self.assertEqual(step.next, "wait")
+        self.assertEqual(step.done[0], "mutation proved nothing on the last changes (cargo-mutants: no viable mutant (8 unviable)): "
+                                       "run again on the whole branch")
+        self.assertIn("(cargo-mutants, round 3)", step.done[1])
+        self.assertEqual(len(self.journal("mutation-inconclusive")), 1)
+        self.assertEqual(len(self.whole_branch_diffs()), 4)   # les deux mutations complètes (tour 1 et relance) lisent la branche entière
+        self.assertEqual(self.state()["mutation"]["whole"], True)
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])   # pas de nouveau Critic
+
+    def test_la_relance_sur_toute_la_branche_verte_pousse_la_branche(self):
+        self.mutation_profile()
+        self.partial_round_without_viable_mutant()
+        self.mutation_result = (0, False, self.green_report())
+        ballet_rehearsal.mutate("FEAT-001.2", self.home, self.tools)
+        step = self.wake(round_=3, message_id="msg_3")
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0)")
+        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+        self.assertEqual(self.state()["mutated"], "beef002")
+
+    def test_la_relance_sur_toute_la_branche_qui_ne_prouve_rien_escalade(self):
+        self.mutation_profile()
+        self.partial_round_without_viable_mutant()
+        step = self.wake(round_=3, message_id="msg_3")
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("mutation proved nothing: cargo-mutants (no viable mutant (8 unviable)), its log: "))
+        self.assertEqual(len(self.journal("mutation-inconclusive")), 2)
+
+    def test_un_rapport_absent_ne_prouve_rien_et_escalade(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, None)
+        self.mutated_report()
+        step = self.wake()
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("mutation proved nothing: cargo-mutants (report missing), its log: "))
+
+    def test_un_rapport_illisible_ne_prouve_rien_et_escalade(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, "{broken")
+        self.mutated_report()
+        step = self.wake()
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("mutation proved nothing: cargo-mutants (unreadable: JSONDecodeError"))
+
+    def test_un_outil_qui_dit_n_avoir_rien_a_muter_reste_vert(self):
+        self.mutation_profile()
+        self.mutation_result = (0, False, None)
+        self.tools.mutate = self.mutation_saying_nothing_to_mutate
+        self.mutated_report()
+        step = self.wake()
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (report no mutant in the diff)")
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
+        self.assertEqual(self.journal("mutation-inconclusive"), [])
+
+    def mutation_saying_nothing_to_mutate(self, command, cwd, timeout, log_path):
+        Path(log_path).write_text("No mutants to filter\n", encoding="utf-8")
+        return 0, False
 
     def test_une_mutation_rouge_n_est_pas_poussee_et_renvoie_les_survivants_au_dancer(self):
         self.mutation_profile()
@@ -746,10 +920,10 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
 
     def test_un_reveil_perdu_se_rattrape_par_receive_mutation(self):
         self.mutation_profile()
-        self.mutation_result = (0, False, None)
+        self.mutation_result = (0, False, self.green_report())
         self.mutated_report()
         step = ballet_rehearsal.receive_mutation("FEAT-001.2", self.home, self.tools)
-        self.assertEqual(step.done[0], "mutation green: cargo-mutants (report missing)")
+        self.assertEqual(step.done[0], "mutation green: cargo-mutants (6 killed, 0 survived, score 1.0)")
         self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Critic · FEAT-001.2"])
 
     def test_receive_mutation_pendant_la_mutation_attend_sans_escalader(self):
@@ -1113,6 +1287,100 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertEqual(step.next, "wait")
         self.assertFalse(self.world.ran("gh", "api"))
 
+    # --- nudge : le Monitor a vu la Rehearsal sans nouvelles ---
+
+    def nudge(self):
+        return ballet_rehearsal.nudge("FEAT-001.2", self.home, self.tools)
+
+    def reminders(self):
+        """Les rappels envoyés : (dispatch visé, sujet, corps)."""
+        sends = [command for command in self.world.ran("orca", "orchestration", "send") if "--subject" in command
+                 and "Ballet is waiting for you" in command[command.index("--subject") + 1]]
+        return [(command[command.index("--to") + 1], command[command.index("--subject") + 1], command[command.index("--body") + 1])
+                for command in sends]
+
+    def test_nudge_rappelle_au_dernier_role_remis_son_message_et_le_journalise_en_relance(self):
+        self.begin()
+        step = self.nudge()
+        self.assertEqual((step.next, step.done), ("wait", ["the dancer reminded: Ballet was waiting for it"]))
+        self.assertEqual(self.reminders(), [("dispatch:ctx_1", "FEAT-001.2 · dancer: Ballet is waiting for you", ballet_rehearsal.IDLE_REMINDER)])
+        relance = self.journal("handoff")[-1]
+        self.assertEqual((relance["role"], relance["how"], relance["text"]), ("dancer", "nudge", ballet_rehearsal.IDLE_REMINDER))
+
+    def test_le_rappel_demande_de_renvoyer_le_message_en_entier_ou_de_finir(self):
+        text = ballet_rehearsal.IDLE_REMINDER
+        self.assertIn("received nothing from you for a while", text)
+        self.assertIn("send it again now, whole, header line first, as your worker_done", text)
+        self.assertIn("otherwise finish your work and send it", text)
+
+    def test_nudge_vise_le_role_du_dernier_handoff_pas_le_premier(self):
+        self.to_the_critic()
+        self.nudge()
+        self.assertEqual([found[0] for found in self.reminders()], ["dispatch:ctx_2"])
+        self.assertIn("critic", self.reminders()[0][1])
+
+    def test_nudge_vise_le_destinataire_de_la_question_en_attente(self):
+        self.begin()
+        self.receive(message("dancer", "choreographer", "question", "1. Which name?"), question_id="msg_42")
+        self.nudge()
+        self.assertEqual([found[0] for found in self.reminders()], ["dispatch:ctx_2"])
+        self.assertIn("choreographer", self.reminders()[0][1])
+
+    def test_nudge_n_est_pas_de_l_activite_pour_le_journal_du_pas_wait(self):
+        self.begin()
+        before = [entry["event"] for entry in ballet_store.journal(self.home, "rehearsal")]
+        self.nudge()
+        after = [entry["event"] for entry in ballet_store.journal(self.home, "rehearsal")]
+        self.assertEqual(after, before + ["handoff"])
+        self.assertEqual(self.journal("handoff")[-1]["how"], "nudge")
+
+    def waiting_on(self, **changes):
+        """La Rehearsal ouverte, avec ce que le test change dans son état."""
+        self.begin()
+        rehearsal = ballet_rehearsal.load("FEAT-001.2", self.home)
+        for name, value in changes.items():
+            setattr(rehearsal, name, value)
+        ballet_rehearsal._save(rehearsal, self.home)
+
+    def test_nudge_n_envoie_rien_quand_c_est_le_director_qu_on_attend(self):
+        self.waiting_on(pending=[{"id": "msg_9", "from": "dancer", "to": "director"}])
+        step = self.nudge()
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("waiting on the Director"))
+        self.assertEqual(self.reminders(), [])
+        self.assertEqual(self.state()["status"], "escalated")
+
+    def test_nudge_n_envoie_rien_pendant_une_mutation(self):
+        self.waiting_on(mutation={"round": 2, "head": "abc", "run": "run_1", "report": "x", "started": "2026-11-23T10:00:00+00:00"})
+        step = self.nudge()
+        self.assertEqual(step.next, "wait")
+        self.assertIn("mutation", step.done[0])
+        self.assertEqual(self.reminders(), [])
+        self.assertEqual(self.journal("handoff")[-1]["how"], "start")
+
+    def test_nudge_d_une_rehearsal_escaladee_redit_son_etat_sans_rien_envoyer(self):
+        self.escalated()
+        step = self.nudge()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("is escalated", step.done[0])
+        self.assertEqual(self.reminders(), [])
+
+    def test_nudge_sans_dispatch_connu_pour_le_role_n_envoie_rien(self):
+        self.waiting_on(dispatches={})
+        step = self.nudge()
+        self.assertEqual(step.next, "wait")
+        self.assertIn("nobody to remind", step.done[0])
+        self.assertEqual(self.reminders(), [])
+
+    def test_la_ligne_de_commande_nudge_sans_id_vise_la_seule_rehearsal_ouverte(self):
+        self.begin()
+        code, lines = self.run_main("nudge")
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, ["- the dancer reminded: Ballet was waiting for it", "NEXT: wait"])
+        self.assertEqual(len(self.reminders()), 1)
+        self.assertEqual(self.run_main("nudge", "FEAT-001.2")[0], 0)
+        self.assertEqual(self.run_main("nudge", "FEAT-001.2", "--bogus")[0], 2)
+
     # --- taille du diff ---
 
     def strict(self):
@@ -1400,6 +1668,66 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.assertIn("not processed after this step, still to receive: receive FEAT-001.2 --message msg_1", step.done)
         self.assertFalse(self.world.ran("gh", "pr", "create"))
         self.assertEqual(self.state()["received"], ["msg_bad"])
+
+    # --- le worker rouvert sous un nouveau dispatch (FEAT-009, nuit du 22/11) ---
+
+    def from_handle(self, message_id, kind, body, dispatch, handle):
+        return {**self.from_worker(message_id, kind, body, dispatch=dispatch), "from_handle": handle}
+
+    def test_le_message_d_un_worker_rouvert_sous_un_nouveau_dispatch_est_reconnu_a_son_handle(self):
+        self.begin()
+        self.world.run_batch = [self.from_handle("msg_q", "question", message("dancer", "choreographer", "question", "1. A?"),
+                                                 "ctx_1", "structworker_dancer")]
+        self.receive_run()
+        self.world.run_batch = [self.from_handle("msg_1", "worker_done", message("dancer", "conductor", "report", "- Done."),
+                                                 "ctx_reopened", "structworker_dancer")]
+        step = self.receive_run()
+        self.assertNotIn("ignored", " ".join(step.done))
+        self.assertEqual(self.state()["dispatches"]["dancer"], "ctx_reopened")
+        self.assertEqual(self.journal("dispatch-moved"), [{"role": "dancer", "from": "ctx_1", "to": "ctx_reopened"}])
+
+    def test_une_question_signee_d_un_dispatch_rouvert_est_reconnue_a_sa_signature(self):
+        self.begin()
+        question = self.from_handle("msg_q", "question", message("dancer", "choreographer", "question", "1. A?"),
+                                    "ctx_reopened", "dispatch:ctx_reopened")
+        self.world.run_batch = [question]
+        step = self.receive_run()
+        self.assertIn("question carried to the choreographer", step.done)
+
+    def test_un_message_signe_d_un_autre_worker_que_celui_du_role_reste_ignore(self):
+        self.begin()
+        self.world.run_batch = [self.from_handle("msg_q", "question", message("dancer", "choreographer", "question", "1. A?"),
+                                                 "ctx_1", "structworker_dancer")]
+        self.receive_run()
+        self.world.run_batch = [self.from_handle("msg_old", "worker_done", message("dancer", "conductor", "report", "- Done."),
+                                                 "ctx_9", "structworker_old_slice")]
+        step = self.receive_run()
+        self.assertIn("(1 ignored)", step.done[0])
+
+    # --- un `report` du Choreographer quand le Dancer a la branche ---
+
+    def asked_the_choreographer(self):
+        self.begin()
+        self.world.run_batch = [self.from_worker("msg_q", "question", message("dancer", "choreographer", "question", "1. A?"))]
+        self.receive_run()
+
+    def test_un_report_du_choreographer_pendant_une_question_est_renvoye_sans_politique_ni_replanification(self):
+        self.asked_the_choreographer()
+        policies = len(self.journal("policy"))
+        step = self.receive(message("choreographer", "conductor", "report", "- Outcome: planned\n- Issue: #12"))
+        self.assertEqual(step.next, "wait")
+        self.assertIn("sent back, an answer to the dancer expected", step.done[0])
+        body = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertIn("type: answer", body[body.index("--body") + 1])
+        self.assertEqual(len(self.journal("policy")), policies)
+        self.assertEqual(self.state()["pending"][0]["to"], "choreographer")
+
+    def test_un_deuxieme_report_mal_place_du_choreographer_escalade(self):
+        self.asked_the_choreographer()
+        self.receive(message("choreographer", "conductor", "report", "- Outcome: planned"))
+        step = self.receive(message("choreographer", "conductor", "report", "- Outcome: planned"))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("sent a report again while the Dancer has the branch", step.reason)
 
     def test_aide_et_option_inconnue_sont_un_mauvais_usage_sans_rien_toucher(self):
         self.begin()

@@ -44,6 +44,18 @@ class FrictionsTest(unittest.TestCase):
         self.assertEqual([friction["text"] for friction in record["frictions"]],
                          ["2 Dramaturg reports refused", "policy refused: dramaturg ×1"])
 
+    def test_les_avis_idle_du_monitor_sont_comptes(self):
+        entries = [entry("begin"), entry("idle", notice=1), entry("idle", notice=2), entry("handoff", how="nudge")]
+        record = ballet_frictions.of_rehearsal({}, entries)
+        idle = [friction for friction in record["frictions"] if friction["kind"] == "idle"]
+        self.assertEqual(idle, [{"kind": "idle", "count": 2, "text": "silent 2 times: Monitor idle notices"}])
+        self.assertEqual([friction["kind"] for friction in record["frictions"]], ["nudges", "idle"])
+
+    def test_un_seul_avis_idle_est_au_singulier_et_aucun_n_est_muet(self):
+        one = ballet_frictions.of_workshop({}, [entry("idle")])["frictions"]
+        self.assertEqual([friction["text"] for friction in one], ["silent 1 time: Monitor idle notice"])
+        self.assertEqual(ballet_frictions.of_workshop({}, [entry("begin")])["frictions"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

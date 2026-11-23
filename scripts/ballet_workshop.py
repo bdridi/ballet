@@ -6,6 +6,7 @@
     python3 ballet_workshop.py receive [<élément>] --dispatch <ctx-id>  # le dernier message du worker de ce dispatch
     python3 ballet_workshop.py resume  [<élément>]                      # reprend ce qu'une escalade a arrêté
     python3 ballet_workshop.py status  [<élément>]                      # où en est la session
+    python3 ballet_workshop.py nudge   [<élément>]                      # rappelle au rôle attendu d'envoyer son message (OPP-75)
 
 Lancé depuis le home du projet, comme `ballet_rehearsal.py`, avec la même dernière ligne :
     NEXT: wait               le Dramaturg travaille ; Orca réveillera le Conductor
@@ -125,6 +126,7 @@ class Workshop:
     question: str = ""                          # la question du Dramaturg au Choreographer, tant qu'elle n'a pas de réponse
     rounds: int = 0                             # questions du Dramaturg au Choreographer, bornées par `max_exchange_rounds`
     advisor_dispatch: str = ""                  # le dispatch Orca du worker Choreographer
+    handles: dict = field(default_factory=dict)  # rôle → handle Orca de son worker, qui ne change pas quand Orca le rouvre sous un nouveau dispatch
     advisor_checkpoint: str = ""                # `HEAD` du worktree quand le Choreographer a reçu la main
     received: list = field(default_factory=list)  # les ids des messages Orca déjà traités : `receive --run` ne les rejoue pas
     frictions: dict = field(default_factory=dict)   # à sa fin : {seconds, frictions} (`ballet_frictions`), aussi au journal
@@ -226,6 +228,20 @@ def status(item, home, tools):
     return Step(ballet_rehearsal.STEP_OF_STATUS[workshop.status], workshop.reason, lines)
 
 
+def nudge(item, home, tools):
+    """Le Monitor a vu le Workshop sans nouvelles (OPP-75) : le rôle attendu (le Choreographer tant que la question du
+    Dramaturg n'a pas de réponse, sinon le Dramaturg) reçoit un rappel de son dispatch, journalisé en relance. Un pas `wait`
+    n'est pas journalisé : ce n'est pas de l'activité, et le Monitor la verrait."""
+    workshop = _load(item, home)
+    if workshop.status != "open":
+        return Step(ballet_rehearsal.STEP_OF_STATUS[workshop.status], workshop.reason, [f"nothing to remind: the Workshop {workshop.item} is {workshop.status}"])
+    role = "choreographer" if workshop.question else "dramaturg"
+    if not (workshop.advisor_dispatch if role == "choreographer" else workshop.dispatch):
+        return Step("wait", done=[f"nobody to remind: the {role} of the Workshop {workshop.item} is not started"])
+    _send(workshop, role, f"{workshop.item} · {role}: Ballet is waiting for you", ballet_rehearsal.IDLE_REMINDER, "nudge", home, tools)
+    return Step("wait", done=[f"the {role} reminded: Ballet was waiting for it"])
+
+
 # --- le Dramaturg -------------------------------------------------------------
 
 
@@ -312,6 +328,7 @@ Under the Conductor:
 
 
 def _handle_worker_message(workshop, message, config, home, tools):
+    _follow_worker(workshop, message, home)
     if message.get("type") == "escalation":
         return _worker_stopped(workshop, message, home, tools)
     header, text = _parsed(message.get("body", ""))
@@ -339,7 +356,7 @@ def _worker_stopped(workshop, message, home, tools):
     """Un worker a fini son tour sans `worker_done` : relancé pour envoyer son message, une fois ; ensuite, ou
     s'il est tombé en erreur, c'est au Director."""
     payload = ballet_orca.payload(message)
-    role = _role_of(workshop, payload.get("dispatchId"))
+    role = _worker_role(workshop, message)
     if not role or payload.get("stopReason") != "finished" or workshop.nudges >= MAX_NUDGES:
         raise WorkshopError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
     workshop.nudges += 1
@@ -347,12 +364,29 @@ def _worker_stopped(workshop, message, home, tools):
     return Step("wait", done=[f"the {role} ended its turn without worker_done: asked to send its message"])
 
 
-def _role_of(workshop, dispatch):
-    if dispatch and dispatch == workshop.dispatch:
-        return "dramaturg"
-    if dispatch and dispatch == workshop.advisor_dispatch:
-        return "choreographer"
-    return None
+def _worker_role(workshop, message):
+    return ballet_orca.worker_role(message, _dispatches(workshop), workshop.handles)
+
+
+def _dispatches(workshop):
+    return {"dramaturg": workshop.dispatch, "choreographer": workshop.advisor_dispatch}
+
+
+def _follow_worker(workshop, message, home):
+    """Le worker reconnu garde son handle, et son dernier dispatch : Orca le rouvre sous un nouveau à chaque envoi (journal
+    `dispatch-moved`)."""
+    role = _worker_role(workshop, message)
+    if not role:
+        return
+    handle, dispatch = ballet_orca.worker_handle(message), ballet_orca.worker_dispatch(message)
+    if handle and not workshop.handles.get(role):
+        workshop.handles[role] = handle
+    if dispatch and dispatch != _dispatches(workshop)[role]:
+        _log(home, workshop, "dispatch-moved", {"role": role, "from": _dispatches(workshop)[role], "to": dispatch})
+        if role == "choreographer":
+            workshop.advisor_dispatch = dispatch
+        else:
+            workshop.dispatch = dispatch
 
 
 def _send(workshop, role, subject, body, how, home, tools):
@@ -737,8 +771,7 @@ def _received_step(workshop, message, config, home, tools):
 
 def _is_new_for(workshop, message):
     """Un message du Run qui revient à ce Workshop : de son Dramaturg ou de son Choreographer, et pas encore traité."""
-    workers = {workshop.dispatch, workshop.advisor_dispatch} - {""}
-    return message.get("id") not in workshop.received and ballet_orca.worker_dispatch(message) in workers
+    return message.get("id") not in workshop.received and bool(_worker_role(workshop, message))
 
 
 def _nothing_new(workshop, run_id, ignored):
@@ -773,8 +806,8 @@ def _parsed(body):
 # --- ligne de commande --------------------------------------------------------
 
 USAGE = ("usage: begin [<item>] | begin --request \"<request>\" | receive [<item>] --run <run-id> | receive [<item>] --message <msg-id> | receive [<item>] --dispatch <ctx-id> "
-         "| resume [<item>] | status [<item>]   (an item: a line of the backlog, OPP-N, FEAT-N, BUG-N or TASK-N, or the slug of a request's Workshop; "
-         "no <item> after receive, resume or status: the only open Workshop; none after begin: the Workshop picks the "
+         "| resume [<item>] | status [<item>] | nudge [<item>]   (an item: a line of the backlog, OPP-N, FEAT-N, BUG-N or TASK-N, or the slug of a request's Workshop; "
+         "no <item> after receive, resume, status or nudge: the only open Workshop; none after begin: the Workshop picks the "
          "first line of Next up that has no Workshop yet)")
 
 
@@ -806,7 +839,7 @@ def _command(command, arguments, home, tools):
         return begin(None, home, tools, request=arguments[1])
     if command == "begin" and len(arguments) <= 1:
         return begin(_item(arguments[0]) if arguments else None, home, tools)
-    if command in ("receive", "resume", "status"):
+    if command in ("receive", "resume", "status", "nudge"):
         item, rest = _item_and_rest(arguments, home)
         if command == "receive" and len(rest) == 2 and rest[0] == "--run":
             return receive_from_run(item, rest[1], home, tools)
@@ -816,6 +849,8 @@ def _command(command, arguments, home, tools):
             return resume(item, home, tools)
         if command == "status" and not rest:
             return status(item, home, tools)
+        if command == "nudge" and not rest:
+            return nudge(item, home, tools)
     raise UsageError(USAGE)
 
 

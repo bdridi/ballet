@@ -452,6 +452,63 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertEqual(step.next, "escalate")
         self.assertIn("invalid message", step.reason)
 
+    # --- nudge : le Monitor a vu le Workshop sans nouvelles ---
+
+    def nudge(self, item="BUG-004"):
+        return ballet_workshop.nudge(item, self.home, self.tools)
+
+    def reminders(self):
+        """Les rappels envoyés : (dispatch visé, sujet, corps)."""
+        sends = [command for command in self.world.ran("orca", "orchestration", "send")
+                 if "Ballet is waiting for you" in command[command.index("--subject") + 1]]
+        return [(command[command.index("--to") + 1], command[command.index("--subject") + 1], command[command.index("--body") + 1])
+                for command in sends]
+
+    def test_nudge_rappelle_au_dramaturg_son_message_et_le_journalise_en_relance(self):
+        self.begin()
+        step = self.nudge()
+        self.assertEqual((step.next, step.done), ("wait", ["the dramaturg reminded: Ballet was waiting for it"]))
+        self.assertEqual(self.reminders(), [("dispatch:ctx_1", "BUG-004 · dramaturg: Ballet is waiting for you", ballet_rehearsal.IDLE_REMINDER)])
+        relance = self.journal("handoff")[-1]["detail"]
+        self.assertEqual((relance["role"], relance["how"], relance["text"]), ("dramaturg", "nudge", ballet_rehearsal.IDLE_REMINDER))
+
+    def test_nudge_vise_le_choreographer_tant_que_sa_reponse_est_attendue(self):
+        self.begin()
+        self.asks()
+        self.nudge()
+        self.assertEqual([found[0] for found in self.reminders()], ["dispatch:ctx_2"])
+        self.assertIn("choreographer", self.reminders()[0][1])
+
+    def test_nudge_revient_au_dramaturg_une_fois_la_question_repondue(self):
+        self.begin()
+        self.asks()
+        self.advises()
+        self.nudge()
+        self.assertEqual([found[0] for found in self.reminders()], ["dispatch:ctx_1"])
+
+    def test_nudge_n_est_pas_de_l_activite_pour_le_journal_du_pas_wait(self):
+        self.begin()
+        before = [entry["event"] for entry in self.journal()]
+        self.nudge()
+        self.assertEqual([entry["event"] for entry in self.journal()], before + ["handoff"])
+
+    def test_nudge_d_un_workshop_escalade_redit_son_etat_sans_rien_envoyer(self):
+        self.begin()
+        self.receive("worker_done", message("question", "1. Which name?", to="director"))
+        step = self.nudge()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("is escalated", step.done[0])
+        self.assertEqual(self.reminders(), [])
+
+    def test_la_ligne_de_commande_nudge_sans_element_vise_le_seul_workshop_ouvert(self):
+        self.begin()
+        code, out, _ = self.run_main("nudge")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.strip().endswith("NEXT: wait"))
+        self.assertEqual(len(self.reminders()), 1)
+        self.assertEqual(self.run_main("nudge", "BUG-004")[0], 0)
+        self.assertEqual(self.run_main("nudge", "BUG-004", "--bogus")[0], 2)
+
     # --- le worker qui s'arrête sans rapport ---
 
     def stopped(self):
@@ -905,6 +962,14 @@ class BalletWorkshopTest(unittest.TestCase):
         self.world.run_batch = [seen, {"id": "msg_old", "type": "worker_done", "body": "{}", "payload": {"dispatchId": "ctx_9"}}]
         step = ballet_workshop.receive_from_run("BUG-004", "run_conductor", self.home, self.tools)
         self.assertEqual(step.done, ["no new message for Workshop BUG-004 in Orca run run_conductor (2 ignored)"])
+
+    def test_le_rapport_d_un_dramaturg_rouvert_sous_un_nouveau_dispatch_est_traite(self):
+        self.begin()
+        self.world.run_batch = [{"id": "msg_1", "type": "worker_done", "body": report(), "from_handle": "structworker_dramaturg",
+                                 "payload": {"dispatchId": "ctx_reopened"}}]
+        step = ballet_workshop.receive_from_run("BUG-004", "run_conductor", self.home, self.tools)
+        self.assertEqual(step.next, "done")
+        self.assertEqual(self.state()["dispatch"], "ctx_reopened")
 
     def test_aide_et_option_inconnue_sont_un_mauvais_usage_sans_rien_toucher(self):
         self.begin()

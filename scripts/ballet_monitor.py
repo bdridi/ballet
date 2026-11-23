@@ -9,7 +9,7 @@ Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boît
 **Règle : le Monitor ne poste que des événements, c'est-à-dire des faits** (quoi, quand, des chiffres, des liens), jamais une
 instruction ni une décision (« relance-le », « ferme-le », « redémarre »). Les décisions appartiennent à Maestro : les lignes
 `DECISION:` que son script écrit sous le message (`ballet_maestro.py`), puis son skill. Un message du Monitor se lit sans
-savoir ce que Maestro en fera. Quatre choses seulement :
+savoir ce que Maestro en fera. Cinq choses seulement :
 
 - **Un élément qui devient lançable.** Pour chaque projet de `maestro.toml`, la file GitHub est lue par `ballet_program.py` (les
   `Feature`, `Bug` et `Task` au champ `Ballet status` `ready`, avec leurs bloqueurs ouverts : les liens « Blocked by » de
@@ -22,8 +22,7 @@ savoir ce que Maestro en fera. Quatre choses seulement :
   gardés avec leurs bloqueurs dans la base (`ballet_db.py`, table `ready`) : un élément encore lançable au tour suivant n'est pas signalé deux fois ; un élément qui quitte `ready` (ou
   se rebloque) puis redevient lançable l'est de nouveau. C'est aussi ce que lit `ballet_maestro.py ready`.
 - **Un Conductor disparu.** Une ligne `running` du registre dont le terminal n'existe plus dans Orca devient un `status`
-  `<projet>#<élément> · gone`, priorité `high`, et la ligne passe à `gone`, une seule fois. Un Conductor figé (terminal
-  vivant, rien d'envoyé) n'est pas vu ici : c'est une autre opportunité.
+  `<projet>#<élément> · gone`, priorité `high`, et la ligne passe à `gone`, une seule fois.
 - **Un Conductor fini resté ouvert.** Une ligne `finished` du registre, d'un Conductor que Maestro a lancé, dont le
   terminal vit encore au-delà de `[conductors] close_finished_after_minutes` (10 par défaut, 0 : jamais) devient un
   `status` `<projet>#<élément> · finished`, une seule fois (`finished_told` dans le registre). Le Monitor ne ferme rien :
@@ -35,6 +34,14 @@ savoir ce que Maestro en fera. Quatre choses seulement :
   une session qui prend la suite (redémarrage, `/clear`) a un autre id, donc sa propre alerte. Un retour au-dessous du
   seuil (compaction) ne la réarme pas. Sans bail, il ne lit rien ; un bail sans id de session, un transcript introuvable
   ou un contexte plus grand que la fenêtre sont des erreurs du tour. Maestro décide (`DECISION: restart`).
+- **Un Conductor qui n'écrit plus** (OPP-75, l'attente sans fin). Pour chaque Conductor `running`, le nœud de sa Rehearsal ou de
+  son Workshop ouvert dans la base : s'il n'a aucun événement (lui et ses enfants) depuis `[conductors] idle_after_minutes`
+  (20 par défaut, 0 : jamais), le Monitor écrit `<projet>#<élément> · idle` : l'avis 1 (priorité `normal`) ; puis, si le
+  silence dure encore un intervalle, l'avis 2 (`high`) ; jamais plus de deux par épisode. Chaque avis est aussi une marque
+  `idle` sur le nœud : elle compte les avis, la Scène la montre, elle n'est pas de l'activité (comme les relances, `handoff`
+  `nudge`) ; une vraie activité réarme l'épisode. Un nœud qui attend un script (preuve, mutation) ou le Director (un enfant
+  ouvert joué par `script` ou `human`) n'est pas idle. Le corps dit le silence et le rôle attendu (le tour ouvert) ; Maestro
+  décide (`DECISION: nudge`, puis `ask the Director`).
 
 Un envoi qui échoue n'est pas noté comme fait : le tour suivant le refait. `gh` ou Orca injoignable est une ligne d'erreur
 du tour, jamais une panne de `run`.
@@ -46,7 +53,7 @@ import sys
 import time
 import tomllib
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import ballet_conductors
@@ -64,6 +71,9 @@ KEPT = ("item", "number", "type", "title", "priority", "url", "blocked_by", "dou
 READY_LINE = re.compile(r"^#(?P<number>\d+) · (?P<type>\w+) · ")
 READY_SUBJECT = re.compile(r"^([^\s#]+)(?:#\S+)? · ready\b")
 CONTEXT_SUBJECT = ballet_maestro.CONTEXT_SUBJECT
+IDLE_EVENT = "idle"
+NUDGE = "nudge"
+PLAYS = ("rehearsal", "workshop")           # les nœuds que joue un Conductor
 USAGE = "usage: once | run [--interval <seconds>]"
 
 
@@ -82,7 +92,7 @@ class Report:
 
 
 def once(orca, queue=ballet_program.ready_items, state=None):
-    """Un tour : la file de chaque projet, puis les Conductors dont le terminal a disparu."""
+    """Un tour : la file de chaque projet, les Conductors disparus, finis ou silencieux, puis le contexte de Maestro."""
     report = Report()
     _attempt(report, "state", lambda: ballet_legacy.refuse_if_pending(state))
     if report.errors:
@@ -92,6 +102,7 @@ def once(orca, queue=ballet_program.ready_items, state=None):
     _attempt(report, "Conductors", lambda: _watch_gone(orca, state, report))
     _attempt(report, "finished Conductors", lambda: _watch_finished(orca, state, report))
     _attempt(report, "Maestro context", lambda: _watch_context(orca, state, report))
+    _attempt(report, "idle Conductors", lambda: _watch_idle(orca, state, report))
     return report
 
 
@@ -280,6 +291,108 @@ def _tell_context(used, window, threshold, session, orca, state, report):
     body = f"Maestro's context is {used} tokens · {used * 100 // window}% of {window} · threshold {threshold}% · session {session}"
     _send(CONTEXT_SUBJECT, body, "normal", orca, state, report)
     _save_context_told(session, state)
+
+
+# --- un Conductor qui n'écrit plus ------------------------------------------------
+
+
+def _watch_idle(orca, state, report):
+    """Chaque Conductor `running` dont la Rehearsal ou le Workshop ouvert n'a rien écrit depuis `idle_after_minutes` : un
+    avis, puis un second si le silence dure encore un intervalle. Seuil à 0 : rien n'est lu."""
+    minutes = ballet_maestro.idle_minutes(ballet_maestro.read_config(state))
+    if not minutes:
+        return
+    for key, line in sorted(ballet_conductors.read(state).items()):
+        if ballet_conductors.state_of(line) == ballet_conductors.RUNNING:
+            _attempt(report, key, lambda: _watch_idle_of(key, minutes, orca, state, report))
+
+
+def _watch_idle_of(key, minutes, orca, state, report):
+    silence = _silence_of(key, state)
+    if not silence:
+        return
+    notice = _next_notice(silence, timedelta(minutes=minutes))
+    if notice:
+        _tell_idle(key, silence, notice, orca, state, report)
+
+
+def _silence_of(key, state):
+    """Le silence du jeu ouvert du Conductor ; rien quand il n'a pas de jeu ouvert, ou qu'il attend un script ou le Director."""
+    with ballet_db.reading(state) as connection:
+        play = _open_play(connection, key)
+        if not play or _waits_on_script_or_human(connection, play["id"]):
+            return None
+        since = _last_activity(connection, play["id"])
+        return {"node": play["id"], "kind": play["kind"], "name": play["name"], "since": since,
+                "marks": _idle_marks_after(connection, play["id"], since), "waiting": _awaited_turn(connection, play["id"])}
+
+
+def _next_notice(silence, interval):
+    """Le numéro du prochain avis (1 ou 2), ou rien : pas encore l'heure, ou les deux avis de l'épisode sont postés."""
+    now = datetime.now(timezone.utc)
+    if now - silence["since"] < interval:
+        return None
+    marks = silence["marks"]
+    if not marks:
+        return 1
+    return 2 if len(marks) == 1 and now - marks[-1] >= interval else None
+
+
+def _tell_idle(key, silence, notice, orca, state, report):
+    """L'avis part, puis la marque `idle` le note au journal : un envoi qui échoue sera refait au tour suivant."""
+    minutes = int((datetime.now(timezone.utc) - silence["since"]).total_seconds() // 60)
+    since = silence["since"].isoformat(timespec="seconds")
+    _send(f"{key} · idle", _idle_body(silence, notice, minutes, since), "normal" if notice == 1 else "high", orca, state, report)
+    waiting = silence["waiting"]
+    with ballet_db.writing(state) as connection:
+        ballet_journal.mark(connection, silence["node"], IDLE_EVENT, "monitor",
+                            {"notice": notice, "silent_minutes": minutes, "since": since, "role": waiting["name"] if waiting else ""})
+
+
+def _idle_body(silence, notice, minutes, since):
+    waiting = silence["waiting"]
+    awaited = f"the {waiting['name']} (turn started {waiting['started_at']})" if waiting else "no worker"
+    return (f"{silence['kind'].capitalize()} {silence['name']} · idle notice {notice} of 2 · no event for {minutes} min since {since} "
+            f"· waiting on {awaited}")
+
+
+def _open_play(connection, key):
+    """Le nœud de la Rehearsal ou du Workshop ouvert que joue ce Conductor (le plus récent), ou rien."""
+    marks = ", ".join("?" for _ in PLAYS)
+    return connection.execute(f"SELECT id, kind, name FROM nodes WHERE conductor = ? AND kind IN ({marks}) AND ended_at IS NULL "
+                              "ORDER BY started_at DESC, rowid DESC LIMIT 1", (key, *PLAYS)).fetchone()
+
+
+def _waits_on_script_or_human(connection, node):
+    """Un enfant ouvert joué par un script (preuve, mutation) ou le Director : l'attente est normale, pas un silence."""
+    return bool(connection.execute("SELECT 1 FROM nodes WHERE parent = ? AND ended_at IS NULL AND runner IN (?, ?) LIMIT 1",
+                                   (node, ballet_journal.SCRIPT, ballet_journal.HUMAN)).fetchone())
+
+
+def _last_activity(connection, node):
+    """La date du dernier événement du nœud et de ses enfants, sans les avis `idle` ni les relances : ce ne sont pas
+    des nouvelles de ceux qu'on attend."""
+    events = connection.execute(
+        "SELECT e.at, e.kind, e.data FROM events e JOIN nodes n ON n.id = e.node WHERE n.id = :node OR n.parent = :node",
+        {"node": node}).fetchall()
+    return max(datetime.fromisoformat(event["at"]) for event in events if not _is_not_activity(event))
+
+
+def _is_not_activity(event):
+    return event["kind"] in (IDLE_EVENT, NUDGE) or (event["kind"] == "handoff" and json.loads(event["data"]).get("how") == NUDGE)
+
+
+def _idle_marks_after(connection, node, since):
+    """Les dates des avis déjà postés sur ce nœud depuis cette dernière activité, dans l'ordre."""
+    rows = connection.execute("SELECT at FROM events WHERE node = ? AND kind = ? ORDER BY id", (node, IDLE_EVENT)).fetchall()
+    return [moment for moment in (datetime.fromisoformat(row["at"]) for row in rows) if moment >= since]
+
+
+def _awaited_turn(connection, node):
+    """Le tour ouvert d'un agent, le plus récent : c'est lui qu'on attend (son nom est le rôle) ; rien sans tour ouvert."""
+    return connection.execute("SELECT name, started_at FROM nodes WHERE parent = ? AND kind = 'turn' AND runner = ? "
+                              "AND ended_at IS NULL ORDER BY started_at DESC, rowid DESC LIMIT 1",
+                              (node, ballet_journal.AGENT)).fetchone()
 
 
 # --- la boîte ------------------------------------------------------------------
