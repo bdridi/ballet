@@ -268,6 +268,42 @@ class BalletGitHubTest(unittest.TestCase):
         with self.assertRaisesRegex(ballet_github.GitHubError, r"issue #42 was created.*init-project"):
             ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh)
 
+    def test_pose_le_mode_de_rehearsal_demande_a_la_publication(self):
+        gh = FakeGh(fields={"Ballet status": STATUS_OPTIONS, "Rehearsal mode": ["assisted", "autopilot"]})
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\nx\n"), "Feature", "ready", run=gh, mode="autopilot")
+        mutations = [call for call in gh.calls if any("setIssueFieldValue" in argument for argument in call)]
+        self.assertIn("field=FIELD-Rehearsal mode", mutations[-1])
+        self.assertIn("option=OPT-autopilot", mutations[-1])
+
+    def test_sans_mode_demande_la_publication_ne_touche_pas_au_champ(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\nx\n"), "Feature", "ready", run=gh)
+        mutations = [call for call in gh.calls if any("setIssueFieldValue" in argument for argument in call)]
+        self.assertEqual(len(mutations), 1)
+
+    def test_refuse_un_mode_inconnu_et_n_ecrit_rien(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Rehearsal mode 'night'"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh, mode="night")
+        self.assertEqual(gh.calls, [])
+
+    def test_sans_champ_rehearsal_mode_l_erreur_nomme_l_issue_et_init_project(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, r"issue #42 was created.*Rehearsal mode.*init-project"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh, mode="autopilot")
+
+    def test_pose_le_mode_d_une_issue_existante(self):
+        gh = FakeGh(fields={"Ballet status": STATUS_OPTIONS, "Rehearsal mode": ["assisted", "autopilot"]})
+        ballet_github.set_mode("#42", "autopilot", run=gh)
+        self.assertIn("field=FIELD-Rehearsal mode", gh.calls[-1])
+        self.assertIn("option=OPT-autopilot", gh.calls[-1])
+
+    def test_publish_en_ligne_de_commande_accepte_mode(self):
+        self.assertEqual(ballet_github._publish_options(["--mode", "autopilot"]), "autopilot")
+        self.assertIsNone(ballet_github._publish_options([]))
+        with self.assertRaisesRegex(ballet_github.GitHubError, "usage: publish"):
+            ballet_github._publish_options(["--fast"])
+
     def test_pose_le_statut_d_une_issue_existante(self):
         gh = FakeGh()
         ballet_github.set_status("#42", "in-rehearsal", run=gh)

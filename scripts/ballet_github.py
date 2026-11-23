@@ -1,7 +1,8 @@
 """Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues et les PR.
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
-    python3 ballet_github.py publish <brouillon.md> <type> <statut>   # crée l'issue (Feature, Bug ou Task) à son statut, affiche son numéro, et ses liens « blocked by »
+    python3 ballet_github.py publish <brouillon.md> <type> <statut> [--mode <mode>]   # crée l'issue (Feature, Bug ou Task) à son statut, et à son mode de Rehearsal si demandé ; affiche son numéro, et ses liens « blocked by »
+    python3 ballet_github.py mode    <issue> <mode>              # pose le champ `Rehearsal mode` d'une issue publiée (assisted, autopilot)
     python3 ballet_github.py block   <issue> --by <issue>        # pose un lien : la première issue est bloquée par la seconde (GitHub « Blocked by »)
     python3 ballet_github.py unblock <issue> --by <issue>        # retire ce lien
     python3 ballet_github.py decided-alone <issue>               # marque l'issue `ballet:decided-alone` : le Dramaturg a tranché sans le Director
@@ -24,7 +25,8 @@
 Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
 Le titre d'une issue est le premier titre `# …` de son brouillon ; le corps, tout le reste.
 `publish` pose le type natif de l'issue (`Feature`, `Bug` ou `Task`) et son champ `Ballet status` (`proposed`, `ready`,
-`in-rehearsal`, `plan-review`, `escalated`, `done`) : c'est ce qui la met dans la file. Il ajoute une section `## Plan`
+`in-rehearsal`, `plan-review`, `escalated`, `done`) : c'est ce qui la met dans la file ; avec `--mode`, aussi son champ
+`Rehearsal mode` (`assisted`, `autopilot` ; vide, la Rehearsal joue `assisted`). Il ajoute une section `## Plan`
 vide si le brouillon n'en a pas, pour que le Choreographer l'écrive. `slice` crée une issue de type `Slice`, sans statut :
 elle suit sa feature. Type et champ viennent de `init-project` ; absents, l'opération le dit.
 Les dépendances entre éléments sont les liens natifs de GitHub. Un brouillon qui porte une ligne `Depends on: FEAT-002, BUG-004`
@@ -73,6 +75,7 @@ SLICE_TYPE = "Slice"
 STATUS_FIELD = "Ballet status"
 MODE_FIELD = "Rehearsal mode"
 PLAN_APPROVAL_FIELD = "Plan approval"
+REHEARSAL_MODES = ("assisted", "autopilot")
 BALLET_STATUSES = ("proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done")
 NEXT_GLOBAL_ID = "X-Github-Next-Global-ID: 1"  # les ID d'issue et de champ au format actuel
 ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!) {
@@ -144,25 +147,26 @@ def read_issue(number, run=None):
     return _issue_body(number, run or _run_gh)
 
 
-def publish_issue(draft_path, issue_type, status, run=None, specs=None):
+def publish_issue(draft_path, issue_type, status, run=None, specs=None, mode=None):
     """Crée l'issue de son type et de son statut : c'est ce qui la met dans la file. Renvoie son numéro."""
-    return publish_issue_with_links(draft_path, issue_type, status, run, specs)[0]
+    return publish_issue_with_links(draft_path, issue_type, status, run, specs, mode)[0]
 
 
-def publish_issue_with_links(draft_path, issue_type, status, run=None, specs=None):
-    """Crée l'issue, puis pose ses liens « blocked by » (ligne `Depends on:` du brouillon) : renvoie son numéro et les notes sur
-    ses liens. Une dépendance inconnue refuse la publication avant de rien créer ; `specs` est l'espace specs où chercher une
-    dépendance pas encore publiée (par défaut celui du projet courant)."""
+def publish_issue_with_links(draft_path, issue_type, status, run=None, specs=None, mode=None):
+    """Crée l'issue, pose son mode de Rehearsal s'il est demandé, puis ses liens « blocked by » (ligne `Depends on:` du
+    brouillon) : renvoie son numéro et les notes sur ses liens. Une dépendance inconnue refuse la publication avant de rien
+    créer ; `specs` est l'espace specs où chercher une dépendance pas encore publiée (par défaut celui du projet courant)."""
     run = run or _run_gh
     _require_among(issue_type, PUBLISHED_TYPES, "issue type")
-    _require_among(status, BALLET_STATUSES, "Ballet status")
+    _require_among(status, BALLET_STATUSES, STATUS_FIELD)
+    if mode is not None:
+        _require_among(mode, REHEARSAL_MODES, MODE_FIELD)
     title, body = _title_and_body(_read_draft(draft_path))
     links = _plan_links(title, body, run, specs)
     number = _create_issue(title, _with_plan_section(body), run, issue_type)
-    try:
-        set_status(number, status, run)
-    except GitHubError as error:
-        raise GitHubError(f"issue #{number} was created, but its {STATUS_FIELD} is not '{status}': {error}")
+    _set_after_creation(number, STATUS_FIELD, status, run)
+    if mode is not None:
+        _set_after_creation(number, MODE_FIELD, mode, run)
     return number, _set_links(number, links, run)
 
 
@@ -202,10 +206,14 @@ def mark_decided_alone(number, run=None):
 
 def set_status(number, status, run=None):
     """Le champ `Ballet status` de l'issue : là où elle en est dans la file."""
-    run = run or _run_gh
-    _require_among(status, BALLET_STATUSES, "Ballet status")
-    issue, field, option = _status_ids(_issue_number(number), status, run)
-    _graphql(["-f", f"query={SET_STATUS}", "-f", f"issue={issue}", "-f", f"field={field}", "-f", f"option={option}"], run)
+    _require_among(status, BALLET_STATUSES, STATUS_FIELD)
+    _set_field(number, STATUS_FIELD, status, run or _run_gh)
+
+
+def set_mode(number, mode, run=None):
+    """Le champ `Rehearsal mode` de l'issue : comment sa Rehearsal tourne (`assisted` ou `autopilot`)."""
+    _require_among(mode, REHEARSAL_MODES, MODE_FIELD)
+    _set_field(number, MODE_FIELD, mode, run or _run_gh)
 
 
 def queue_fields(number, run=None):
@@ -417,7 +425,8 @@ def main(argv):
 def _dispatch(operation, arguments):
     operations = {
         "read": (read_issue, 1),
-        "publish": (_publish_and_say, 3),
+        "publish": (_publish_and_say, (3, 5)),
+        "mode": (_set_mode_and_say, 2),
         "block": (_block_by, 3),
         "unblock": (_unblock_by, 3),
         "decided-alone": (mark_decided_alone, 1),
@@ -439,15 +448,30 @@ def _dispatch(operation, arguments):
     }
     if operation not in operations:
         raise GitHubError(f"unknown operation '{operation}'; known: {', '.join(operations)}")
-    function, arity = operations[operation]
-    if len(arguments) != arity:
-        raise GitHubError(f"{operation} expects {arity} argument(s)")
+    function, arities = operations[operation]
+    arities = arities if isinstance(arities, tuple) else (arities,)
+    if len(arguments) not in arities:
+        raise GitHubError(f"{operation} expects {' or '.join(map(str, arities))} argument(s)")
     return function(*arguments)
 
 
-def _publish_and_say(draft_path, issue_type, status):
-    number, notes = publish_issue_with_links(draft_path, issue_type, status)
+def _publish_and_say(draft_path, issue_type, status, *options):
+    number, notes = publish_issue_with_links(draft_path, issue_type, status, mode=_publish_options(list(options)))
     return "\n".join([number, *(f"note: {note}" for note in notes)])
+
+
+def _publish_options(options):
+    """Les options de `publish` : rien, ou `--mode <mode>`."""
+    if not options:
+        return None
+    if len(options) != 2 or options[0] != "--mode":
+        raise GitHubError("usage: publish <draft.md> <type> <status> [--mode assisted|autopilot]")
+    return options[1]
+
+
+def _set_mode_and_say(number, mode):
+    set_mode(number, mode)
+    return f"#{_issue_number(number)} {MODE_FIELD}: {mode}"
 
 
 def _block_by(issue, flag, blocker):
@@ -553,16 +577,29 @@ def _create_issue(title, body, run, issue_type):
     return url.rsplit("/", 1)[-1]
 
 
-def _status_ids(number, status, run):
+def _set_after_creation(number, field, value, run):
+    """Un champ refusé après la création ne défait pas l'issue : l'erreur dit laquelle est restée sans lui."""
+    try:
+        _set_field(number, field, value, run)
+    except GitHubError as error:
+        raise GitHubError(f"issue #{number} was created, but its {field} is not '{value}': {error}")
+
+
+def _set_field(number, field, value, run):
+    issue, field_id, option = _field_ids(_issue_number(number), field, value, run)
+    _graphql(["-f", f"query={SET_STATUS}", "-f", f"issue={issue}", "-f", f"field={field_id}", "-f", f"option={option}"], run)
+
+
+def _field_ids(number, field, value, run):
     answer = _graphql(["-H", NEXT_GLOBAL_ID, "-f", f"query={ISSUE_AND_STATUS_FIELD}", "-F", "owner={owner}", "-F", "name={repo}",
                        "-F", f"number={number}"], run)["data"]
     fields = {node["name"]: node for node in answer["repositoryOwner"]["issueFields"]["nodes"] if node}
-    if STATUS_FIELD not in fields:
-        raise GitHubError(f"the owner has no '{STATUS_FIELD}' field: run /ballet:init-project")
-    options = {option["name"]: option["id"] for option in fields[STATUS_FIELD]["options"]}
-    if status not in options:
-        raise GitHubError(f"the '{STATUS_FIELD}' field has no option '{status}'")
-    return answer["repository"]["issue"]["id"], fields[STATUS_FIELD]["id"], options[status]
+    if field not in fields:
+        raise GitHubError(f"the owner has no '{field}' field: run /ballet:init-project")
+    options = {option["name"]: option["id"] for option in fields[field]["options"]}
+    if value not in options:
+        raise GitHubError(f"the '{field}' field has no option '{value}'")
+    return answer["repository"]["issue"]["id"], fields[field]["id"], options[value]
 
 
 # --- les liens de dépendance --------------------------------------------------

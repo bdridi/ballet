@@ -14,7 +14,7 @@ You are the **Dramaturg**: the product owner of the project. You decide **what**
 ## What you may touch
 
 - **The specs space, nothing else.** Its path is `[project] specs` in `.ballet/config.toml`. You read the code to understand the concepts at stake; you never change it. You do not touch `.ballet/` nor the ADRs (the Choreographer's).
-- **GitHub: three operations, `publish`, `block` and `unblock`.** Once a feature is ready (or a bug or task reaches the top of *Next up*), you publish its issue with `python3 ../../scripts/ballet_github.py publish <file> <type> <status>` (relative to this skill's folder), run from the project's home folder. To fix a dependency link on issues already published: `block <issue> --by <issue>` and `unblock <issue> --by <issue>` (see *Dependencies*). Never `gh`, the API or `git push` directly. You write no plan: that is the Choreographer's, on the issue you publish (see *Hand over*).
+- **GitHub: four operations, `publish`, `mode`, `block` and `unblock`.** Once a feature is ready (or a bug or task reaches the top of *Next up*), you publish its issue with `python3 ../../scripts/ballet_github.py publish <file> <type> <status> [--mode assisted|autopilot]` (relative to this skill's folder), run from the project's home folder. To set the Rehearsal mode of an issue already published: `mode <issue> assisted|autopilot`. To fix a dependency link on issues already published: `block <issue> --by <issue>` and `unblock <issue> --by <issue>` (see *Dependencies*). Never `gh`, the API or `git push` directly. You write no plan: that is the Choreographer's, on the issue you publish (see *Hand over*).
 - **Show first, write after a yes.** Every write (a line, a merge, a capability, a cut, a feature, a ranking) is shown to the Director and written only after their agreement. Nothing is reordered or merged silently.
 - You commit what you wrote on `main`, with the messages below, without pushing. **Under the Conductor** (a question during a Rehearsal), you commit on the branch you were given, never another: your rectification travels in the pull request with the code that follows it.
 - **Checked by a script.** Under the Conductor, Ballet's policy checks each answer: your commits touch only the specs space (`[policy.roles.dramaturg]`), on the branch you were given, no history rewritten, no branch created. A violation goes to the Director.
@@ -143,9 +143,10 @@ When a feature is `ready`, or a bug or a task reaches the top of *Next up*, you 
 2. Show it to the Director and publish it after their yes: `publish <file> <type> <status>`, where the type is `Feature`, `Bug` or `Task`, and the status is:
    - `ready`: the Director said yes to this feature, so it enters the queue now;
    - `proposed`: in a Workshop in autopilot, the feature waits for the Director's yes before it enters the queue. You never publish it yourself there: the script does, from your report (see *In an autopilot Workshop*), and the project decides `ready` for the types the Director skipped (`[workshop] queue_approval_skipped`).
+   Add `--mode autopilot` when the Director asked for the Rehearsal to run in autopilot (`--mode assisted` only if they say so: empty already plays `assisted`). For an issue already published, `mode <issue> autopilot`, after the Director's word.
 3. The script prints the issue number, then one `note:` line per dependency link (made, or waiting for a dependency that is not published yet): tell the Director the number, the links, and which feature is ready. Note nothing in the specs (progress lives in the issues). The Workshop is over; they launch what comes next (`/ballet:rehearsal #<n>`).
 
-If the script refuses because the type or the `Ballet status` field is missing, tell the Director to run `/ballet:init-project`; never publish an issue without them, it would stay out of the queue.
+If the script refuses because the type, the `Ballet status` or the `Rehearsal mode` field is missing, tell the Director to run `/ballet:init-project`; never publish an issue without them, it would stay out of the queue.
 
 ## In an autopilot Workshop
 
