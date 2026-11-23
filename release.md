@@ -2,6 +2,10 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
+## 0.43.1 — 2026-11-23 · `v0.43.1`
+
+- **Un commit est un signe de vie** : le Monitor ne compte plus seulement le journal ; le dernier commit du worktree de la Rehearsal (ou du Workshop), lu par `git log -1 --format=%cI`, repousse le silence s'il est plus récent. Un Dancer qui commite depuis 40 min sans rien envoyer n'est plus signalé `idle` ; un commit après l'avis 1 réarme l'épisode. Sans worktree lisible, seul le journal compte. Le corps de l'avis dit `no event nor commit for <n> min`. Monitor, skill Maestro, README, PRD à jour ; 4 tests.
+
 ## 0.43.0 — 2026-11-23 · `v0.43.0`
 
 La nuit perdue de FEAT-009 (#64, 22-23/11 : 9 h 06, dont 7 h 40 sans un événement). Cause trouvée dans la boîte d'Orca : le Choreographer avait répondu à la question du Dancer 21 secondes après (22:52:36), depuis un nouveau dispatch ; le script l'a ignorée sans rien dire. OPP-82, OPP-75, OPP-83 et OPP-84 traitées.

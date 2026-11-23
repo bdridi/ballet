@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -476,6 +478,41 @@ class BalletMonitorTest(unittest.TestCase):
         config["conductors"] = {"idle_after_minutes": minutes}
         ballet_maestro.write_config(config)
 
+    def worktree_committed(self, minutes_ago, name="FEAT-001.1"):
+        """Le worktree de la Rehearsal, un vrai dépôt git dont le dernier commit date de `minutes_ago`."""
+        worktree = Path(self._tmp.name) / f"worktree-{name}"
+        worktree.mkdir()
+        when = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+        environment = {**os.environ, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when, "GIT_AUTHOR_NAME": "t",
+                       "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for command in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "task"]):
+            subprocess.run(["git", "-C", str(worktree), *command], check=True, env=environment)
+        with ballet_db.writing() as connection:
+            ballet_store.save_in(connection, "antimurphy", "rehearsal", {"id": name, "status": "open", "worktree": str(worktree)})
+
+    def test_un_commit_recent_dans_le_worktree_est_un_signe_de_vie(self):
+        self.play(minutes_ago=40)
+        self.worktree_committed(minutes_ago=5)
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_commit_ancien_n_empeche_pas_l_avis(self):
+        self.play(minutes_ago=40)
+        self.worktree_committed(minutes_ago=30)
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+        self.assertIn("no event nor commit for 30 min", self.sent()[0][2])
+
+    def test_un_commit_apres_l_avis_1_rearme_l_episode(self):
+        self.play(minutes_ago=40)
+        self.turn()
+        self.worktree_committed(minutes_ago=1)
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_worktree_disparu_ne_compte_pas(self):
+        self.play(minutes_ago=25)
+        with ballet_db.writing() as connection:
+            ballet_store.save_in(connection, "antimurphy", "rehearsal", {"id": "FEAT-001.1", "status": "open", "worktree": "/nowhere"})
+        self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
+
     def test_pas_d_avis_avant_le_seuil(self):
         self.play(minutes_ago=19)
         self.assertEqual(self.turn().told, [])
@@ -486,7 +523,7 @@ class BalletMonitorTest(unittest.TestCase):
         self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
         subject, priority, body = self.sent()[0]
         self.assertEqual((subject, priority), ("antimurphy#12 · idle", "normal"))
-        self.assertRegex(body, r"^Rehearsal FEAT-001\.1 · idle notice 1 of 2 · no event for 25 min since \S+ "
+        self.assertRegex(body, r"^Rehearsal FEAT-001\.1 · idle notice 1 of 2 · no event nor commit for 25 min since \S+ "
                                r"· waiting on the dancer \(turn started \S+\)$")
         self.assertEqual(self.idle_marks(), [{"notice": 1, "silent_minutes": 25, "since": self.at.isoformat(timespec="seconds"),
                                               "role": "dancer"}])
@@ -512,7 +549,7 @@ class BalletMonitorTest(unittest.TestCase):
         self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
         subject, priority, body = self.sent()[1]
         self.assertEqual(priority, "high")
-        self.assertIn("idle notice 2 of 2 · no event for 46 min", body)
+        self.assertIn("idle notice 2 of 2 · no event nor commit for 46 min", body)
 
     def test_jamais_plus_de_deux_avis_par_episode(self):
         self.play(minutes_ago=25)
@@ -543,7 +580,7 @@ class BalletMonitorTest(unittest.TestCase):
         self.log("rehearsal", "FEAT-001.1", "proof-start", {"command": "make test"}, minutes_ago=59)
         self.log("rehearsal", "FEAT-001.1", "proof-end", {"passed": True}, minutes_ago=30)
         self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
-        self.assertIn("no event for 30 min", self.sent()[0][2])
+        self.assertIn("no event nor commit for 30 min", self.sent()[0][2])
 
     def test_une_nouvelle_activite_rearme_l_episode(self):
         self.play(minutes_ago=25)
@@ -563,7 +600,7 @@ class BalletMonitorTest(unittest.TestCase):
         self.log("rehearsal", "FEAT-001.1", "handoff", {"role": "dancer", "how": "nudge", "text": "hurry"}, minutes_ago=1)
         self.log("rehearsal", "FEAT-001.1", "nudge", {"role": "dancer"}, minutes_ago=1)
         self.assertEqual(self.turn().told, ["antimurphy#12 · idle"])
-        self.assertIn("idle notice 2 of 2 · no event for 46 min", self.sent()[1][2])
+        self.assertIn("idle notice 2 of 2 · no event nor commit for 46 min", self.sent()[1][2])
 
     def test_l_activite_d_un_enfant_compte(self):
         self.play(minutes_ago=60)

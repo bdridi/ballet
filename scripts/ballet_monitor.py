@@ -39,7 +39,8 @@ savoir ce que Maestro en fera. Cinq choses seulement :
   (20 par défaut, 0 : jamais), le Monitor écrit `<projet>#<élément> · idle` : l'avis 1 (priorité `normal`) ; puis, si le
   silence dure encore un intervalle, l'avis 2 (`high`) ; jamais plus de deux par épisode. Chaque avis est aussi une marque
   `idle` sur le nœud : elle compte les avis, la Scène la montre, elle n'est pas de l'activité (comme les relances, `handoff`
-  `nudge`) ; une vraie activité réarme l'épisode. Un nœud qui attend un script (preuve, mutation) ou le Director (un enfant
+  `nudge`) ; une vraie activité réarme l'épisode, et un commit dans le worktree du jeu en est une (un worker qui commite
+  travaille, même sans rien envoyer). Un nœud qui attend un script (preuve, mutation) ou le Director (un enfant
   ouvert joué par `script` ou `human`) n'est pas idle. Le corps dit le silence et le rôle attendu (le tour ouvert) ; Maestro
   décide (`DECISION: nudge`, puis `ask the Director`).
 
@@ -49,6 +50,7 @@ du tour, jamais une panne de `run`.
 
 import json
 import re
+import subprocess
 import sys
 import time
 import tomllib
@@ -73,7 +75,8 @@ READY_SUBJECT = re.compile(r"^([^\s#]+)(?:#\S+)? · ready\b")
 CONTEXT_SUBJECT = ballet_maestro.CONTEXT_SUBJECT
 IDLE_EVENT = "idle"
 NUDGE = "nudge"
-PLAYS = ("rehearsal", "workshop")           # les nœuds que joue un Conductor
+PLAYS = ("rehearsal", "workshop")
+PLAY_TABLES = {"rehearsal": ("rehearsals", "id"), "workshop": ("workshops", "item")}   # où lire l'état d'un jeu (son worktree)           # les nœuds que joue un Conductor
 USAGE = "usage: once | run [--interval <seconds>]"
 
 
@@ -322,7 +325,7 @@ def _silence_of(key, state):
         play = _open_play(connection, key)
         if not play or _waits_on_script_or_human(connection, play["id"]):
             return None
-        since = _last_activity(connection, play["id"])
+        since = _last_sign_of_life(connection, play)
         return {"node": play["id"], "kind": play["kind"], "name": play["name"], "since": since,
                 "marks": _idle_marks_after(connection, play["id"], since), "waiting": _awaited_turn(connection, play["id"])}
 
@@ -352,14 +355,14 @@ def _tell_idle(key, silence, notice, orca, state, report):
 def _idle_body(silence, notice, minutes, since):
     waiting = silence["waiting"]
     awaited = f"the {waiting['name']} (turn started {waiting['started_at']})" if waiting else "no worker"
-    return (f"{silence['kind'].capitalize()} {silence['name']} · idle notice {notice} of 2 · no event for {minutes} min since {since} "
+    return (f"{silence['kind'].capitalize()} {silence['name']} · idle notice {notice} of 2 · no event nor commit for {minutes} min since {since} "
             f"· waiting on {awaited}")
 
 
 def _open_play(connection, key):
     """Le nœud de la Rehearsal ou du Workshop ouvert que joue ce Conductor (le plus récent), ou rien."""
     marks = ", ".join("?" for _ in PLAYS)
-    return connection.execute(f"SELECT id, kind, name FROM nodes WHERE conductor = ? AND kind IN ({marks}) AND ended_at IS NULL "
+    return connection.execute(f"SELECT id, kind, name, project FROM nodes WHERE conductor = ? AND kind IN ({marks}) AND ended_at IS NULL "
                               "ORDER BY started_at DESC, rowid DESC LIMIT 1", (key, *PLAYS)).fetchone()
 
 
@@ -367,6 +370,34 @@ def _waits_on_script_or_human(connection, node):
     """Un enfant ouvert joué par un script (preuve, mutation) ou le Director : l'attente est normale, pas un silence."""
     return bool(connection.execute("SELECT 1 FROM nodes WHERE parent = ? AND ended_at IS NULL AND runner IN (?, ?) LIMIT 1",
                                    (node, ballet_journal.SCRIPT, ballet_journal.HUMAN)).fetchone())
+
+
+def _last_sign_of_life(connection, play):
+    """Le dernier signe de vie du jeu : son dernier événement, ou le dernier commit de son worktree s'il est plus récent.
+    Un worker qui commite travaille, même sans rien envoyer : ce n'est pas un silence."""
+    journal = _last_activity(connection, play["id"])
+    commit = _last_commit_at(_worktree_of(connection, play))
+    return max(journal, commit) if commit else journal
+
+
+def _worktree_of(connection, play):
+    """Le worktree de la Rehearsal ou du Workshop, lu dans son état ; vide s'il n'est pas lisible."""
+    table, column = PLAY_TABLES[play["kind"]]
+    row = connection.execute(f"SELECT data FROM {table} WHERE project = ? AND {column} = ?", (play["project"], play["name"])).fetchone()
+    return json.loads(row["data"]).get("worktree", "") if row else ""
+
+
+def _last_commit_at(worktree):
+    """La date du dernier commit du worktree (celle du commit, pas de l'auteur), en UTC ; rien sans worktree lisible."""
+    if not worktree or not Path(worktree).is_dir():
+        return None
+    try:
+        found = subprocess.run(["git", "-C", worktree, "log", "-1", "--format=%cI"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if found.returncode != 0 or not found.stdout.strip():
+        return None
+    return datetime.fromisoformat(found.stdout.strip()).astimezone(timezone.utc)
 
 
 def _last_activity(connection, node):
