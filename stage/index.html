@@ -153,7 +153,7 @@ pre.text { white-space:pre-wrap; word-break:break-word; margin:6px 0 0; padding:
   .seg.open { animation:blink 1.4s infinite; }
   /* gantt (ticket) */
   .gantt { display:grid; gap:4px; }
-  .gantt .g { display:grid; grid-template-columns:170px minmax(0,1fr) 70px; gap:10px; align-items:center; font-size:12.5px; }
+  .gantt .g { display:grid; grid-template-columns:170px minmax(0,1fr) 130px; gap:10px; align-items:center; font-size:12.5px; }
   .gantt .track { position:relative; height:16px; background:var(--panel); border-radius:4px; }
   .gantt .track i { position:absolute; top:2px; bottom:2px; border-radius:3px; background:var(--ok); min-width:2px; } .gantt .track i.plan { background:var(--choreographer); } .gantt .track i.ws { background:var(--dramaturg); } .gantt .track i.open { background:var(--run); }
   .chips { display:flex; flex-wrap:wrap; gap:6px; }
@@ -214,10 +214,25 @@ pre.text { white-space:pre-wrap; word-break:break-word; margin:6px 0 0; padding:
   .diffs .track b { position:absolute; top:-3px; bottom:-3px; width:0; border-left:2px dashed var(--bad); }
   .stack > span:first-child, .dgrid td { white-space:nowrap; }
   .rolebar { height:8px; border-radius:2px; background:var(--r); }
-  .tip { position:fixed; pointer-events:none; z-index:60; background:var(--fg); color:var(--bg); font-size:12px; line-height:1.4; padding:5px 9px; border-radius:6px; max-width:300px; box-shadow:0 4px 14px rgba(0,0,0,.2); display:none; }
+  .tip { position:fixed; pointer-events:none; z-index:60; background:var(--fg); color:var(--bg); font-size:12px; line-height:1.4; padding:5px 9px; border-radius:6px; max-width:520px; white-space:pre-line; box-shadow:0 4px 14px rgba(0,0,0,.2); display:none; }
   .offline { position:fixed; left:50%; transform:translateX(-50%); bottom:14px; z-index:40; padding:6px 12px; border-radius:8px; background:var(--bad-bg); color:var(--bad); font-size:12.5px; font-weight:600; }
   dialog.acc { border:1px solid var(--line); border-radius:12px; background:var(--surface); color:var(--fg); padding:18px 20px; max-width:440px; }
   dialog.acc::backdrop { background:rgba(0,0,0,.35); } dialog.acc h2 { font-size:16px; margin-bottom:8px; } dialog.acc p { font-size:13px; margin:0 0 14px; }
+  /* durée en grand, coût, frictions, détail d'une étape du script */
+  .bigs { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; }
+  .big { display:grid; gap:2px; } .big small { color:var(--muted); font-size:12px; display:flex; align-items:center; gap:6px; }
+  .big b { font-size:34px; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1.15; }
+  .big.live b { color:var(--run); } .big em { font-style:normal; font-size:12.5px; color:var(--muted); }
+  .big.live small::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--run); animation:blink 1.4s infinite; }
+  table.costs td.num, table.costs th.num { text-align:right; }
+  .fr { list-style:none; margin:0; padding:0; display:grid; gap:6px; font-size:13px; }
+  .fr li { display:grid; grid-template-columns:22px minmax(0,1fr); gap:6px; align-items:start; }
+  .fr li i { color:var(--warn); padding-top:3px; }
+  .ev.open-able > .lbody { cursor:pointer; } .ev.open-able > .lbody:hover > b { text-decoration:underline; }
+  .ev.open-able > .lbody > b:first-child::after { content:" \25B8"; color:var(--faint); font-weight:400; } .ev.opened > .lbody > b:first-child::after { content:" \25BE"; }
+  .det { margin-top:6px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--fg); font-size:12.5px; cursor:default; }
+  .det table { border-collapse:collapse; width:100%; } .det td { padding:2px 8px 2px 0; vertical-align:top; word-break:break-word; } .det td:first-child { color:var(--muted); white-space:nowrap; width:1%; }
+  .det pre.text { max-height:360px; overflow:auto; }
   @media (max-width:900px) { .layout { grid-template-columns:1fr; height:auto; } aside { max-height:40vh; } .top nav { display:none; } }
 </style>
 </head>
@@ -248,8 +263,14 @@ const ago = at => `il y a ${dur(secs(at))}`;
 const median = xs => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
 const role = who => `<span class="role r-${esc(who)}">${esc(ROLE[who] || who)}</span>`;
 const ICON = {agent:'fa-robot', script:'fa-gear', human:'fa-user'};
+/* Chaque étape déterministe a son icône : la preuve, la mutation, la politique, la taille du diff. */
+const STEP_ICON = {proof:'fa-flask-vial', mutation:'fa-dna', policy:'fa-scale-balanced', size:'fa-ruler-combined'};
+const iconOfNode = n => STEP_ICON[n.kind] || ICON[n.runner];
+const tok = n => n >= 1e6 ? `${(n / 1e6).toFixed(1).replace('.', ',')} M` : n >= 1e3 ? `${Math.round(n / 1e3)} k` : String(n);
+const usd = x => `$${x.toFixed(2)}`;
 const runnerOf = who => who === 'director' ? 'human' : ['conductor', 'script'].includes(who) ? 'script' : 'agent';
-const rn = (runner, who = '') => `<span class="rn ${runner}" style="${runner === 'agent' ? `--r:var(--${who})` : ''}"><i class="fa-solid ${ICON[runner]}"></i></span>`;
+const rn = (runner, who = '', icon = '') => `<span class="rn ${runner}" style="${runner === 'agent' ? `--r:var(--${who})` : ''}"><i class="fa-solid ${icon || ICON[runner]}"></i></span>`;
+const rnNode = n => rn(n.runner, nodeWho(n), iconOfNode(n));
 const nodeWho = n => n.kind === 'turn' ? n.name : n.runner === 'human' ? 'director' : 'script';
 const label = n => n.kind === 'turn' ? (ROLE[n.name] || n.name) : n.kind === 'proof' ? 'Preuve' : n.kind === 'mutation' ? `Mutation ${n.name}` : n.kind === 'director' ? 'Attente du Director' : n.name;
 const outc = (o, ended = true) => ended ? `<span class="outc ${o}">${{ok:'ok', failed:'échec', escalated:'escaladé', stopped:'arrêté', timeout:'trop long'}[o] || o}</span>` : '<span class="outc running">en cours</span>';
@@ -280,6 +301,70 @@ function sessions(kind) {
   }).sort((a, b) => a.started_at < b.started_at ? 1 : -1);
 }
 const sessionOf = p => sessions(p.kind).find(s => s.key === p.session);
+/* Le coût de plusieurs représentations (un ticket : son Workshop, son plan, ses slices) : les rôles fusionnés, le total,
+   et ce qui manque (un coût encore en calcul, un journal absent). */
+function costOf(ps) {
+  const roles = new Map(), out = {usd:0, tokens:0, cache_read:0, pending:0, missing:[], left_out:[], roles:[]};
+  for (const p of ps) {
+    const c = p.cost;
+    if (!c) { out.pending++; continue; }
+    if (c.missing) { out.missing.push(`${p.key} : ${c.missing}`); continue; }
+    out.usd += c.usd; out.tokens += c.tokens; out.cache_read += c.cache_read; out.left_out.push(...c.left_out.map(x => `${p.key} : ${x}`));
+    for (const r of c.roles) { const m = roles.get(r.role) || {role:r.role, models:new Set(), tokens:0, cache_read:0, output:0, usd:0};
+      r.models.forEach(x => m.models.add(x)); m.tokens += r.tokens; m.cache_read += r.cache_read; m.output += r.output; m.usd += r.usd; roles.set(r.role, m); }
+  }
+  out.roles = [...roles.values()].map(r => ({...r, models:[...r.models]})).sort((a, b) => b.usd - a.usd);
+  return out;
+}
+/* Le coût cumulé de plusieurs représentations (une session de Conductor, un ticket) : `…` tant qu'une se calcule. */
+const costSum = ps => { const c = costOf(ps); return !c.roles.length ? (c.pending ? '<span class="faint">…</span>' : '<span class="faint">—</span>')
+  : `<span ${tip(`${tok(c.tokens)} tokens, dont ${tok(c.cache_read)} lus en cache${c.pending ? ` · ${c.pending} encore en calcul` : ''}`)}>${usd(c.usd)}${c.pending ? '…' : ''}</span>`; };
+/* Le coût d'un ticket : une ligne par représentation (Workshop, plan, slices), une colonne par session d'agent, le cumul en bas. */
+function costMatrix(ps) {
+  const total = costOf(ps), roles = total.roles.map(r => r.role);
+  if (!roles.length) return costTable(total);
+  const cell = (c, r) => { const x = c.roles.find(y => y.role === r); return x ? `<span ${tip(`${tok(x.tokens)} tokens · ${x.models.join(', ')}`)}>${usd(x.usd)}</span>` : '<span class="faint">—</span>'; };
+  const name = p => p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : esc(p.key);
+  return `<table class="list costs"><tr><th>Représentation</th>${roles.map(r => `<th class="num">${role(r.toLowerCase())}</th>`).join('')}<th class="num">Tokens</th><th class="num">Total</th></tr>
+    ${ps.map(p => { const c = costOf([p]); return `<tr data-href="#/play/${p.node}"><td><b>${name(p)}</b>${p.ended_at ? '' : ' ' + outc('', false)}</td>${c.roles.length ? roles.map(r => `<td class="num">${cell(c, r)}</td>`).join('') + `<td class="num muted">${tok(c.tokens)}</td><td class="num"><b>${usd(c.usd)}</b></td>`
+      : `<td colspan="${roles.length + 2}" class="faint">${c.pending ? 'en calcul…' : esc(c.missing.join(' · '))}</td>`}</tr>`; }).join('')}
+    <tr><td><b>Cumul</b></td>${roles.map(r => `<td class="num"><b>${cell(total, r)}</b></td>`).join('')}<td class="num"><b>${tok(total.tokens)}</b></td><td class="num"><b>${usd(total.usd)}</b></td></tr></table>${costNotes([...total.left_out, ...total.missing])}
+    <div class="diag-note">Gardé à la fin de chaque représentation (<code>frictions.cost</code>), sinon lu dans les journaux de Claude Code. Le dollar est l'équivalent au prix de l'API ; les tokens, la mesure du quota.</div>`;
+}
+const costCell = p => !p.cost ? '<span class="faint">…</span>' : p.cost.missing ? `<span class="faint" ${tip(p.cost.missing)}>—</span>` : `<span ${tip(`${tok(p.cost.tokens)} tokens, dont ${tok(p.cost.cache_read)} lus en cache`)}>${usd(p.cost.usd)}</span>`;
+/* Durée en grand : un minuteur vivant tant que ça joue. */
+function bigDuration(start, end, what, played = 'jouée') {
+  const live = !end;
+  return `<div class="card big ${live ? 'live' : ''}"><small><i class="fa-solid fa-stopwatch"></i>${live ? `${what} en cours depuis` : `${what} ${played} en`}</small>
+    <b ${live ? `class="elapsed" data-since="${start}"` : ''}>${dur(secs(start, end))}</b><em>${dayOf(start)} ${clock(start)}${end ? ` → ${dayOf(end) === dayOf(start) ? '' : dayOf(end) + ' '}${clock(end)}` : ' → maintenant'}</em></div>`;
+}
+function bigCost(c, count) {
+  const sure = !c.pending && !c.missing.length;
+  return `<div class="card big"><small><i class="fa-solid fa-coins"></i>Coût${count > 1 ? ` · ${count} représentations` : ''} · équivalent au prix de l'API</small>
+    <b>${c.roles.length ? usd(c.usd) : c.pending ? '…' : '—'}</b><em>${tok(c.tokens)} tokens, dont ${tok(c.cache_read)} lus en cache${c.pending ? ` · ${c.pending} en calcul` : ''}${!sure && c.missing.length ? ` · ${c.missing.length} sans journal` : ''}</em></div>`;
+}
+/* Ce que le coût ne compte pas (un Conductor introuvable, un modèle sans prix) : en entier jusqu'à 3, résumé au-delà. */
+const costNotes = notes => !notes.length ? '' : notes.length <= 3 ? `<div class="diag-note">${notes.map(esc).join('<br>')}</div>`
+  : `<div class="diag-note" ${tip(notes.join('\n'))}><i class="fa-solid fa-circle-info"></i> ${notes.length} parts du coût non comptées (un Conductor introuvable, un modèle sans prix…) · survoler pour le détail</div>`;
+function costTable(c) {
+  if (!c.roles.length) return `<p class="muted">${c.pending ? 'Coût en calcul : lu dans les journaux de Claude Code…' : 'Pas de coût : ' + esc(c.missing.join(' · ') || 'aucun journal')}</p>`;
+  return `<table class="list costs"><tr><th>Session</th><th class="num">Tokens</th><th class="num">Lus en cache</th><th class="num">Sortie</th><th class="num">$</th></tr>
+    ${c.roles.map(r => `<tr><td>${role(r.role.toLowerCase())}<div class="faint mono" style="font-size:11px">${esc(r.models.join(', '))}</div></td><td class="num">${tok(r.tokens)}</td><td class="num muted">${tok(r.cache_read)}</td><td class="num muted">${tok(r.output)}</td><td class="num"><b>${usd(r.usd)}</b></td></tr>`).join('')}
+    <tr><td><b>Total</b></td><td class="num"><b>${tok(c.tokens)}</b></td><td class="num muted">${tok(c.cache_read)}</td><td></td><td class="num"><b>${usd(c.usd)}</b></td></tr></table>
+    ${costNotes([...c.left_out, ...c.missing])}
+    <div class="diag-note">Lu dans les journaux de Claude Code (<code>~/.claude/projects</code>), sur la fenêtre de la représentation. Le Director est sur un abonnement : le dollar est l'équivalent au prix de l'API, les tokens sont la mesure du quota.</div>`;
+}
+const FRICTION_ICON = {escalation:'fa-triangle-exclamation', rejections:'fa-rotate-left', red_proofs:'fa-flask-vial', red_mutations:'fa-dna', refused_reports:'fa-ban', nudges:'fa-bell', idle:'fa-hourglass-half', policy:'fa-scale-balanced', diff:'fa-ruler-combined'};
+/* Les genres de frictions de plusieurs représentations, comptés : `escalation ×5 · policy ×2 · diff`. */
+const frictionKinds = ps => { const n = {}; ps.forEach(p => p.frictions.list.forEach(f => n[f.kind] = (n[f.kind] || 0) + 1));
+  return Object.entries(n).sort((a, b) => b[1] - a[1]).map(([k, c]) => c > 1 ? `${k} ×${c}` : k).join(' · '); };
+const frictionList = list => list.length ? `<ul class="fr">${list.map(f => `<li><i class="fa-solid ${FRICTION_ICON[f.kind] || 'fa-circle-exclamation'}"></i><span>${esc(f.text)}</span></li>`).join('')}</ul>` : '<p class="muted" style="margin:0">Aucune friction.</p>';
+/* Le retour de la représentation : ce que le script a dit à sa fin (le `done`), et ses frictions. */
+function feedback(p) {
+  const done = (PLAYS[p.node]?.marks || []).filter(e => ['done', 'handover', 'published', 'stopped'].includes(e.kind)).at(-1);
+  return `<div class="card"><h3><i class="fa-solid fa-triangle-exclamation"></i> Frictions <em>· ${p.frictions.live ? 'calculées sur le moment' : 'gardées à la fin'}</em><span class="badge ${p.frictions.list.length ? 'warn' : 'ok'}" style="margin-left:auto">${p.frictions.list.length}</span></h3>${frictionList(p.frictions.list)}
+    ${done ? `<h3 style="margin-top:14px"><i class="fa-solid fa-flag-checkered"></i> Retour du script <em>· ${clock(done.at)}</em></h3><div style="font-size:13px">${esc(done.data.reason || done.kind)}</div>${(done.data.done || []).length ? `<ul class="steps">${done.data.done.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}` : ''}</div>`;
+}
 
 /* --- la sidebar (blocs pliables) --------------------------------------------------------------- */
 function block(key, cls, title, count, body, foot = '') {
@@ -289,7 +374,7 @@ function side(rt) {
   const picked = id => rt.id === id ? 'picked' : '';
   const live = running().map(p => { const n = openNode(p);
     return `<a class="item ${picked(p.node)}" href="#/play/${p.node}"><div class="row"><span class="proj">${p.project}</span><b>${esc(p.key)}</b>${p.simulated ? '<span class="sim">simulé</span>' : ''}<span class="end muted" style="font-size:11.5px">${p.mode}</span></div>
-      <div class="t">${esc(p.title)}</div>${n ? `<div class="s">${rn(n.runner, nodeWho(n))}<span>${esc(label(n))}</span><span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>` : ''}</a>`; }).join('');
+      <div class="t">${esc(p.title)}</div>${n ? `<div class="s">${rnNode(n)}<span>${esc(label(n))}</span><span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>` : ''}</a>`; }).join('');
   const waits = running().filter(p => openNode(p)?.runner === 'human').map(p => `<a class="item" href="#/play/${p.node}"><div class="row"><span class="proj">${p.project}</span><b>${esc(p.key)}</b><span class="badge warn end">escalade</span></div><div class="t">${esc(openNode(p).events[0]?.data.reason)}</div></a>`).join('')
     + STAGE.proposed.filter(inProject).map(x => `<div class="item"><div class="row"><span class="proj">${x.project}</span><b>${x.item}</b><span class="badge warn end">proposed</span></div><div class="t">${esc(x.title)}</div><div class="s">${x.decided_alone} décisions prises seul</div><div class="acts" style="justify-content:flex-start;margin-top:5px">${acceptActs(x)}</div></div>`).join('');
   const ready = STAGE.ready.filter(inProject).map((x, i) => `<a class="item" href="#/program"><div class="row"><span class="faint num">${i + 1}</span><span class="proj">${x.project}</span><b>${x.item}</b><span class="kind end">${x.type} · ${x.priority}</span></div><div class="t">${esc(x.title)}</div>${x.blocked_by.length ? `<div class="s"><i class="fa-solid fa-link"></i> bloqué par ${x.blocked_by.join(', ')}</div>` : ''}</a>`).join('');
@@ -313,13 +398,13 @@ const PAGES = {
       return `<a class="card now-card ${human ? 'esc' : ''}" href="#/play/${p.node}">
         <div class="crumbs"><span class="proj">${p.project}</span>›<span>Conductor #${esc(s?.item)}</span>›<span>${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : 'Rehearsal'} <b>${esc(p.key)}</b></span>${p.simulated ? '<span class="sim">simulé</span>' : ''}<span style="margin-left:auto">${p.mode}</span></div>
         <div class="muted" style="margin-top:-6px">${esc(p.title)}</div>
-        <div class="now-big">${rn(n.runner, nodeWho(n))}<b>${esc(label(n))}</b><span class="muted" style="font-size:13px">${{agent:'un agent travaille', script:'étape déterministe', human:'à toi de décider'}[n.runner]}</span><span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>
+        <div class="now-big">${rnNode(n)}<b>${esc(label(n))}</b><span class="muted" style="font-size:13px">${{agent:'un agent travaille', script:'étape déterministe', human:'à toi de décider'}[n.runner]}</span><span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>
         ${human ? `<div class="callout">${esc(n.events[0]?.data.reason)}</div>` : ''}${lanes(p)}
-        <div class="hero-line">${p.counts.turn} tours · ${p.counts.proof} preuves · ${p.counts.mutation} mutations · ouverte depuis ${dur(secs(p.started_at))}</div></a>`; };
+        <div class="hero-line">${p.counts.turn} tours · ${p.counts.proof} preuves · ${p.counts.mutation} mutations · ${p.frictions.list.length} frictions · coût ${costCell(p)} · ouverte depuis <span class="elapsed" data-since="${p.started_at}">${dur(secs(p.started_at))}</span></div></a>`; };
     const list = items => { const {rows, nav} = paged('scene', items);
       return nav + `<table class="list"><tr><th></th><th>Représentation</th><th>Qui joue</th><th>Depuis</th><th style="width:34%">Portées</th><th>Ouverte</th></tr>${rows.map(({p, n}) =>
         `<tr data-href="#/play/${p.node}" ${n.runner === 'human' ? 'style="box-shadow:inset 3px 0 var(--warn)"' : ''}><td><span class="proj">${p.project}</span></td><td><b>${esc(p.key)}</b> <span class="kind">${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : 'Rehearsal'}</span>${p.simulated ? ' <span class="sim">simulé</span>' : ''}<div class="muted" style="font-size:12px">${esc(p.title)}</div></td>
-        <td>${rn(n.runner, nodeWho(n))} ${esc(label(n))}</td><td class="num elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</td><td>${lanes(p)}</td><td class="num muted">${dur(secs(p.started_at))}</td></tr>`).join('')}</table>`; };
+        <td>${rnNode(n)} ${esc(label(n))}</td><td class="num elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</td><td>${lanes(p)}</td><td class="num muted">${dur(secs(p.started_at))}</td></tr>`).join('')}</table>`; };
     const waiting = live.filter(x => x.n?.runner === 'human').length;
     return `<div><h1>En scène</h1><div class="hero-line">${live.length} représentation(s) en cours${waiting ? ` · <b style="color:var(--warn)">${waiting} attend(ent) le Director</b>` : ''} · ${project === 'all' ? 'tous les projets' : project}
         <span class="tabs" style="margin-left:auto">${[['cards', 'Cartes'], ['list', 'Liste']].map(([k, l]) => `<button data-scene="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</span></div></div>
@@ -339,8 +424,8 @@ const PAGES = {
   tickets() {
     const {rows, nav} = paged('tickets', tickets().sort((a, b) => (b.parent || b.key).localeCompare(a.parent || a.key) || a.key.localeCompare(b.key)));
     return `<div><h1>Tickets</h1><div class="hero-line">Tous les tickets joués, slices comprises</div></div>
-      ${nav}<table class="list"><tr><th>Ticket</th><th>Type</th><th>Titre</th><th>Statut</th><th>PR</th><th>Durée</th><th>Tours</th><th>Diff</th></tr>${rows.map(p =>
-        `<tr data-href="${p.type === 'Feature' && slicesOf(p.key).length ? '#/ticket/' + p.key : '#/play/' + p.node}"><td style="${p.parent ? 'padding-left:28px' : ''}"><span class="proj">${p.project}</span> <b>${esc(p.key)}</b></td><td><span class="kind">${p.planning ? 'Plan' : p.type}</span></td><td>${esc(p.title)}</td><td>${outc(p.outcome, !!p.ended_at)}</td><td>${p.pr ? '#' + p.pr : '—'}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.counts.turn}</td><td class="num">${p.diff ?? '—'}</td></tr>`).join('')}</table>`;
+      ${nav}<table class="list"><tr><th>Ticket</th><th>Type</th><th>Titre</th><th>Statut</th><th>PR</th><th>Durée</th><th>Tours</th><th>Diff</th><th>Frictions</th><th>Coût</th></tr>${rows.map(p =>
+        `<tr data-href="${p.type === 'Feature' && slicesOf(p.key).length ? '#/ticket/' + p.key : '#/play/' + p.node}"><td style="${p.parent ? 'padding-left:28px' : ''}"><span class="proj">${p.project}</span> <b>${esc(p.key)}</b></td><td><span class="kind">${p.planning ? 'Plan' : p.type}</span></td><td>${esc(p.title)}</td><td>${outc(p.outcome, !!p.ended_at)}</td><td>${p.pr ? '#' + p.pr : '—'}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.counts.turn}</td><td class="num">${p.diff ?? '—'}</td><td class="num">${p.frictions.list.length}</td><td class="num">${costCell(p)}</td></tr>`).join('')}</table>`;
   },
   ticket(key) {
     const ps = plays().filter(p => p.key === key || p.parent === key), slices = ps.filter(p => p.parent === key), f = ps.find(p => p.key === key && !p.planning) || ps[0];
@@ -349,13 +434,27 @@ const PAGES = {
     const nodes = ps.flatMap(nodesOf), sum = r => nodes.filter(n => n.runner === r).reduce((s, n) => s + secs(n.started_at, n.ended_at), 0);
     return `<div class="crumbs"><a href="#/tickets">Tickets</a> / ${esc(key)}</div>
       <div><h1><span class="muted">${esc(key)}</span> ${esc(f.title)}</h1><div class="hero-line"><span class="proj">${f.project}</span><span>${f.type}</span>${f.issue ? `<span>#${f.issue}</span>` : ''}<span>${slices.length} slices</span></div></div>
-      <div class="metrics"><div class="metric"><small>Slices</small><b>${slices.filter(p => p.ended_at).length}<em> / ${slices.length}</em></b></div><div class="metric"><small>De bout en bout</small><b>${dur(Math.round((t1 - t0) / 1000))}</b></div>
+      <div class="bigs">${bigDuration(new Date(t0).toISOString(), all.every(p => p.ended_at) ? new Date(t1).toISOString() : null, 'Ticket', 'joué')}${bigCost(costOf(all), all.length)}
+        <div class="card big"><small><i class="fa-solid fa-triangle-exclamation"></i>Frictions</small><b style="${all.some(p => p.frictions.list.length) ? 'color:var(--warn)' : ''}">${all.reduce((n, p) => n + p.frictions.list.length, 0)}</b><em>sur ${all.length} représentations</em></div></div>
+      <div class="metrics"><div class="metric"><small>Slices</small><b>${slices.filter(p => p.ended_at).length}<em> / ${slices.length}</em></b></div>
         <div class="metric"><small>Tours d'agents</small><b>${nodes.filter(n => n.kind === 'turn').length}</b></div><div class="metric"><small>Lignes</small><b>${slices.reduce((s, p) => s + (p.diff || 0), 0)}</b></div>
         <div class="metric"><small>Attentes du Director</small><b>${nodes.filter(n => n.kind === 'director').length}</b></div>
         <div class="metric"><small><i class="fa-solid fa-robot"></i> / <i class="fa-solid fa-gear"></i> / <i class="fa-solid fa-user"></i></small><b style="font-size:14px">${dur(sum('agent'))} · ${dur(sum('script'))} · ${dur(sum('human'))}</b></div></div>
       ${slices.length > 3 ? `<div class="callout"><b>Coût</b> · ${slices.length} slices : au-dessus de la règle des 3 slices au plus (0.30.0).</div>` : ''}
-      <div class="card"><h3>Déroulé</h3><div class="gantt">${all.map(p => `<a class="g" href="#/play/${p.node}"><span><b>${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : esc(p.key)}</b></span><span class="track"><i class="${p.kind === 'workshop' ? 'ws' : p.planning ? 'plan' : p.ended_at ? '' : 'open'}" style="left:${x(p.started_at)}%;width:${Math.max(0.4, x(p.ended_at) - x(p.started_at))}%"></i></span><span class="muted num">${dur(secs(p.started_at, p.ended_at))}</span></a>`).join('')}</div></div>
-      <div><h3>Slices</h3>${paged('slices-' + key, slices).nav}<table class="list"><tr><th>Slice</th><th>Titre</th><th>Statut</th><th>PR</th><th>Durée</th><th>Allers-retours</th><th>Diff</th></tr>${paged('slices-' + key, slices).rows.map(p => `<tr data-href="#/play/${p.node}"><td><b>${esc(p.key)}</b></td><td>${esc(p.title)}</td><td>${outc(p.outcome, !!p.ended_at)}</td><td>${p.pr ? '#' + p.pr : '—'}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.round_trips}</td><td class="num">${p.diff ?? '—'}</td></tr>`).join('')}</table></div>`;
+      <div class="card"><h3>Déroulé</h3><div class="gantt">${all.map(p => `<a class="g" href="#/play/${p.node}"><span><b>${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : esc(p.key)}</b></span><span class="track"><i class="${p.kind === 'workshop' ? 'ws' : p.planning ? 'plan' : p.ended_at ? '' : 'open'}" style="left:${x(p.started_at)}%;width:${Math.max(0.4, x(p.ended_at) - x(p.started_at))}%"></i></span><span class="muted num">${dur(secs(p.started_at, p.ended_at))} · ${costCell(p)}</span></a>`).join('')}</div></div>
+      <div class="card"><h3><i class="fa-solid fa-coins"></i> Coût par session <em>· chaque représentation, et le cumul du ticket</em></h3>${costMatrix(all)}</div>
+        <div class="card"><h3><i class="fa-solid fa-triangle-exclamation"></i> Frictions</h3>${all.map(p => `<div style="margin-bottom:10px"><a href="#/play/${p.node}"><b>${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : esc(p.key)}</b></a> <span class="badge ${p.frictions.list.length ? 'warn' : 'ok'}">${p.frictions.list.length}</span>${p.frictions.list.length ? `<div style="margin-top:4px">${frictionList(p.frictions.list)}</div>` : ''}</div>`).join('')}</div>
+      <div><h3>Slices</h3>${paged('slices-' + key, slices).nav}<table class="list"><tr><th>Slice</th><th>Titre</th><th>Statut</th><th>PR</th><th>Durée</th><th>Allers-retours</th><th>Diff</th><th>Frictions</th><th>Coût</th></tr>${paged('slices-' + key, slices).rows.map(p => `<tr data-href="#/play/${p.node}"><td><b>${esc(p.key)}</b></td><td>${esc(p.title)}</td><td>${outc(p.outcome, !!p.ended_at)}</td><td>${p.pr ? '#' + p.pr : '—'}</td><td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${p.round_trips}</td><td class="num">${p.diff ?? '—'}</td><td class="num">${p.frictions.list.length}</td><td class="num">${costCell(p)}</td></tr>`).join('')}</table></div>`;
+  },
+  frictions() {
+    const all = plays().filter(p => !p.planning || p.frictions.list.length).sort((a, b) => a.started_at < b.started_at ? 1 : -1), c = costOf(all);
+    const {rows, nav} = paged('frictions', all);
+    return `<div><h1>Frictions et coût</h1><div class="hero-line">Ce qui a coincé, coûté un tour de plus ou tourné en rond, et ce que chaque représentation a coûté · ${project === 'all' ? 'tous les projets' : project}</div></div>
+      <div class="bigs">${bigCost(c, all.length)}<div class="card big"><small><i class="fa-solid fa-triangle-exclamation"></i>Frictions</small><b>${all.reduce((n, p) => n + p.frictions.list.length, 0)}</b><em>${esc(frictionKinds(all) || 'aucune')}</em></div></div>
+      <div class="card"><h3><i class="fa-solid fa-coins"></i> Coût par session <em>· toutes les représentations</em></h3>${costTable(c)}</div>
+      <div>${nav}<table class="list"><tr><th>Début</th><th>Représentation</th><th>Durée</th><th>Coût</th><th style="width:50%">Frictions</th></tr>${rows.map(p =>
+        `<tr data-href="#/play/${p.node}"><td class="muted">${dayOf(p.started_at)} ${clock(p.started_at)}</td><td><span class="proj">${p.project}</span> <b>${esc(p.key)}</b> <span class="kind">${p.kind === 'workshop' ? 'Workshop' : p.planning ? 'Plan' : p.type}</span>${p.ended_at ? '' : ' ' + outc('', false)}</td>
+         <td class="num">${dur(secs(p.started_at, p.ended_at))}</td><td class="num">${costCell(p)}</td><td>${frictionList(p.frictions.list)}</td></tr>`).join('')}</table></div>`;
   },
   premieres() { return `<div><h1>Premieres</h1><div class="hero-line">Chaque merge sur main, le plus récent d'abord</div></div>${premiereTable(premieres(), 'premieres')}`; },
   play(id) {
@@ -363,14 +462,17 @@ const PAGES = {
     const s = sessionOf(p), n = openNode(p), tree = PLAYS[id];
     return `<div class="crumbs"><a href="#/${p.kind === 'workshop' ? 'workshops' : 'rehearsals'}">${p.kind === 'workshop' ? 'Workshops' : 'Rehearsals'}</a> / <span class="proj">${p.project}</span> Conductor #${esc(s.item)} ${s.legacy ? '<span class="legacy">repris</span>' : `<span class="badge">${s.state}</span>`} / <b>${esc(p.key)}</b>${p.simulated ? '<span class="sim">simulé</span>' : ''}</div>
       <div><h1><span class="muted">${esc(p.key)}</span> ${esc(p.title)}</h1><div class="hero-line">${outc(p.outcome, !!p.ended_at)}<span>${p.mode}</span>${p.issue ? `<a class="more" href="${issueUrl(p.project, p.issue)}" target="_blank" rel="noopener">#${p.issue}</a>` : ''}${p.pr ? `<a class="more" href="${prUrl(p.project, p.pr)}" target="_blank" rel="noopener">PR #${p.pr}</a>` : ''}<span>${dayOf(p.started_at)} ${clock(p.started_at)} · <span class="elapsed" ${p.ended_at ? '' : `data-since="${p.started_at}"`}>${dur(secs(p.started_at, p.ended_at))}</span></span></div></div>
-      ${n?.runner === 'human' ? `<div class="callout"><b>Attend le Director</b> depuis <span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span> · ${esc(n.events[0]?.data.reason)}</div>` : n ? `<div class="callout info"><b>Maintenant</b> · ${rn(n.runner, nodeWho(n))} ${esc(label(n))} depuis <span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>` : ''}
+      ${n?.runner === 'human' ? `<div class="callout"><b>Attend le Director</b> depuis <span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span> · ${esc(n.events[0]?.data.reason)}</div>` : n ? `<div class="callout info"><b>Maintenant</b> · ${rnNode(n)} ${esc(label(n))} depuis <span class="elapsed" data-since="${n.started_at}">${dur(secs(n.started_at))}</span></div>` : ''}
       ${p.published ? `<div class="callout info"><b>Issue #${p.published.issue} publiée</b> · ${esc(p.published.item)} en <span class="badge warn">${esc(p.published.status)}</span> · ${p.published.decided_alone} décisions prises seul</div>` : ''}
       ${s.plays.length > 1 ? `<div><h3>Session du Conductor #${esc(s.item)}</h3><div class="chips">${s.plays.map(x => `<a class="chip ${x.node === id ? 'on' : ''}" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)} ${outc(x.outcome, !!x.ended_at)}</a>`).join('')}</div></div>` : ''}
+      <div class="bigs">${bigDuration(p.started_at, p.ended_at, p.kind === 'workshop' ? 'Workshop' : 'Rehearsal', p.kind === 'workshop' ? 'joué' : 'jouée')}${bigCost(costOf([p]), 1)}
+        <div class="card big"><small><i class="fa-solid fa-triangle-exclamation"></i>Frictions</small><b style="${p.frictions.list.length ? 'color:var(--warn)' : ''}">${p.frictions.list.length}</b><em>${esc(frictionKinds([p]) || 'aucune')}</em></div></div>
       <div class="metrics"><div class="metric"><small>Tours d'agents</small><b>${p.counts.turn}</b></div><div class="metric"><small>Preuves</small><b>${p.counts.proof}</b></div><div class="metric"><small>Mutations</small><b>${p.counts.mutation}</b></div><div class="metric"><small>Allers-retours</small><b>${p.round_trips ?? 0}</b></div><div class="metric"><small>Diff</small><b>${p.diff ?? '—'}</b></div><div class="metric"><small>Attentes du Director</small><b>${p.counts.director}</b></div></div>
+      <div class="dgrid"><div class="card"><h3><i class="fa-solid fa-coins"></i> Coût par session</h3>${costTable(costOf([p]))}</div>${feedback(p)}</div>
       <div class="diagrams"><div class="diag"><h3><i class="fa-solid fa-diagram-project"></i> Transitions <span style="text-transform:none;letter-spacing:0;font-weight:400">les étapes et leurs passages, comptés</span></h3><pre class="mermaid">${esc(transitions(p))}</pre>
-          <div class="diag-note"><i class="fa-solid fa-robot"></i> agent · <i class="fa-solid fa-gear"></i> étape du script · <i class="fa-solid fa-user"></i> Director · en pointillé : pas emprunté · le nœud en cours est encadré</div></div>
+          <div class="diag-note"><i class="fa-solid fa-robot"></i> agent · <i class="fa-solid fa-gear"></i> étape du script · <i class="fa-solid fa-flask-vial"></i> preuve · <i class="fa-solid fa-dna"></i> mutation · <i class="fa-solid fa-scale-balanced"></i> politique · <i class="fa-solid fa-user"></i> Director · en pointillé : pas emprunté · le nœud en cours est encadré</div></div>
         <div class="diag"><h3><i class="fa-solid fa-comments"></i> Communication <span style="text-transform:none;letter-spacing:0;font-weight:400">qui parle à qui, dans l'ordre</span></h3><pre class="mermaid">${esc(sequence(p))}</pre></div></div>
-      <div><h3>Fil <span class="tabs">${[['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([k, l]) => `<button data-filter="${k}" aria-pressed="${filter === k}">${l}</button>`).join('')}</span></h3>${thread(p)}</div>`;
+      <div><h3>Fil <em style="text-transform:none;letter-spacing:0;font-weight:400">· cliquer une étape du script pour son détail</em> <span class="tabs">${[['all', 'Tout'], ['talk', 'Échanges'], ['script', 'Script']].map(([k, l]) => `<button data-filter="${k}" aria-pressed="${filter === k}">${l}</button>`).join('')}</span></h3>${thread(p)}</div>`;
   },
 };
 PAGES.workshop = PAGES.play;
@@ -496,9 +598,9 @@ function escalations() {
 }
 function sessionTable(all, key) {
   const {rows: list, nav} = paged(key, all);
-  return nav + `<table class="list"><tr><th>Conductor</th><th>Élément</th><th>Mode</th><th>État</th><th>Représentations jouées</th><th>Début</th><th>Durée</th></tr>${list.map(s =>
+  return nav + `<table class="list"><tr><th>Conductor</th><th>Élément</th><th>Mode</th><th>État</th><th>Représentations jouées</th><th>Début</th><th>Durée</th><th>Coût</th></tr>${list.map(s =>
     `<tr data-href="#/play/${s.plays.at(-1).node}"><td><span class="proj">${s.project}</span> <b>#${esc(s.item)}</b> ${s.legacy ? '<span class="legacy">repris</span>' : ''}${s.simulated ? '<span class="sim">simulé</span>' : ''}</td><td>${esc(s.title)}</td><td>${s.mode}</td><td>${s.state === 'running' ? '<span class="outc running">en cours</span>' : `<span class="badge">${s.state}</span>`}</td>
-      <td><div class="chips">${s.plays.map(x => `<a class="chip" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)}</a>`).join('')}</div></td><td class="muted">${dayOf(s.started_at)} ${clock(s.started_at)}</td><td class="num">${dur(secs(s.started_at, s.ended_at))}</td></tr>`).join('')}</table>`;
+      <td><div class="chips">${s.plays.map(x => `<a class="chip" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)}</a>`).join('')}</div></td><td class="muted">${dayOf(s.started_at)} ${clock(s.started_at)}</td><td class="num">${dur(secs(s.started_at, s.ended_at))}</td><td class="num">${costSum(s.plays)}</td></tr>`).join('')}</table>`;
 }
 function premiereTable(all, key) {
   const {rows: list, nav} = paged(key, all);
@@ -527,7 +629,7 @@ function transitions(p) {
   path.forEach((s, i) => { visits[s] = (visits[s] || 0) + 1; if (i) { const k = path[i - 1] + '>' + s; count[k] = (count[k] || 0) + 1; } });
   const current = openNode(p) ? stepOf(openNode(p)) : null;
   const steps = STEPS[p.kind].filter(([id]) => visits[id] || SKELETON[p.kind].some(e => e.includes(id)));
-  const shape = (id, runner, text) => { const t = `fa:${ICON[runner]} ${text}${visits[id] > 1 ? ` ×${visits[id]}` : ''}`; return runner === 'agent' ? `s_${id}(["${t}"])` : runner === 'human' ? `s_${id}{{"${t}"}}` : `s_${id}["${t}"]`; };
+  const shape = (id, runner, text) => { const t = `fa:${STEP_ICON[id] || ICON[runner]} ${text}${visits[id] > 1 ? ` ×${visits[id]}` : ''}`; return runner === 'agent' ? `s_${id}(["${t}"])` : runner === 'human' ? `s_${id}{{"${t}"}}` : `s_${id}["${t}"]`; };
   const edges = [...new Set([...SKELETON[p.kind].map(e => e.join('>')), ...Object.keys(count)])].map(k => k.split('>'));
   const lines = ['flowchart LR', ...steps.map(([id, r, t]) => '  ' + shape(id, r, t)),
     ...edges.map(([a, b]) => { const n = count[a + '>' + b]; return n > 1 ? `  s_${a} -->|×${n}| s_${b}` : n ? `  s_${a} --> s_${b}` : `  s_${a} -.-> s_${b}`; }),
@@ -563,23 +665,47 @@ function thread(p) {
   const pg = paged(`thread-${p.node}-${filter}`, rows, 25);
   return `${pg.nav}<ol class="thread">${pg.rows.map(row).join('')}</ol>${pg.nav}`;
 }
+/* L'étape du script de chaque événement, pour son icône. */
+const STEP_OF = {'proof-start':'proof', 'proof-end':'proof', 'proof-reused':'proof', 'proof-waiting':'proof', 'mutation-start':'mutation', 'mutation-end':'mutation',
+  'mutation-wake':'mutation', 'mutation-skipped':'mutation', 'mutation-inconclusive':'mutation', policy:'policy', 'diff-size':'size'};
+const opened = new Set(), LOGS = {};
+const LABEL = {passed:'verte', timed_out:'trop longue', head:'commit', seconds:'secondes', exit_code:'code de sortie', tool:'outil', command:'commande', role:'rôle',
+  violations:'violations', reason:'motif', done:'étapes', counted:'lignes comptées', limit:'limite', excluded:'exclues', over:'au-dessus', log:'sortie', details:'détail', report:'rapport'};
+function stepDetail(e) {
+  const d = {...e.data}, rows = [];
+  if (e.node) rows.push(['étape', `${esc(label(e.node))}${e.node.ended_at ? ` · ${dur(secs(e.node.started_at, e.node.ended_at))}` : ' · en cours'}`]);
+  for (const [k, v] of Object.entries(d)) {
+    if (k === 'report' && v && typeof v === 'object') { rows.push(['rapport', `${v.killed} tués · ${v.survived} survivants · ${v.invalid ?? 0} non viables · ${v.timeouts ?? 0} trop longs · score ${v.score}`]);
+      if ((v.survivors || []).length) rows.push(['survivants', `<ul class="steps">${v.survivors.map(x => `<li class="mono">${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>`]); continue; }
+    const shown = Array.isArray(v) ? (v.length ? `<ul class="steps">${v.map(x => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : '<span class="muted">aucune</span>')
+      : typeof v === 'boolean' ? (v ? 'oui' : 'non') : v && typeof v === 'object' ? `<pre class="text">${esc(JSON.stringify(v, null, 2))}</pre>` : `<span class="${['head', 'log', 'details', 'command'].includes(k) ? 'mono' : ''}">${esc(v)}</span>`;
+    rows.push([LABEL[k] || k, shown]);
+  }
+  const log = d.log ? (LOGS[d.log] === undefined ? `<button class="btn" data-log="${esc(d.log)}"><i class="fa-solid fa-terminal"></i> Voir la sortie</button>`
+    : `<pre class="text">${esc(LOGS[d.log])}</pre>`) : '';
+  return `<div class="det">${rows.length ? `<table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>` : '<span class="muted">Pas de données.</span>'}${log}</div>`;
+}
 function row(e) {
   const d = e.data, t = `<time>${clock(e.at)}</time>`;
-  const av = (who) => { const r = runnerOf(who); return `<span class="avatar ${r}" style="--r:var(--${r === 'human' ? 'director' : r === 'script' ? 'script' : who})"><i class="fa-solid ${ICON[r]}"></i></span>`; };
+  const av = (who, icon = '') => { const r = runnerOf(who); return `<span class="avatar ${r}" style="--r:var(--${r === 'human' ? 'director' : r === 'script' ? 'script' : who})"><i class="fa-solid ${icon || ICON[r]}"></i></span>`; };
   const bubble = (who, meta, body = '', cls = '') => `<li class="ev ${cls}">${av(who)}<div class="bubble">${meta}${t}${body}</div></li>`;
-  const line = (who, html, tone = '') => `<li class="ev line ${tone}">${av(who)}<div class="lbody">${html}${t}</div></li>`;
+  /* Une ligne du script s'ouvre au clic sur son détail : ses données, la sortie gardée (le journal d'une mutation). */
+  const open = opened.has(e.id), icon = STEP_ICON[STEP_OF[e.kind]] || '';
+  const line = (who, html, tone = '') => `<li class="ev line ${tone} open-able ${open ? 'opened' : ''}">${av(who, icon)}<div class="lbody" data-open="${e.id}">${html}${t}${open ? stepDetail(e) : ''}</div></li>`;
   const pre = x => x ? `<pre class="text">${esc(x.length > 500 ? x.slice(0, 500) + '…' : x)}</pre>` : '';
   switch (e.kind) {
     case 'message': { const v = d.type === 'verdict' ? verdict(e) : ''; return bubble(d.from, `<div class="meta">${role(d.from)} → ${role(d.to)} <span class="badge ${v === 'APPROVED' ? 'ok' : v === 'REJECTED' ? 'bad' : d.type === 'question' ? 'warn' : ''}">${esc(v || d.type)}</span><span class="muted">tour ${esc(d.round)}</span></div>`, pre(d.text)); }
     case 'handoff': return bubble('conductor', `<div class="meta">${role('conductor')} → ${rn('agent', d.role)} ${role(d.role)} <span class="badge">${d.how === 'start' ? 'lancé' : 'relancé'}</span>${d.model ? `<span class="muted">${esc(d.agent)} ${esc(d.model)}</span>` : ''}</div>`, '', 'handoff');
     case 'proof-start': return line('script', `<b>Preuve</b> lancée <span class="mono">${esc(e.node?.name || '')}</span>`);
-    case 'proof-end': return line('script', `<b>Preuve</b> ${d.passed ? 'verte' : 'rouge'} · ${d.seconds} s`, d.passed ? 'ok' : 'bad');
+    case 'proof-end': return line('script', `<b>Preuve</b> ${d.passed ? 'verte' : d.timed_out ? 'trop longue' : 'rouge'} · ${d.seconds} s`, d.passed ? 'ok' : 'bad');
     case 'mutation-start': return line('script', `<b>Mutation</b> ${esc(e.node?.name || '')} lancée en arrière-plan`);
-    case 'mutation-end': return line('script', `<b>Mutation</b> ${d.passed ? 'verte' : 'rouge'} · ${d.seconds} s`, d.passed ? 'ok' : 'bad');
+    case 'mutation-end': return line('script', `<b>Mutation</b> ${esc(d.tool || '')} ${d.passed ? 'verte' : 'rouge'} · ${d.seconds} s${d.report ? ` · ${d.report.killed} tués, ${d.report.survived} survivants` : ''}`, d.passed ? 'ok' : 'bad');
+    case 'mutation-skipped': return line('script', `<b>Mutation</b> sautée : ${esc(d.reason)}`, 'quiet');
+    case 'mutation-inconclusive': return line('script', `<b>Mutation</b> sans conclusion${d.reason ? ' : ' + esc(d.reason) : ''}`, 'warn');
     case 'escalate': return line('director', `<b>Escalade</b> : ${esc(d.reason)}`, 'warn');
     case 'director': return line('director', '<b>Le Director a répondu</b>', 'ok');
     case 'director-decision': return line('director', `<b>Décision du Director</b>${d.verdict ? ' : ' + esc(d.verdict) : ''}`, 'ok');
-    case 'policy': return line('script', `<b>Politique</b> · ${role(d.role)} ${d.violations?.length ? `: ${d.violations.length} violation(s)` : 'en règle'}`, d.violations?.length ? 'bad' : 'quiet');
+    case 'policy': return line('script', `<b>Politique</b> · ${role(d.role)} ${d.violations?.length ? `: ${d.violations.length} violation(s)<ul class="steps">${d.violations.map(v => `<li>${esc(v)}</li>`).join('')}</ul>` : 'en règle'}`, d.violations?.length ? 'bad' : 'quiet');
     case 'diff-size': return line('script', `<b>Diff</b> ${d.counted} / ${d.limit} lignes${d.over ? ' · au-dessus' : ''}`, d.over ? 'warn' : 'quiet');
     case 'wait': return line('script', `<b>Script</b><ul class="steps">${(d.done || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul>`, 'quiet');
     case 'begin': case 'rehearsal': return line('script', `<b>Ouverture</b>${d.item ? ' de ' + esc(d.item) : ''}`);
@@ -591,7 +717,7 @@ function row(e) {
 }
 
 /* --- rendu ------------------------------------------------------------------------------------- */
-const NAV = [['dashboard', 'Dashboard'], ['scene', 'En scène'], ['program', 'Programme'], ['workshops', 'Workshops'], ['rehearsals', 'Rehearsals'], ['tickets', 'Tickets'], ['premieres', 'Premieres']];
+const NAV = [['dashboard', 'Dashboard'], ['scene', 'En scène'], ['program', 'Programme'], ['workshops', 'Workshops'], ['rehearsals', 'Rehearsals'], ['tickets', 'Tickets'], ['premieres', 'Premieres'], ['frictions', 'Frictions']];
 const route = () => { const [page = 'dashboard', id = ''] = location.hash.slice(2).split('/').map(decodeURIComponent); return {page, id}; };
 /* Le thème : auto (celui du système), clair ou sombre ; Mermaid suit. */
 const isDark = () => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -622,6 +748,10 @@ document.addEventListener('click', e => {
   const f = e.target.closest('[data-filter]'); if (f) { filter = f.dataset.filter; render(); return; }
   if (e.target.closest('#theme')) { theme = {auto:'light', light:'dark', dark:'auto'}[theme]; store('stage-theme', theme); applyTheme(); render(); return; }
   const sc = e.target.closest('[data-scene]'); if (sc) { sceneMode = sc.dataset.scene; store('stage-scene', sceneMode); render(); return; }
+  const lg = e.target.closest('[data-log]'); if (lg) { const path = lg.dataset.log; LOGS[path] = 'lecture…'; render();
+    fetch('/api/log?path=' + encodeURIComponent(path)).then(r => r.ok ? r.text() : `Sortie introuvable (${r.status}).`).then(x => { LOGS[path] = x || '(vide)'; render(); }); return; }
+  if (e.target.closest('.det')) return;
+  const op = e.target.closest('[data-open]'); if (op && !e.target.closest('a')) { const id = +op.dataset.open; opened.has(id) ? opened.delete(id) : opened.add(id); render(); return; }
   const pg = e.target.closest('[data-page]'); if (pg) { const [k, n] = pg.dataset.page.split(':'); pages[k] = +n; render(); return; }
   if (e.target.closest('a')) return;
   const tr = e.target.closest('tr[data-href]'); if (tr) location.hash = tr.dataset.href;

@@ -14,13 +14,21 @@ contexte) ; le remote git de chaque projet (les liens vers GitHub). Les titres d
 arrière-plan puis gardés : la page s'ouvre tout de suite et les reçoit au tour suivant. Une issue que le Workshop a publiée
 `proposed` y figure tant qu'elle n'est ni dans la file ni jouée : l'accepter se fait sur GitHub.
 
-`/api/stage?since=<version>` répond `{"version", "unchanged": true}` quand rien n'a bougé. N'écoute que sur 127.0.0.1.
+Chaque représentation porte ses frictions (celles gardées à sa fin, sinon calculées sur le moment par `ballet_frictions`) et
+son coût, par rôle, en tokens et en équivalent dollars (`ballet_cost`, lu dans les journaux de Claude Code) : gardé dans
+son état quand la fin l'a écrit, sinon calculé en arrière-plan, une fois pour une représentation finie, toutes les
+`COST_REFRESH_SECONDS` pour une représentation en cours.
+
+`/api/stage?since=<version>` répond `{"version", "unchanged": true}` quand rien n'a bougé. `/api/log?path=<fichier>` rend la
+fin d'une sortie gardée par le script (le journal d'une mutation), seulement sous `~/.ballet/projects/`. N'écoute que sur
+127.0.0.1.
 """
 
 import json
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,12 +38,16 @@ from urllib.parse import parse_qs, urlparse
 import ballet_config
 import ballet_conductors
 import ballet_context
+import ballet_cost
 import ballet_db
+import ballet_frictions
 import ballet_launch
 import ballet_legacy
 import ballet_maestro
 import ballet_monitor
 import ballet_runtime
+import ballet_state
+import ballet_store
 
 STAGE = Path(__file__).resolve().parent.parent / "stage"
 FILES = {
@@ -53,8 +65,13 @@ TITLES = {}   # (projet, issue) → titre ; une issue ne change pas de titre pen
 ASKED = set()   # les titres déjà demandés à gh
 REPOS = {}   # projet → URL du repo sur GitHub, vide sans remote
 CONTEXT = {}   # transcript → (mtime, tokens) : le transcript n'est relu que s'il a bougé
+COSTS = {}   # nœud de la représentation → (instant du calcul, coût vu par la page)
+COSTING = set()   # les coûts en cours de calcul
+COST_REFRESH_SECONDS = 60   # le coût d'une représentation en cours est relu au plus toutes les minutes
+LOG_LINES = 200   # la fin d'une sortie gardée par le script
 _LOCK = threading.Lock()
 _TITLE_READERS = ThreadPoolExecutor(max_workers=6)
+_COST_READERS = ThreadPoolExecutor(max_workers=2)
 
 
 class UsageError(Exception):
@@ -76,6 +93,7 @@ def snapshot(since="", state=None):
     """Ce que la page affiche, en une fois ; `unchanged` quand rien n'a bougé depuis la version `since`."""
     with ballet_db.reading(state) as connection:
         version = _version(connection)
+        _request_costs(connection)
         if version == since:
             return {"version": version, "unchanged": True}
         config = ballet_maestro.read_config(state)
@@ -104,13 +122,14 @@ def _plays(connection):
     for node in (node for node in nodes if node["kind"] in PLAYS):
         children = [{**child, "events": events.get(child["id"], [])} for child in nodes if child["parent"] == node["id"]]
         marks = events.get(node["id"], [])
-        plays.append(_play(node, children, marks, context))
+        plays.append(_play(node, children, marks, context) | {"frictions": _frictions(node, children, marks, context),
+                                                               "cost": _cost_seen(node, context)})
         trees[node["id"]] = {"marks": marks, "nodes": children}
     return plays, trees
 
 
 def _play(node, children, marks, context):
-    state = context["states"].get((node["kind"], node["project"], node["name"]), {})
+    state = _state_of(node, context)
     issue, key = str(state.get("issue") or ""), node["name"]
     session, legacy = _session_of(node, context)
     return {
@@ -134,6 +153,10 @@ def _play_context(connection):
     sessions = {(row["project"], row["item"]): json.loads(row["data"]) for row in connection.execute("SELECT * FROM sessions")}
     registry = {row["id"] for row in connection.execute("SELECT id FROM conductors")}
     return {"states": states, "sessions": sessions, "registry": registry}
+
+
+def _state_of(node, context):
+    return context["states"].get((node["kind"], node["project"], node["name"]), {})
 
 
 def _session_of(node, context):
@@ -186,6 +209,123 @@ def _short(data):
         if isinstance(value, str) and len(value) > TEXT_LIMIT:
             found[key] = value[:TEXT_LIMIT] + "…"
     return found
+
+
+# --- les frictions ------------------------------------------------------------------
+
+
+def _frictions(node, children, marks, context):
+    """Les frictions de la représentation : celles que sa fin a gardées dans son état, sinon celles du moment (`live`)."""
+    state = _state_of(node, context)
+    kept = (state.get("frictions") or {}).get("frictions")
+    if kept is not None:
+        return {"list": kept, "live": False}
+    listed = ballet_frictions.workshop_frictions if node["kind"] == "workshop" else ballet_frictions.rehearsal_frictions
+    return {"list": listed(state, _entries(node, children, marks)), "live": True}
+
+
+def _entries(node, children, marks):
+    """Le journal de la représentation tel que les scripts l'ont écrit (`ballet_store.journal_of`) : sans les événements
+    qui ne font que fermer un nœud."""
+    kinds = {child["id"]: child["kind"] for child in children} | {node["id"]: node["kind"]}
+    events = [(event, node["id"]) for event in marks] + [(event, child["id"]) for child in children for event in child["events"]]
+    written = [event for event, owner in sorted(events, key=lambda pair: pair[0]["id"]) if event["kind"] != kinds[owner]]
+    return [{"at": event["at"], "event": event["kind"], "detail": event["data"]} for event in written]
+
+
+# --- le coût -----------------------------------------------------------------------------
+
+
+def _cost_seen(node, context):
+    """Le coût de la représentation : celui que sa fin a gardé, sinon le dernier calculé ; `None` tant qu'il se calcule."""
+    kept = (_state_of(node, context).get("frictions") or {}).get("cost")
+    if kept:
+        return _cost_view(kept)
+    with _LOCK:
+        return COSTS.get(node["id"], (0, None))[1]
+
+
+def _request_costs(connection):
+    """Demande en arrière-plan le coût des représentations qui n'en ont pas encore, ou dont le coût en cours a vieilli."""
+    context = _play_context(connection)
+    for row in connection.execute("SELECT * FROM nodes WHERE kind IN ('rehearsal', 'workshop')"):
+        node = dict(row)
+        if (_state_of(node, context).get("frictions") or {}).get("cost") or not _cost_due(node):
+            continue
+        with _LOCK:
+            COSTING.add(node["id"])
+        _COST_READERS.submit(_compute_cost, node, _state_of(node, context))
+
+
+def _cost_due(node):
+    with _LOCK:
+        if node["id"] in COSTING:
+            return False
+        computed_at = COSTS.get(node["id"], (None,))[0]
+    if computed_at is None:
+        return True
+    return not node["ended_at"] and time.monotonic() - computed_at > COST_REFRESH_SECONDS
+
+
+def _compute_cost(node, state):
+    try:
+        cost = _cost_view(_read_cost(node, state))
+    except Exception as error:   # le coût est un confort : un journal illisible ne doit jamais faire tomber la page
+        cost = {"missing": f"journals unreadable: {type(error).__name__}"}
+    with _LOCK:
+        COSTS[node["id"]] = (time.monotonic(), cost)
+        COSTING.discard(node["id"])
+
+
+def _read_cost(node, state):
+    """Le coût lu par `ballet_cost` sur la fenêtre de la représentation (jusqu'à maintenant si elle joue encore)."""
+    if not state.get("worktree"):
+        return {"missing": "no worktree in its state"}
+    window = (_instant(node["started_at"]), _instant(node["ended_at"]) if node["ended_at"] else datetime.now(timezone.utc))
+    item = state.get("item", "") if node["kind"] == "workshop" else state.get("session") or _conductor_item(node)
+    home = state.get("repo") or _home_of(node["project"]) or ""
+    return ballet_cost.of_work(state["worktree"], str(home), f"ballet:{node['kind']}", item, window)
+
+
+def _conductor_item(node):
+    """L'élément de la session du Conductor (`#75`), d'après le nœud, quand l'état ne le dit pas."""
+    _, _, item = (node["conductor"] or "").partition("#")
+    return f"#{item}" if item else ""
+
+
+def _instant(text):
+    return datetime.fromisoformat(text)
+
+
+def _cost_view(cost):
+    """Le coût tel que la page le montre : par rôle (ses modèles, ses tokens, ceux lus en cache, ses dollars) et au total."""
+    if "missing" in cost:
+        return {"missing": cost["missing"]}
+    roles = {}
+    for row in cost["rows"]:
+        role = roles.setdefault(row["role"], {"role": row["role"], "models": [], "tokens": 0, "cache_read": 0, "output": 0, "usd": 0.0})
+        role["models"].append(row["model"])
+        role["tokens"] += sum(row[kind] for kind in ballet_cost.KINDS)
+        role["cache_read"] += row["cache_read"]
+        role["output"] += row["output"]
+        role["usd"] += row["usd"]
+    listed = sorted(roles.values(), key=lambda role: -role["usd"])
+    return {"roles": [role | {"usd": round(role["usd"], 4)} for role in listed],
+            "tokens": sum(role["tokens"] for role in listed), "cache_read": sum(role["cache_read"] for role in listed),
+            "usd": round(sum(role["usd"] for role in listed), 4), "left_out": cost.get("left_out", [])}
+
+
+# --- les sorties gardées par le script ---------------------------------------------------
+
+
+def log_tail(path, state=None):
+    """La fin d'une sortie gardée par le script, ou `None` hors de `~/.ballet/projects/` (rien d'autre n'est lu)."""
+    root = (ballet_state.state_dir(state) / ballet_store.WORK_DIR).resolve()
+    wanted = Path(path).resolve()
+    if not wanted.is_relative_to(root) or not wanted.is_file():
+        return None
+    lines = wanted.read_text(encoding="utf-8", errors="replace").splitlines()
+    return "\n".join(lines[-LOG_LINES:])
 
 
 # --- la file, les issues proposées, les Conductors --------------------------------------
@@ -364,6 +504,7 @@ def _version(connection):
     stamps += [connection.execute("SELECT max(seen_at) FROM ready").fetchone()[0], tuple(ballet_runtime.read_in(connection).values())]
     with _LOCK:
         stamps.append(len(TITLES))
+        stamps.append(sorted((node, at) for node, (at, _) in COSTS.items()))
     return str(hash(json.dumps(stamps, default=str)))
 
 
@@ -413,6 +554,11 @@ class Handler(BaseHTTPRequestHandler):
             except (*ballet_db.ERRORS, OSError) as error:
                 return self._reply(503, "application/json", json.dumps({"error": str(error)}).encode())
             return self._reply(200, "application/json", json.dumps(body, ensure_ascii=False).encode())
+        if url.path == "/api/log":
+            tail = log_tail(parse_qs(url.query).get("path", [""])[0])
+            if tail is None:
+                return self._reply(404, "text/plain", b"no such output")
+            return self._reply(200, "text/plain; charset=utf-8", tail.encode())
         self._reply(404, "text/plain", b"not found")
 
     def _reply(self, status, content_type, body):

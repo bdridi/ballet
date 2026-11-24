@@ -91,6 +91,14 @@ class FrictionsTest(unittest.TestCase):
     def test_un_ancien_enregistrement_sans_cout_garde_sa_ligne(self):
         self.assertEqual(ballet_frictions.line("FEAT-007", {"seconds": 60, "frictions": []}), "frictions of FEAT-007 (1 min): none")
 
+    def test_la_liste_des_frictions_se_lit_sans_le_cout_en_cours_de_route(self):
+        with mock.patch.object(ballet_cost, "of_work") as of_work:
+            rehearsal = ballet_frictions.rehearsal_frictions({"red_proofs": 1}, [entry("begin")])
+            workshop = ballet_frictions.workshop_frictions({"refused_reports": 1}, [entry("begin")])
+        of_work.assert_not_called()
+        self.assertEqual([friction["text"] for friction in rehearsal], ["1 red proof"])
+        self.assertEqual([friction["text"] for friction in workshop], ["1 Dramaturg report refused"])
+
 
 if __name__ == "__main__":
     unittest.main()

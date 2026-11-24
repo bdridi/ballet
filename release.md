@@ -2,6 +2,19 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
+## 0.45.0 — 2026-11-24 · `v0.45.0`
+
+Les retours du Director sur la Scène.
+
+- **Le coût de chaque session** : chaque Rehearsal et chaque Workshop porte son coût par rôle (Choreographer, Dancer, Critic, Conductor, Dramaturg), en tokens (dont ceux lus en cache) et en équivalent dollars au prix de l'API, lu par `ballet_cost.py` dans les journaux de Claude Code : celui gardé à sa fin, sinon calculé en arrière-plan (une fois pour une représentation finie, chaque minute pour une représentation en cours ; un journal illisible ne fait jamais tomber la page). Le coût d'un ticket sur sa page : une ligne par représentation (son Workshop, son plan, chaque slice), une colonne par session d'agent, et le cumul ; une colonne Coût dans les Rehearsals et les Workshops (le cumul de la session de Conductor), les tickets et les slices, et sur les cartes En scène. Ce qui n'est pas compté est dit (un Conductor introuvable, un modèle sans prix).
+- **La durée en grand** : la page d'une représentation et celle d'un ticket ont de nouveau un bloc de durée, un minuteur vivant tant qu'ils jouent.
+- **Les frictions et le retour** : la page d'une représentation montre ses frictions (gardées à sa fin, sinon calculées sur le moment par `ballet_frictions.rehearsal_frictions` / `workshop_frictions`, la liste sans le coût) et le retour du script à sa fin (`done` : son motif et ses étapes) ; le ticket les regroupe ; une page **Frictions** les liste toutes, avec le coût de chacune et le total par session.
+- **Le détail des étapes du script** : dans le fil, une étape (preuve, mutation, politique, diff, attente…) s'ouvre au clic sur ses données ; les violations de la politique sont listées ; une mutation montre son rapport (tués, survivants, non viables, score) et sa sortie, servie par `/api/log` (seulement sous `~/.ballet/projects/`).
+- **Une icône par étape** : la preuve (fiole), la mutation (ADN), la politique (balance) et la taille du diff (règle), dans le fil, les transitions et ce qui joue.
+- README et PRD à jour. 1068 tests verts.
+
+**Opportunités traitées** : aucune.
+
 ## 0.44.1 — 2026-11-24 · `v0.44.1`
 
 - **Le modèle de Maestro se règle** : `[maestro] model` de `~/.ballet/maestro.toml` (`sonnet` par défaut), passé en `--model` à la création de sa session ; un changement s'applique au prochain `/ballet:setup upgrade` (ou `restart`). Le harness reste Claude Code.

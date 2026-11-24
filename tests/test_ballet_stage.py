@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -22,7 +23,7 @@ class BalletStageTest(unittest.TestCase):
         environment = mock.patch.dict("os.environ", {"BALLET_HOME": str(root / "ballet-home")})
         environment.start()
         self.addCleanup(environment.stop)
-        for cache in (ballet_stage.TITLES, ballet_stage.ASKED, ballet_stage.REPOS):
+        for cache in (ballet_stage.TITLES, ballet_stage.ASKED, ballet_stage.REPOS, ballet_stage.COSTS, ballet_stage.COSTING):
             cache.clear()
         reader = mock.patch.object(ballet_stage, "_read_title", lambda home, issue: f"FEAT-001.2 · Issue {issue}")
         reader.start()
@@ -104,6 +105,8 @@ class BalletStageTest(unittest.TestCase):
 
     def test_rien_n_a_bouge_la_page_garde_ce_qu_elle_a(self):
         self.log("begin")
+        ballet_stage.snapshot()
+        self.wait_for_costs()
         version = ballet_stage.snapshot()["version"]
         self.assertEqual(ballet_stage.snapshot(version), {"version": version, "unchanged": True})
 
@@ -154,6 +157,114 @@ class BalletStageTest(unittest.TestCase):
         self.assertEqual(ballet_stage._github_url("git@github.com:o/r.git"), "https://github.com/o/r")
         self.assertEqual(ballet_stage._github_url("https://github.com/o/r"), "https://github.com/o/r")
         self.assertEqual(ballet_stage._github_url("git@gitlab.com:o/r.git"), "")
+
+    # --- les frictions ---
+
+    def test_une_rehearsal_en_cours_montre_ses_frictions_du_moment(self):
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "red_proofs": 1})
+        self.log("begin")
+        self.log("escalate", {"reason": "the dancer asks"})
+        frictions = self.play()["frictions"]
+        self.assertTrue(frictions["live"])
+        self.assertEqual([friction["text"] for friction in frictions["list"]], ["escalated: the dancer asks", "1 red proof"])
+
+    def test_une_rehearsal_finie_montre_les_frictions_gardees_a_sa_fin(self):
+        kept = [{"kind": "diff", "count": 1, "text": "diff 2091 lines over the 1500 limit"}]
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "red_proofs": 3, "frictions": {"seconds": 60, "frictions": kept}})
+        self.log("begin")
+        self.assertEqual(self.play()["frictions"], {"list": kept, "live": False})
+
+    # --- le coût ---
+
+    def wait_for_costs(self):
+        """Attend que les coûts demandés soient calculés (les lecteurs travaillent à deux)."""
+        for _ in range(200):
+            with ballet_stage._LOCK:
+                if not ballet_stage.COSTING:
+                    return
+            time.sleep(0.01)
+        self.fail("costs still computing")
+
+    def test_le_cout_garde_a_la_fin_est_montre_par_role(self):
+        cost = {"rows": [self.row("Dancer", "claude-sonnet-5-5", 3.5), self.row("Dancer", "claude-opus-5-5", 1.0),
+                         self.row("Critic", "claude-opus-5-5", 0.5)], "total": {}, "left_out": []}
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "frictions": {"frictions": [], "cost": cost}})
+        self.log("begin")
+        with mock.patch.object(ballet_stage.ballet_cost, "of_work") as of_work:
+            shown = self.play()["cost"]
+        of_work.assert_not_called()
+        self.assertEqual([(role["role"], role["models"], role["usd"], role["tokens"]) for role in shown["roles"]],
+                         [("Dancer", ["claude-sonnet-5-5", "claude-opus-5-5"], 4.5, 2200), ("Critic", ["claude-opus-5-5"], 0.5, 1100)])
+        self.assertEqual((shown["usd"], shown["tokens"], shown["cache_read"]), (5.0, 3300, 3000))
+
+    def test_le_cout_d_une_rehearsal_en_cours_se_calcule_en_arriere_plan(self):
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "worktree": "/w/FEAT-001.2", "repo": str(self.home)})
+        self.log("begin", conductor="#3")
+        calls = []
+        def of_work(worktree, project, command, item, window):
+            calls.append((worktree, project, command, item, window[0] <= window[1]))
+            return {"rows": [self.row("Conductor", "claude-haiku-5-5", 0.25)], "total": {}, "left_out": []}
+        with mock.patch.object(ballet_stage.ballet_cost, "of_work", of_work):
+            self.stage()
+            self.wait_for_costs()
+            self.assertEqual(self.play()["cost"]["usd"], 0.25)
+        self.assertEqual(calls, [("/w/FEAT-001.2", str(self.home), "ballet:rehearsal", "#3", True)])
+
+    def test_le_cout_d_une_representation_finie_n_est_calcule_qu_une_fois(self):
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "worktree": "/w", "session": "#3"})
+        self.log("begin")
+        self.log("done", {"reason": "merged"})
+        calls = []
+        with mock.patch.object(ballet_stage.ballet_cost, "of_work", lambda *args: calls.append(args) or {"missing": "no journal"}):
+            self.stage()
+            self.wait_for_costs()
+            self.assertEqual(self.play()["cost"], {"missing": "no journal"})
+            self.wait_for_costs()
+        self.assertEqual(len(calls), 1)
+
+    def test_un_cout_qui_arrive_change_la_version(self):
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "worktree": "/w"})
+        self.log("begin")
+        with mock.patch.object(ballet_stage.ballet_cost, "of_work", lambda *args: {"missing": "no journal"}):
+            version = ballet_stage.snapshot()["version"]
+            self.wait_for_costs()
+            self.assertNotIn("unchanged", ballet_stage.snapshot(version))
+
+    def test_un_journal_illisible_ne_fait_pas_tomber_la_page(self):
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2", "worktree": "/w"})
+        self.log("begin")
+        with mock.patch.object(ballet_stage.ballet_cost, "of_work", side_effect=OSError("boom")):
+            self.stage()
+            self.wait_for_costs()
+        self.assertEqual(self.play()["cost"], {"missing": "journals unreadable: OSError"})
+
+    def test_sans_worktree_le_cout_est_dit_absent(self):
+        ballet_store.save(self.home, "rehearsal", {"id": "FEAT-001.2"})
+        self.log("begin")
+        self.stage()
+        self.wait_for_costs()
+        self.assertEqual(self.play()["cost"], {"missing": "no worktree in its state"})
+
+    @staticmethod
+    def row(role, model, usd):
+        return {"role": role, "model": model, "input": 100, "output": 0, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 1000, "usd": usd}
+
+    # --- la sortie d'une étape du script ---
+
+    def test_la_fin_d_une_sortie_gardee_par_le_script_se_lit(self):
+        folder = ballet_stage.ballet_state.state_dir() / "projects" / "shop" / "FEAT-001.2"
+        folder.mkdir(parents=True)
+        (folder / "mutation-1-rust.log").write_text("\n".join(f"line {n}" for n in range(300)))
+        tail = ballet_stage.log_tail(str(folder / "mutation-1-rust.log"))
+        self.assertEqual(tail.splitlines()[0], "line 100")
+        self.assertEqual(len(tail.splitlines()), ballet_stage.LOG_LINES)
+
+    def test_rien_n_est_lu_hors_des_dossiers_de_travail(self):
+        outside = Path(self._tmp.name) / "secret.txt"
+        outside.write_text("secret")
+        self.assertIsNone(ballet_stage.log_tail(str(outside)))
+        self.assertIsNone(ballet_stage.log_tail(str(ballet_stage.ballet_state.state_dir() / "projects" / ".." / ".." / "secret.txt")))
+        self.assertIsNone(ballet_stage.log_tail(str(ballet_stage.ballet_state.state_dir() / "projects" / "absent.log")))
 
     # --- la ligne de commande, le serveur ---
 

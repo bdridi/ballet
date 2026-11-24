@@ -23,6 +23,20 @@ ESCALATION_TEXT_LIMIT = 200
 
 def of_rehearsal(state, entries):
     """Les frictions d'une Rehearsal finie, et sa durée."""
+    frictions = rehearsal_frictions(state, entries)
+    cost = _cost_of(state, entries, command="ballet:rehearsal", item=state.get("session", ""))
+    return {"seconds": _seconds(entries), "frictions": frictions, "cost": cost}
+
+
+def of_workshop(state, entries):
+    """Les frictions d'un Workshop fini, et sa durée."""
+    frictions = workshop_frictions(state, entries)
+    cost = _cost_of(state, entries, command="ballet:workshop", item=state.get("item", ""))
+    return {"seconds": _seconds(entries), "frictions": frictions, "cost": cost}
+
+
+def rehearsal_frictions(state, entries):
+    """La liste des frictions d'une Rehearsal, finie ou non, sans son coût : la Scène la lit en cours de route."""
     frictions = _escalations(entries)
     frictions += _counted("rejections", state.get("round_trips", 0), "Critic rejection")
     frictions += _counted("red_proofs", state.get("red_proofs", 0), "red proof")
@@ -32,19 +46,17 @@ def of_rehearsal(state, entries):
     frictions += _idle(entries)
     frictions += _policy(state.get("violations", {}))
     frictions += _oversized(state.get("size", {}))
-    cost = _cost_of(state, entries, command="ballet:rehearsal", item=state.get("session", ""))
-    return {"seconds": _seconds(entries), "frictions": frictions, "cost": cost}
+    return frictions
 
 
-def of_workshop(state, entries):
-    """Les frictions d'un Workshop fini, et sa durée."""
+def workshop_frictions(state, entries):
+    """La liste des frictions d'un Workshop, fini ou non, sans son coût."""
     frictions = _escalations(entries)
     frictions += _counted("refused_reports", state.get("refused_reports", 0), "Dramaturg report refused", plural="Dramaturg reports refused")
     frictions += _nudges(entries)
     frictions += _idle(entries)
     frictions += _policy({"dramaturg": state.get("violations", 0)})
-    cost = _cost_of(state, entries, command="ballet:workshop", item=state.get("item", ""))
-    return {"seconds": _seconds(entries), "frictions": frictions, "cost": cost}
+    return frictions
 
 
 def line(name, record):
