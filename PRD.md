@@ -143,19 +143,19 @@ Ces réglages dépendent de chaque CLI (Claude Code : permissions ; Mistral Vibe
 
 **Couche 3 — la politique, déterministe.** C'est la couche qui fait foi.
 - C'est **un script de Ballet, pas un modèle** : il prend le rôle, l'état du repo avant et après, les zones interdites (défauts de Ballet et profil projet), et rend un code de sortie et la liste des violations.
-- Le Conductor l'exécute après chaque rôle et **applique son résultat tel quel** : il ne l'interprète pas, ne le discute pas, ne passe pas outre.
+- Le Conductor l'exécute après chaque rôle et **applique son résultat tel quel** : il ne l'interprète pas, ne le discute pas, ne passe pas outre. Seul le Director passe outre, par un message `override` (§6.1).
 - **Quand** : au rapport du Dancer (avant le push), au verdict du Critic (avant sa publication), au plan et à chaque réponse du Choreographer, à la réponse du Dramaturg consulté pendant une Rehearsal.
 - Ce qu'il vérifie :
   - **Critic** : `HEAD` n'a pas bougé et l'arbre de travail est propre (`git status --porcelain` vide) ;
   - **Choreographer** : sur la branche de Rehearsal, tous les fichiers modifiés sont dans le dossier des ADR ou sont `AGENTS.md` ; seules des branches `spike/*` ont été créées ; il est revenu sur la branche de Rehearsal ; l'arbre de travail est propre ; pas de réécriture d'historique ;
   - **Dramaturg** : tous les fichiers modifiés sont dans l'espace specs, aucun dans une zone interdite ; l'arbre de travail est propre ; pas de réécriture d'historique (en Workshop assisted, hors Conductor : pas vérifié) ;
-  - **Dancer** : il est resté sur la branche de Rehearsal ; aucun fichier modifié par ses commits n'est dans l'espace specs, dans le dossier des ADR ni dans une zone interdite ; l'arbre de travail est propre ; le nouveau `HEAD` descend de l'ancien (pas de réécriture d'historique) ; aucune branche ni aucun tag créé ou supprimé ; aucun test présent sur `main` n'a disparu ni changé de nom (reconnu par son nom : `it`/`test` en JS et TS, `#[test]` en Rust, `def test_` en Python, `Scenario:` en Gherkin). Le corps d'un test existant modifié reste au Critic : au premier run, chaque Rehearsal a retouché les imports d'un fichier de test, une règle à la ligne aurait tout bloqué.
+  - **Dancer** : il est resté sur la branche de Rehearsal ; aucun fichier modifié par ses commits n'est dans l'espace specs, dans le dossier des ADR ni dans une zone interdite ; l'arbre de travail est propre ; le nouveau `HEAD` descend de l'ancien (pas de réécriture d'historique) ; aucune branche ni aucun tag créé ou supprimé ; un test existant peut changer : un refacto ou une évolution rend une règle, donc un test, obsolète, et le Dancer le retire, le renomme ou le réécrit sans déclaration ni escalade (la nuit du 23/11 sur antimurphy : quatre renommages légitimes ont coûté 24 min). Le jugement revient au Critic : le script lui donne, dans sa mission, la liste des tests que le diff retire ou renomme, avec leur fichier (reconnus par leur nom : `it`/`test` en JS et TS, `#[test]` en Rust, `def test_` en Python, `Scenario:` en Gherkin ; `[policy.test_names]` y ajoute un langage). Le corps d'un test modifié reste au Critic, lui aussi.
   - **tous les rôles** : l'état GitHub de l'issue et de la PR (corps, libellés, commentaires, reviews, état) est identique avant et après leur passage ; seule exception, le Choreographer, qui crée les slices de son issue (liées à la parente) et écrit leur section `## Plan` (pas encore vérifié).
 - **Ses données vivent dans `[policy]`** (défauts du plugin, surchargés par le projet) : un périmètre par rôle, que le projet remplace ou étend sans recopier la méthode, les zones interdites et sensibles, et la façon de reconnaître un test par langage ; le détail des clés est commenté dans le `config.toml` du plugin. Une config qui laisse un rôle écrire `.ballet/config.toml` est refusée.
 - Les zones interdites sont des motifs de chemins (globs), pour que la vérification reste mécanique.
 - **Un commit appartient au rôle pendant le passage duquel il est apparu** : le Choreographer et le Dancer partagent la branche de Rehearsal, mais jamais en même temps, et l'état avant et après chaque passage suffit à les départager. Les commits du Choreographer et du Dramaturg ne comptent donc pas contre le Dancer (le registre qui le garantit : pas encore fait).
 
-**Une violation n'est jamais intégrée.** Le Conductor ne pousse pas ; il renvoie le travail au rôle avec la liste des violations, une fois. À la deuxième violation, il escalade vers le Director. Toute violation est journalisée.
+**Une violation n'est jamais intégrée.** Le Conductor ne pousse pas ; il renvoie le travail au rôle avec la liste des violations, une fois. À la deuxième violation, il escalade vers le Director. Toute violation est journalisée. Le Director peut recevoir la branche telle quelle, une fois (`override`, §6.1).
 
 ### 5.4 GitHub : un seul point de passage
 
@@ -215,8 +215,7 @@ Toute phase sans le Director peut escalader vers lui. Les déclencheurs par déf
 - il sort du périmètre fonctionnel de l'issue ;
 - un rôle viole la politique une deuxième fois (section 5.3) ;
 - il touche une zone sensible déclarée par le projet (contrat d'API, sécurité, décisions d'architecture, harnais…) ;
-- il dépasse une taille de diff fixée, comptée par le script (lignes changées hors `diff_exclude`) et non par le Critic ; hors mode strict, la PR est seulement marquée `ballet:oversized` ; en mode strict, l'escalade précède le Critic, et le Director la lève par `ballet:size-accepted` ;
-- il modifie ou supprime un test existant au lieu d'en ajouter.
+- il dépasse une taille de diff fixée, comptée par le script (lignes changées hors `diff_exclude`) et non par le Critic ; hors mode strict, la PR est seulement marquée `ballet:oversized` ; en mode strict, l'escalade précède le Critic, et le Director la lève par `ballet:size-accepted` (ou par `override`) ;
 
 **Côté exécution**
 - la preuve du repo, lancée par le script à chaque rapport du Dancer, reste rouge au-delà du plafond d'allers-retours, ou dépasse `proof_timeout_seconds` ;
@@ -234,6 +233,18 @@ La liste est commune ; les seuils et les zones sensibles vont dans `.ballet/conf
 - chaque escalade est journalisée avec son motif, pour savoir quels déclencheurs relâcher.
 
 Attendre le tampon du Director n'est jamais un échec : le Conductor prévient le Director et attend.
+
+**Ce que le Director peut faire d'une escalade : `answer` ou `override`.** Chaque escalade dit, dans le motif que Maestro relaie, ce qu'elle est et ce que le Director peut faire :
+
+| Motif | Ce que c'est | Le Director |
+|---|---|---|
+| `question` | un rôle lui pose une question (ou le Conductor, qui ne fait que relayer) | `answer` |
+| `failure` | un worker tombé en erreur (la limite de 5 h d'Orca, un arrêt répété) ou qui escalade | `override` : le worker est relancé dans sa session, avec son contexte et les mots du Director |
+| `policy` | un rôle a violé la politique une deuxième fois (ou le Critic une première), ou un rapport du Dancer refusé deux fois sans `Red:` | `override` : la branche est reçue telle quelle, une seule fois (ses commits sont ceux que le Director a acceptés : la même violation ne revient pas au tour suivant, une nouvelle oui) |
+| `size` | un diff trop gros, en mode strict | `override` : la PR part au Critic (comme `ballet:size-accepted`) |
+| `turns` | trop d'allers-retours Dancer ↔ Critic, une preuve ou une mutation rouge trop souvent, ou trop de tours d'échange sur un sujet | `override` : un tour de plus (le Dancer reprend avec les mots du Director, les points du Critic et les survivants ; ou le message passe) ; s'il échoue encore, l'escalade revient |
+
+`override` est un message du Director seul, qui ne suppose aucune question en attente : sa raison est écrite par le Director, dans le corps. La décision est marquée du Director dans le journal et commentée sur l'issue. Une `answer` sans question en attente n'escalade plus : elle est refusée en disant de passer par `override`. Le Conductor reste un relais : Maestro (`tell --override`) tape la raison dans son terminal, il écrit le message et le reçoit ; rien de ce que `override` force n'est décidé par lui. Les autres escalades (le Critic qui escalade, une CI, un plan à relire, une mutation qui ne prouve rien…) se décident comme avant : par les libellés de la PR puis `resume`, ou par la review du plan.
 
 ## 7. Le Conductor
 
@@ -267,7 +278,7 @@ On mesure la qualité du Critic grâce au journal (refus, allers-retours, builds
 
 - **En étoile** : tout passe par le Conductor. Les workers ne se parlent pas entre eux. Le Conductor sait qui a demandé quoi, peut répondre lui-même, arbitre et trace.
 - **Primitives Orca** : un worker pose une question avec `ask` et termine avec `worker_done` ; le Conductor répond avec `reply` et écrit à un worker avec `send`.
-- **Un seul format de message**, pour tous les échanges (`templates/message.md`) : une première ligne JSON, l'en-tête (`from`, `to`, `type`, `subject`, `round`), lue par le Conductor avec la bibliothèque standard ; puis le corps en Markdown, jamais échappé, pour les agents et le Director. Un en-tête qui n'est pas du JSON valide est renvoyé. Types : `question`, `answer`, `report`, `verdict`, `escalation`. Le Conductor ne lit que l'en-tête : il route sur `to`, compte les tours par sujet et par paire de rôles, et escalade vers le Director au-delà de `[escalation] max_exchange_rounds` (3 par défaut).
+- **Un seul format de message**, pour tous les échanges (`templates/message.md`) : une première ligne JSON, l'en-tête (`from`, `to`, `type`, `subject`, `round`), lue par le Conductor avec la bibliothèque standard ; puis le corps en Markdown, jamais échappé, pour les agents et le Director. Un en-tête qui n'est pas du JSON valide est renvoyé. Types : `question`, `answer`, `report`, `verdict`, `escalation`, et ceux du Director seul : `revise`, `approve` (la review du plan) et `override` (§6.1). Le Conductor ne lit que l'en-tête : il route sur `to`, compte les tours par sujet et par paire de rôles, et escalade vers le Director au-delà de `[escalation] max_exchange_rounds` (3 par défaut).
 - **Qui répond** : produit → Dramaturg, technique → Choreographer, hors cadre → Director.
 - **Un plan modifié retourne toujours dans l'issue**, jamais seulement dans les messages, avec sa ligne d'amendement (round, décision, raison).
 - **Tous les échanges sont publiés** : le Conductor commente l'issue avec chaque question et chaque réponse (le message entier, en-tête compris), et la PR avec chaque rapport du Dancer ; le verdict du Critic y est une review. La trace complète reste sur GitHub, pour l'analyse (section 12).
@@ -417,7 +428,7 @@ sensitive_zones = ["*/contract/*"]     # globs, valables dans tous les repos (`*
 [policy.roles.choreographer]
 extra_writes = ["docs/*"]              # s'ajoute à la méthode (ADR, AGENTS.md), sans la recopier
 
-[policy.test_names.go]                 # un langage de plus : la politique y reconnaît les tests par leur nom
+[policy.test_names.go]                 # un langage de plus : la liste des tests retirés ou renommés, donnée au Critic, y reconnaît les tests par leur nom
 extensions = [".go"]
 pattern = 'func (Test\w+)'
 

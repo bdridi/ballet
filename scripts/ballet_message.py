@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 PEOPLE = ("dramaturg", "choreographer", "dancer", "critic", "conductor", "director")
-TYPES = ("question", "answer", "report", "verdict", "escalation", "revise", "approve")
+TYPES = ("question", "answer", "report", "verdict", "escalation", "revise", "approve", "override")
 VERDICT_LINE = re.compile(r"^VERDICT: (APPROVED|REJECTED|ESCALATE)$", re.MULTILINE)
 
 

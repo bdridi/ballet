@@ -70,7 +70,10 @@ class FakeWorld:
         self.dirty = ""
         self.changed = []
         self.changed_since = {}     # départ d'un diff `<départ>..HEAD` → fichiers changés ; sinon `changed`
+        self.name_status = ""       # `git diff --name-status` du Dancer : les fichiers modifiés ou supprimés (`M\tchemin`)
+        self.shown = {}             # `git show <réf>:<chemin>` : `c0ffee1:src/a.test.ts` → le texte du fichier
         self.new_commits = []
+        self.commit_authors = {}    # chemin → les commits de la branche qui le touchent (`git log -- <chemin>`) ; sinon `new_commits`
         self.issues = {}            # numéro → {title, body, state, labels} ; les autres issues sont #3
         self.fields = {}            # numéro → {type, mode, status} ; par défaut une Feature sans mode ni statut
         self.statuses = []          # (issue, Ballet status) de chaque écriture du champ, dans l'ordre
@@ -131,11 +134,16 @@ class FakeWorld:
             ("merge-base", "origin/main"): "base\n",
             ("diff", "--name-only"): "\n".join(self.changed),
             ("diff", "--no-color"): self.branch_diff,
+            ("diff", "--name-status"): self.name_status,
         }
         if arguments[0] == "rev-list" and arguments[1] != "--count":
             return "\n".join(self.new_commits)
         if arguments[:2] == ["diff", "--name-only"]:
             return "\n".join(self.changed_since.get(arguments[-1].split("..")[0], self.changed))
+        if arguments[0] == "show":
+            return self.shown.get(arguments[1], "")
+        if arguments[0] == "log":
+            return "\n".join(self.commit_authors.get(arguments[-1], self.new_commits))
         return answers.get(tuple(arguments[:2]), "")
 
     def gh(self, arguments):
@@ -407,7 +415,8 @@ class BalletRehearsalTest(unittest.TestCase):
         self.red_report()
         self.red_report()
         step = self.red_report()
-        self.assertEqual((step.next, step.reason), ("escalate", "proof: `pnpm proof` red 3 times, over max_round_trips"))
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("turns: proof `pnpm proof` red 3 times, over max_round_trips (2). The Director can `override`"))
 
     def test_une_preuve_deja_verte_sur_le_meme_commit_n_est_pas_relancee(self):
         self.to_the_critic()
@@ -440,7 +449,8 @@ class BalletRehearsalTest(unittest.TestCase):
         report = "- Tasks:\n  - [x] [C1] Do it — abc1234\n- Proof: green"
         self.receive(message("dancer", "conductor", "report", report))
         step = self.receive(message("dancer", "conductor", "report", report))
-        self.assertEqual((step.next, step.reason), ("escalate", "the Dancer's report has no `Red:` line again for: [C1] Do it"))
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("policy: the Dancer's report has no `Red:` line again for: [C1] Do it. The Director can `override`"))
 
     def test_un_rapport_qui_cite_le_rouge_de_chaque_tache_part_a_la_preuve(self):
         self.begin()
@@ -449,10 +459,37 @@ class BalletRehearsalTest(unittest.TestCase):
         self.assertEqual(len(self.world.proofs), 1)
         self.assertTrue(self.world.ran("gh", "pr", "create"))
 
-    def test_un_test_renomme_declare_dans_le_rapport_est_transmis_a_la_politique(self):
+    def a_test_renamed_by_the_dancer(self):
+        self.world.name_status = "M\tsrc/a.test.ts\n"
+        self.world.shown = {"c0ffee1:src/a.test.ts": 'it("lists the stock", () => {});\nit("sorts by deadline", () => {});\n',
+                            "HEAD:src/a.test.ts": 'it("lists the stock", () => {});\nit("sorts by due date", () => {});\n'}
+
+    def test_un_test_renomme_par_le_dancer_ne_bloque_pas_son_rapport(self):
+        self.a_test_renamed_by_the_dancer()
         self.begin()
-        self.receive(message("dancer", "conductor", "report", "- Done.\n- Renamed test: `disabled link` → `live link`"))
-        self.assertEqual(self.state()["renamed_tests"], {"disabled link": "live link"})
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertIn("critic asked to review #8, round 1", step.done)
+        self.assertEqual(self.journal("policy"), [{"role": "dancer", "violations": []}])
+
+    def test_la_mission_du_critic_liste_les_tests_retires_ou_renommes_par_le_diff(self):
+        self.a_test_renamed_by_the_dancer()
+        self.begin()
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        assignment = self.journal("handoff")[-1]["text"]
+        self.assertIn("Tests the diff removes or renames", assignment)
+        self.assertIn("- src/a.test.ts: sorts by deadline", assignment)
+        self.assertIn("legitimate", assignment)
+
+    def test_la_mission_du_critic_ne_parle_pas_de_tests_quand_le_diff_n_en_retire_aucun(self):
+        self.to_the_critic()
+        self.assertNotIn("Tests the diff removes", self.journal("handoff")[-1]["text"])
+
+    def test_un_etat_d_avant_garde_ses_champs_disparus_sans_planter(self):
+        self.begin()
+        saved = self.state()
+        saved["renamed_tests"] = {"old": "new"}
+        ballet_store.save(self.home, "rehearsal", saved)
+        self.assertEqual(ballet_rehearsal.load("FEAT-001.2", self.home).id, "FEAT-001.2")
 
     def test_le_point_de_depart_de_la_branche_est_note_a_l_ouverture_du_worktree(self):
         self.begin()
@@ -967,7 +1004,8 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
             self.receive(message("dancer", "conductor", "report", "- Done."))
             self.wake(round_, f"msg_{round_}")
             step = self.critic_says("APPROVED")
-        self.assertEqual((step.next, step.reason), ("escalate", "mutation: red 3 times, over max_round_trips (cargo-mutants)"))
+        self.assertEqual(step.next, "escalate")
+        self.assertTrue(step.reason.startswith("turns: mutation red 3 times, over max_round_trips (2) (cargo-mutants). The Director can `override`"))
 
     def test_une_mutation_trop_longue_escalade(self):
         self.mutation_profile()
@@ -1045,7 +1083,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.world.changed = ["specs/backlog.md"]
         self.receive(message("dancer", "conductor", "report", "- Done."))
         step = self.receive(message("dancer", "conductor", "report", "- Done again."))
-        self.assertEqual((step.next, step.reason), ("escalate", "policy: the dancer broke the rules: specs/backlog.md: the specs space"))
+        self.assertTrue(step.reason.startswith("policy: the dancer broke the rules: specs/backlog.md: the specs space. The Director can `override`"))
 
     def test_une_violation_corrigee_repart_vers_le_critic(self):
         self.begin()
@@ -1138,8 +1176,8 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
     def test_une_question_au_conductor_va_au_director_qui_y_repond(self):
         self.begin()
         step = self.receive(message("dancer", "conductor", "question", "1. Which branch?"), question_id="msg_q")
-        self.assertEqual((step.next, step.reason), ("escalate", "the dancer asks the Conductor, who only relays: answer with "
-                                                    "an `answer` message, from the director"))
+        self.assertEqual((step.next, step.reason), ("escalate", "question: the dancer asks the Conductor, who only relays. "
+                                                    "The Director can `answer` (an `answer` message, from the director)."))
         self.receive(message("director", "dancer", "answer", "1. This one."))
         reply = self.world.ran("orca", "orchestration", "reply")[0]
         self.assertEqual(reply[reply.index("--id") + 1], "msg_q")
@@ -1426,7 +1464,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.waiting_on(pending=[{"id": "msg_9", "from": "dancer", "to": "director"}])
         step = self.nudge()
         self.assertEqual(step.next, "escalate")
-        self.assertTrue(step.reason.startswith("waiting on the Director"))
+        self.assertTrue(step.reason.startswith("question: waiting on the Director. The Director can `answer`"))
         self.assertEqual(self.reminders(), [])
         self.assertEqual(self.state()["status"], "escalated")
 
@@ -1672,7 +1710,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.begin()
         self.stopped("msg_stop_1")
         step = self.stopped("msg_stop_2")
-        self.assertEqual((step.next, step.reason), ("escalate", "Orca: Worker stopped without reporting: Worker term_1 exited"))
+        self.assertTrue(step.reason.startswith("failure: Orca: Worker stopped without reporting: Worker term_1 exited. The Director can `override`"))
 
     def test_la_relance_est_rendue_au_worker_apres_son_prochain_message(self):
         self.begin()
@@ -1690,7 +1728,7 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
         self.begin()
         self.orca_message("msg_stop", "escalation", "Worker term_1 exited", subject="Worker stopped without reporting")
         step = self.receive_from_orca("msg_stop")
-        self.assertEqual(step.reason, "Orca: Worker stopped without reporting: Worker term_1 exited")
+        self.assertTrue(step.reason.startswith("failure: Orca: Worker stopped without reporting: Worker term_1 exited. The Director can `override`"))
 
     def test_la_ligne_de_commande_lit_le_message_chez_orca(self):
         self.begin()
@@ -1931,6 +1969,294 @@ report = {{ path = "{self.native_report}", format = "cargo-mutants" }}
     def test_rien_n_est_ecrit_dans_le_projet(self):
         self.begin()
         self.assertFalse((self.home / ".ballet" / "run").exists())
+
+    # --- le Director force (OPP-85) ---
+
+    def override(self, reason="The limit is lifted: carry on."):
+        return self.receive(message("director", "conductor", "override", reason))
+
+    def failed(self):
+        """Le Dancer tombe sur la limite de 5 h d'Orca : un worker en erreur, une escalade de panne."""
+        self.begin()
+        return self.stopped("msg_stop", reason="errored")
+
+    def decisions(self):
+        return self.journal("director-decision")
+
+    def test_une_panne_dit_ce_qu_elle_est_et_ce_que_le_director_peut_faire(self):
+        step = self.failed()
+        self.assertTrue(step.reason.startswith("failure: Orca: Worker stopped without reporting: Worker term_1 exited."), step.reason)
+        self.assertIn("The Director can `override`", step.reason)
+        self.assertEqual(self.state()["blocked_on"], "failure")
+
+    def test_un_override_relance_le_worker_en_panne_avec_son_contexte_et_la_raison_du_director(self):
+        self.failed()
+        step = self.override("The 5-hour limit is lifted: carry on.")
+        self.assertEqual(step.next, "wait")
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertEqual(send[send.index("--to") + 1], "dispatch:ctx_1")
+        self.assertIn("The 5-hour limit is lifted: carry on.", send[send.index("--body") + 1])
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+        self.assertEqual((self.state()["status"], self.state()["blocked_on"]), ("open", ""))
+        self.assertIn("the dancer restarted with its context", " ".join(step.done))
+
+    def test_un_override_est_marque_du_director_au_journal_et_commente_sur_l_issue(self):
+        self.failed()
+        step = self.override("The 5-hour limit is lifted: carry on.")
+        self.assertEqual(self.decisions(), [{"override": "failure", "reason": "The 5-hour limit is lifted: carry on."}])
+        comment = self.world.ran("gh", "issue", "comment")[-1]
+        self.assertIn("The 5-hour limit is lifted: carry on.", comment[comment.index("--body") + 1])
+        self.assertIn("override published on issue #3", step.done)
+
+    def test_un_override_rend_au_worker_relance_son_droit_a_une_relance(self):
+        self.begin()
+        self.stopped("msg_stop_1")
+        self.stopped("msg_stop_2")
+        self.assertEqual(self.state()["blocked_on"], "failure")
+        self.override()
+        self.assertEqual(self.stopped("msg_stop_3").next, "wait")
+
+    def test_un_message_escalation_d_un_worker_se_leve_aussi_par_un_override(self):
+        self.begin()
+        step = self.receive(message("dancer", "conductor", "escalation", "The proof needs a service I cannot start."))
+        self.assertTrue(step.reason.startswith("failure: the dancer escalates"), step.reason)
+        self.assertEqual(self.override("Start it with `pnpm dev`.").next, "wait")
+        send = self.world.ran("orca", "orchestration", "send")[-1]
+        self.assertIn("Start it with `pnpm dev`.", send[send.index("--body") + 1])
+
+    # --- une answer sans question en attente ne crée plus d'escalade ---
+
+    def test_une_answer_sans_question_en_attente_est_refusee_sans_escalade_et_renvoie_a_override(self):
+        self.failed()
+        events = len(self.journal("escalate"))
+        step = self.receive(message("director", "dancer", "answer", "The limit is lifted."))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("answer refused: no pending question from the dancer to the director", step.done[0])
+        self.assertIn("`override`", step.done[0])
+        self.assertEqual(len(self.journal("escalate")), events)
+        self.assertEqual(self.state()["status"], "escalated")
+        self.assertEqual(self.state()["blocked_on"], "failure")
+
+    def test_une_answer_refusee_ne_touche_pas_a_la_rehearsal_qui_travaille(self):
+        self.begin()
+        before = self.state()
+        step = self.receive(message("director", "dancer", "answer", "Go on."))
+        self.assertEqual(step.next, "wait")
+        self.assertIn("answer refused", step.done[0])
+        self.assertEqual(self.state(), before)
+        self.assertEqual(self.journal("escalate"), [])
+
+    def test_une_answer_refusee_n_empeche_pas_l_override_qui_suit(self):
+        self.failed()
+        self.receive(message("director", "dancer", "answer", "The limit is lifted."))
+        self.assertEqual(self.override().next, "wait")
+
+    def test_un_override_sans_raison_est_refuse_sans_escalade(self):
+        self.failed()
+        step = self.receive(message("director", "conductor", "override", ""))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("override refused: it needs the Director's reason in its body", step.done[0])
+        self.assertEqual(self.state()["blocked_on"], "failure")
+        self.assertEqual(self.decisions(), [])
+
+    def test_un_override_quand_rien_ne_bloque_est_refuse_sans_escalade(self):
+        self.begin()
+        step = self.override()
+        self.assertEqual(step.next, "wait")
+        self.assertIn("override refused: nothing blocks this Rehearsal", step.done[0])
+        self.assertEqual(self.journal("escalate"), [])
+
+    def test_un_override_pendant_une_question_en_attente_renvoie_vers_answer(self):
+        self.begin()
+        self.receive(message("dancer", "director", "question", "1. Touch the CI?"), question_id="msg_3")
+        step = self.override()
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("override refused: the dancer waits for the Director's answer: write an `answer`", step.done[0])
+
+    def test_un_override_ne_vient_que_du_director(self):
+        self.failed()
+        step = self.receive(message("dancer", "conductor", "override", "Let me through."))
+        self.assertEqual(step.next, "escalate")
+        self.assertIn("an `override` comes from the director", step.reason)
+        self.assertEqual(self.state()["blocked_on"], "failure")
+
+    # --- chaque escalade dit ce qu'elle est et ce que le Director peut faire ---
+
+    def test_une_question_au_director_dit_qu_elle_se_repond_par_answer(self):
+        self.begin()
+        step = self.receive(message("dancer", "director", "question", "1. Touch the CI?"), question_id="msg_3")
+        self.assertTrue(step.reason.startswith("question: the dancer asks the Director."), step.reason)
+        self.assertIn("The Director can `answer`", step.reason)
+
+    def test_la_politique_dit_ce_qu_elle_est_et_ce_que_le_director_peut_faire(self):
+        self.begin()
+        self.world.changed = ["specs/backlog.md"]
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        step = self.receive(message("dancer", "conductor", "report", "- Done again."))
+        self.assertTrue(step.reason.startswith("policy: the dancer broke the rules: specs/backlog.md: the specs space."), step.reason)
+        self.assertIn("The Director can `override`", step.reason)
+        self.assertEqual(self.state()["blocked_on"], "policy")
+
+    def test_la_taille_dit_ce_qu_elle_est_et_ce_que_le_director_peut_faire(self):
+        self.strict()
+        self.begin()
+        step = self.receive(message("dancer", "conductor", "report", "- Done."))
+        self.assertTrue(step.reason.startswith("size: diff of 180 lines, over max_diff_lines (100)"), step.reason)
+        self.assertIn("The Director can `override`", step.reason)
+
+    def rejected_three_times(self):
+        self.to_the_critic()
+        for _ in range(2):
+            self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+            self.receive(message("dancer", "conductor", "report", "- Fixed."))
+        return self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+
+    def test_les_tours_disent_ce_qu_ils_sont_et_ce_que_le_director_peut_faire(self):
+        step = self.rejected_three_times()
+        self.assertTrue(step.reason.startswith("turns: 3 rejections, over max_round_trips (2)."), step.reason)
+        self.assertIn("The Director can `override`", step.reason)
+        self.assertEqual(self.state()["blocked_on"], "turns")
+
+    def test_un_reveil_apres_une_escalade_sans_pull_request_ne_renvoie_plus_vers_answer(self):
+        self.failed()
+        step = self.resume()
+        self.assertIn("no pull request yet", step.reason)
+        self.assertIn("blocked by a failure", step.reason)
+        self.assertIn("`override`", step.reason)
+        self.assertNotIn("answer the pending question", step.reason)
+
+    def test_un_reveil_sans_pull_request_avec_une_question_en_attente_renvoie_vers_answer(self):
+        self.begin()
+        self.receive(message("dancer", "director", "question", "1. Touch the CI?"), question_id="msg_3")
+        step = self.resume()
+        self.assertIn("no pull request yet: answer the pending question with an `answer` message", step.reason)
+
+    # --- la politique levée par le Director ---
+
+    def second_violation(self, changed=("specs/backlog.md",)):
+        self.begin()
+        self.world.changed = list(changed)
+        self.world.new_commits = ["d1", "d2"]
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        return self.receive(message("dancer", "conductor", "report", "- Done again."))
+
+    def test_un_override_recoit_la_branche_telle_quelle_une_seule_fois(self):
+        self.second_violation()
+        step = self.override("The spec change is wanted: take the branch as it is.")
+        self.assertEqual(step.next, "wait")
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+        self.assertEqual(self.policy_events()[-1], {"role": "dancer", "violations": [], "waived_by": "director"})
+        self.assertEqual(self.decisions(), [{"override": "policy", "reason": "The spec change is wanted: take the branch as it is."}])
+        self.assertEqual((self.state()["blocked_on"], self.state()["status"]), ("", "open"))
+
+    def test_la_violation_levee_n_est_pas_reprochee_au_tour_suivant_mais_une_nouvelle_l_est(self):
+        self.second_violation()
+        self.override()
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.world.new_commits = ["d1", "d2", "d3"]
+        self.world.commit_authors = {"specs/backlog.md": ["d1"]}
+        self.assertEqual(self.receive(message("dancer", "conductor", "report", "- Fixed.")).next, "wait")
+        self.assertEqual(self.policy_events()[-1]["violations"], [])
+        self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.world.changed = ["specs/backlog.md", ".github/workflows/proof.yml"]
+        self.world.new_commits = ["d1", "d2", "d3", "d4"]
+        self.world.commit_authors = {".github/workflows/proof.yml": ["d4"], "specs/backlog.md": ["d1"]}
+        step = self.receive(message("dancer", "conductor", "report", "- Fixed again."))
+        self.assertEqual(self.policy_events()[-1]["violations"], [".github/workflows/proof.yml: a forbidden zone of [policy] forbidden_zones"])
+        self.assertEqual(step.next, "escalate")
+
+    def test_un_override_ne_leve_que_la_politique_pas_la_preuve(self):
+        self.second_violation()
+        self.world.proof = ballet_rehearsal.Proof(False, "FAIL inventory\n")
+        step = self.override()
+        self.assertEqual(step.next, "wait")
+        self.assertFalse(self.world.ran("gh", "pr", "create"))
+        self.assertIn("proof red", " ".join(step.done))
+
+    def test_un_override_recoit_le_verdict_d_un_critic_qui_avait_touche_au_worktree(self):
+        self.to_the_critic()
+        self.world.head = "d1rty00"
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: APPROVED"))
+        self.assertTrue(step.reason.startswith("policy: the critic broke the rules"), step.reason)
+        self.assertFalse(self.world.ran("gh", "pr", "merge"))
+        step = self.override("Its note file is harmless: take the verdict.")
+        self.assertEqual(step.next, "done")
+        self.assertTrue(self.world.ran("gh", "pr", "merge"))
+
+    def test_un_rapport_sans_rouge_refuse_deux_fois_se_leve_par_un_override(self):
+        self.begin()
+        report = "- Tasks:\n  - [x] [C1] Do it — abc1234\n- Proof: green"
+        self.receive(message("dancer", "conductor", "report", report))
+        step = self.receive(message("dancer", "conductor", "report", report))
+        self.assertTrue(step.reason.startswith("policy: the Dancer's report has no `Red:` line again for: [C1] Do it."), step.reason)
+        self.assertEqual(self.override("It is a chore.").next, "wait")
+        self.assertTrue(self.world.ran("gh", "pr", "create"))
+
+    # --- la taille levée par le Director ---
+
+    def test_un_override_sur_la_taille_envoie_la_pull_request_au_critic(self):
+        self.strict()
+        self.begin()
+        self.receive(message("dancer", "conductor", "report", "- Done."))
+        step = self.override("The size is the feature: review it.")
+        self.assertEqual((step.next, self.state()["blocked_on"]), ("wait", ""))
+        self.assertEqual(self.world.started_roles()[-1], "Critic · FEAT-001.2")
+        self.assertEqual(self.decisions(), [{"override": "size", "reason": "The size is the feature: review it."}])
+
+    # --- les tours levés par le Director ---
+
+    def test_un_override_sur_les_tours_donne_un_tour_de_plus_au_dancer_avec_les_mots_du_director(self):
+        self.rejected_three_times()
+        step = self.override("Fix only point 1: the rest is a note.")
+        self.assertEqual(step.next, "wait")
+        body = self.last_send_body()
+        self.assertEqual(body[0], "dispatch:ctx_1")
+        self.assertIn("> Fix only point 1: the rest is a note.", body[1])
+        self.assertIn("read-pr 8", body[1])
+        self.assertEqual((self.state()["granted"], self.state()["blocked_on"], self.state()["round_trips"]), (1, "", 3))
+
+    def test_le_tour_donne_est_le_dernier_la_rejection_suivante_escalade_de_nouveau(self):
+        self.rejected_three_times()
+        self.override()
+        self.receive(message("dancer", "conductor", "report", "- Fixed."))
+        step = self.receive(message("critic", "conductor", "verdict", "VERDICT: REJECTED"))
+        self.assertTrue(step.reason.startswith("turns: 4 rejections, over max_round_trips (3)."), step.reason)
+
+    def test_un_override_sur_une_preuve_rouge_trop_souvent_donne_un_tour_de_plus(self):
+        self.begin()
+        for _ in range(3):
+            step = self.red_report()
+        self.assertTrue(step.reason.startswith("turns: proof `pnpm proof` red 3 times, over max_round_trips (2)."), step.reason)
+        self.assertEqual(self.override().next, "wait")
+        self.assertEqual(self.red_report().next, "escalate")
+
+    def test_un_override_sur_une_mutation_rouge_trop_souvent_rend_les_survivants_au_dancer(self):
+        self.mutation_profile()
+        self.mutation_result = (2, False, CARGO_REPORT)
+        self.mutated_report()
+        self.critic_says("APPROVED")
+        self.wake()
+        for round_ in (2, 3):
+            self.world.head = f"beef00{round_}"
+            self.receive(message("dancer", "conductor", "report", "- Survivors killed.", round_=round_))
+            self.critic_says("APPROVED")
+            step = self.wake(round_=round_, message_id=f"msg_mutation_{round_}")
+        self.assertTrue(step.reason.startswith("turns: mutation red 3 times, over max_round_trips (2) (cargo-mutants)."), step.reason)
+        self.override("Keep going.")
+        body = self.last_send_body()[1]
+        self.assertIn("> Keep going.", body)
+        self.assertIn("replace rank -> u8 with 1", body)
+
+    def test_un_override_sur_les_tours_d_une_question_laisse_passer_le_message_une_fois(self):
+        self.begin()
+        step = self.receive(message("dancer", "choreographer", "question", "1. Again?", round_=4), question_id="msg_9")
+        self.assertTrue(step.reason.startswith("turns: round 4 on #3 between choreographer and dancer, over max_exchange_rounds (3)."), step.reason)
+        step = self.override("One more round: answer it.")
+        self.assertEqual(step.next, "wait")
+        self.assertIn("question carried to the choreographer", step.done)
+        self.assertEqual(self.world.started_roles()[-1], "Choreographer · FEAT-001.2")
+        self.assertEqual(self.decisions(), [{"override": "rounds", "reason": "One more round: answer it."}])
 
 
 class SessionTest(unittest.TestCase):

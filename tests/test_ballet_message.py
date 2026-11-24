@@ -31,6 +31,11 @@ class BalletMessageTest(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ballet_message.MessageError):
                 ballet_message.read_message(self.write({**HEADER, **change}))
 
+    def test_un_override_du_director_est_un_message_comme_les_autres(self):
+        header, text = ballet_message.read_message(self.write({**HEADER, "from": "director", "type": "override"}, "The limit is lifted."))
+        self.assertEqual(header["type"], "override")
+        self.assertTrue(text.endswith("The limit is lifted.\n"))
+
     def test_un_verdict_porte_sa_ligne_verdict(self):
         verdict = {**HEADER, "from": "critic", "type": "verdict"}
         with self.assertRaises(ballet_message.MessageError):

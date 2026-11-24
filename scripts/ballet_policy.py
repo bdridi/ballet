@@ -16,11 +16,16 @@ ne créer ni supprimer de branche ni de tag, laisser l'arbre de travail propre (
 l'arbre du Dancer est alors en cours). Le Dancer est jugé sur le diff net de sa branche face au `HEAD` qu'il a reçu
 (noté par le Conductor à sa première mission : les commits du Choreographer et du Dramaturg d'avant ne comptent pas ;
 à défaut, le `HEAD` du worktree à son ouverture, puis l'ancêtre commun avec `origin/main`), hors des fichiers que
-seuls les commits des autres rôles, venus pendant son travail, ont touchés ; aucun test présent au départ ne doit y disparaître
-ni changer de nom, sauf un renommage que le Dancer déclare dans son rapport (`- Renamed test: <ancien> → <nouveau>`).
+seuls les commits des autres rôles, venus pendant son travail, ont touchés.
+
+Un test peut changer : un refacto ou une évolution rend une règle, donc un test, obsolète, et le Dancer le retire, le
+renomme ou le réécrit sans rien déclarer. La politique ne le bloque pas ; elle en tient la liste (`removed_tests` : les
+tests présents au départ qui n'ont plus leur nom dans la branche, avec leur fichier) pour la mission du Critic, qui
+juge si le changement est légitime.
 
 Les données viennent de la config (`[policy]` du plugin, surchargé par le projet) : `forbidden_zones`,
-`sensitive_zones`, `roles` (le périmètre de la méthode, remplaçable, et l'extension du projet) et, par langage, `test_names` (extensions et motif du nom).
+`sensitive_zones`, `roles` (le périmètre de la méthode, remplaçable, et l'extension du projet) et, par langage, `test_names` (extensions et motif du nom,
+qui servent à reconnaître un test pour la liste du Critic).
 Une zone est un glob `fnmatch` : `*` traverse aussi les `/`. Un glob sans `/` vaut à toute profondeur (`CLAUDE.md`),
 un glob avec `/` part de la racine du repo (`.github/*`). `@specs`, `@adr`, `@forbidden` et `@sensitive` nomment
 l'espace specs, le dossier des ADR, `forbidden_zones` et `sensitive_zones`. Le corps d'un test modifié reste au Critic.
@@ -74,7 +79,6 @@ class Passage:
     answering: bool = False                       # le rôle répond pendant que le Dancer attend
     dancer_start: str = ""                        # `HEAD` quand le Dancer a reçu la branche : ce qu'il a fait en part
     base: str = ""                                # sans `dancer_start`, le point de départ de la branche ; vide, l'ancêtre commun avec `origin/main`
-    renamed: dict = field(default_factory=dict)   # les tests renommés que le Dancer déclare : ancien nom → nouveau
 
 
 def policy_of(config):
@@ -95,7 +99,7 @@ def violations(passage, policy, git):
     if passage.role == "critic":
         found += _head_unmoved(passage, git)
     elif passage.role == "dancer":
-        found += _branch_within_perimeter(passage, policy, git) + _kept_tests(passage, policy, git)
+        found += _branch_within_perimeter(passage, policy, git)
     else:
         found += _passage_within_perimeter(passage, policy, git)
     return found
@@ -122,6 +126,18 @@ def dirty_files(git):
 
 def commits_since(checkpoint, git):
     return git(["rev-list", f"{checkpoint}..HEAD"]).split() if checkpoint else []
+
+
+def removed_tests(passage, policy, git):
+    """Les tests présents quand le Dancer a reçu la branche qui n'y ont plus leur nom, retirés ou renommés, un par ligne
+    `fichier: nom` : la liste que le Critic juge (une évolution ou un refacto peut les rendre obsolètes)."""
+    base = _base(passage, git)
+    found = []
+    for status, path in _modified_or_deleted(base, git):
+        before = _test_names(path, policy, git(["show", f"{base}:{path}"]))
+        after = _test_names(path, policy, git(["show", f"HEAD:{path}"]) if status == "M" else "")
+        found += [f"{path}: {name}" for name in sorted((before - after).elements())]
+    return found
 
 
 def main(argv):
@@ -191,18 +207,6 @@ def _branch_within_perimeter(passage, policy, git):
     return found
 
 
-def _kept_tests(passage, policy, git):
-    """Chaque test présent quand le Dancer a reçu la branche existe encore sous le même nom, ou sous celui que le Dancer déclare."""
-    base = _base(passage, git)
-    found = []
-    for status, path in _modified_or_deleted(base, git):
-        before = _test_names(path, policy, git(["show", f"{base}:{path}"]))
-        after = _test_names(path, policy, git(["show", f"HEAD:{path}"]) if status == "M" else "")
-        missing = [name for name in sorted((before - after).elements()) if not _declared_rename(name, after, passage)]
-        found += [f"{path}: existing test removed or renamed: {name}" for name in missing]
-    return found
-
-
 # --- détails ------------------------------------------------------------------
 
 
@@ -247,11 +251,6 @@ def _folder_globs(folder):
 def _base(passage, git):
     """Où le Dancer a reçu la branche ; sans ce `HEAD` (un ancien état), l'ouverture du worktree, puis `origin/main`."""
     return passage.dancer_start or passage.base or git(["merge-base", BASE, "HEAD"]).strip()
-
-
-def _declared_rename(name, after, passage):
-    """Un test que le Dancer déclare renommé, et dont le nouveau nom est bien là."""
-    return passage.renamed.get(name) in after
 
 
 def _modified_or_deleted(base, git):

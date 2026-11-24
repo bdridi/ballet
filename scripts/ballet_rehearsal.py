@@ -3,7 +3,7 @@
     python3 ballet_rehearsal.py begin    <élément>                                 # ouvre la session de l'élément
     python3 ballet_rehearsal.py receive  <ID> --message <msg-id>                   # un message d'un worker, lu chez Orca par son id
     python3 ballet_rehearsal.py receive  <ID> --dispatch <ctx-id>                  # le dernier message du worker de ce dispatch
-    python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director)
+    python3 ballet_rehearsal.py receive  <ID> <message.md> [--question <msg-id>]   # un message écrit dans un fichier (le Director : `answer`, `override`…)
     python3 ballet_rehearsal.py receive  <ID> --mutation                           # la fin de la mutation, si son réveil s'est perdu
     python3 ballet_rehearsal.py premiere <ID>                                      # retente le merge (CI rouge ou trop longue)
     python3 ballet_rehearsal.py resume   <ID> | <élément>                          # applique la décision du Director (libellé de la PR)
@@ -46,9 +46,9 @@ Une escalade avec une PR pose `ballet:escalated` ; le Director tranche en posant
 ou `ballet:rejected` avec un commentaire de PR (renvoi au Dancer), puis fait reprendre la Rehearsal (`resume`).
 
 Un rapport du Dancer dont une tâche cochée n'a pas sa ligne `Red:` (le test et son échec, vus avant le code) est
-refusé avant tout : rien ne tourne, le Dancer le complète ; la seconde fois, escalade. Les tests qu'il déclare renommés
-(`- Renamed test: <ancien> → <nouveau>`) passent à la politique, qui juge la branche face à son point de départ (le
-`HEAD` du worktree à son ouverture).
+refusé avant tout : rien ne tourne, le Dancer le complète ; la seconde fois, escalade. Un test peut changer sans rien
+déclarer : la politique juge la branche face à son point de départ (le `HEAD` du worktree à son ouverture), et la mission
+du Critic liste les tests que le diff retire ou renomme (fichier et nom), qu'il juge (OPP-86).
 
 À chaque rapport du Dancer, après la politique, le script lance lui-même la preuve du repo (`proof` du profil) dans
 le worktree, sans croire le rapport sur parole (`proof-start` et `proof-end` au journal) ; déjà verte sur ce commit,
@@ -93,6 +93,21 @@ ou s'il est tombé en erreur, la Rehearsal escalade.
 Une escalade est un cas prévu : le script sort avec 0. Il sort avec 2 sur un usage invalide,
 et un autre code ≠ 0 n'est qu'une panne du script.
 
+Le Director débloque par deux messages (`receive <ID> <message.md>`, `from: director`). Une `answer` répond à une question
+en attente ; sans elle, elle est refusée sans escalade (`answer refused: …`, la Rehearsal reste comme elle était). Un
+`override` (OPP-85), avec sa raison dans le corps, ne suppose aucune question : il lève ce qui bloque, au plus petit geste.
+Chaque escalade dit ce qu'elle est dans son motif (`question`, `failure`, `policy`, `size`, `turns`) et ce que le Director
+peut faire (`answer` ou `override`) ; `blocked_on` garde le blocage que l'`override` lève :
+    failure   un worker tombé en erreur (la limite de 5 h d'Orca, un arrêt répété, un message `escalation`) est relancé
+              dans sa session, avec son contexte, comme un nudge, avec les mots du Director
+    policy    le dernier message du worker, refusé par la politique (ou un rapport du Dancer refusé deux fois sans `Red:`),
+              est reçu tel quel une fois (les commits du Dancer deviennent ceux que le Director a acceptés)
+    rounds    le message qui a dépassé `max_exchange_rounds` est traité une fois, comme s'il était dans le plafond
+    turns     `max_round_trips` gagne un tour (`granted`) et le Dancer reprend, avec les mots du Director, les points du Critic
+              et les survivants de la mutation ; s'il échoue encore, la Rehearsal escalade de nouveau
+    size      la PR part au Critic, comme avec `ballet:size-accepted`
+La décision est marquée du Director au journal (`director-decision`) et publiée sur l'issue.
+
 Une transition qui finit en `NEXT: escalate` ou `NEXT: done` est annoncée à Maestro (`ballet_maestro.announce`) : un
 `status` dans sa boîte, sujet `<projet>#<élément> · <événement>`. Sans boîte, rien ; un échec n'est qu'une ligne du pas.
 
@@ -114,7 +129,7 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -155,14 +170,23 @@ ANSWERING_ROLES = ("choreographer", "dramaturg")   # vérifiés à chaque répon
 MAX_SLICES = 3            # au plus, par feature : une slice par critère, ou par groupe de critères
 TASK_LINE = re.compile(r"^- \[([ xX])\]\s*(.+?)(?:\s+—\s+.*)?$")   # une tâche du rapport du Dancer
 RED_LINE = re.compile(r"^- Red:\s*\S")                                 # son rouge, sous elle
-RENAMED_TEST = re.compile(r"^\s*- Renamed test:\s*(.+?)\s*(?:→|->)\s*(.+?)\s*$", re.MULTILINE)
 IDLE_REMINDER = ("Ballet has received nothing from you for a while. If you already sent your message (report, answer, verdict or "
                  "question), send it again now, whole, header line first, as your worker_done; otherwise finish your work and send it.")
 REPORT_REMINDER = "You ended your turn without sending your worker_done. Send it now: its body is your final message, whole, header line first. Do not redo any work."
+LIFTABLE = ("failure", "policy", "rounds", "turns", "size")   # ce que `blocked_on` peut dire d'une escalade que le Director lève par `override`
+LIFTED_BY_A_WORKER = ("failure", "policy", "rounds", "turns")  # ceux que le message suivant d'un worker lève de lui-même (pas la taille)
+BLOCKS = {"failure": "a failure", "policy": "a policy refusal", "rounds": "the limit of rounds", "turns": "the limit of turns",
+          "size": "the size of the diff"}
+CAN_ANSWER = "The Director can `answer` (an `answer` message, from the director)."
+WORKER_GOES_ON = "the worker restarts with its context, and the Director's words"
 
 
 class RehearsalError(Exception):
     """La Rehearsal ne peut pas avancer : le Conductor escalade."""
+
+
+class Refusal(RehearsalError):
+    """Un message du Director est refusé : l'état ne bouge pas, et rien n'escalade ; le message dit quoi faire à la place."""
 
 
 class UsageError(Exception):
@@ -187,7 +211,10 @@ class Rehearsal:
     reason: str = ""                                 # le motif de la dernière escalade, ou de la fin
     label: str = ""                                  # le dernier verdict posé en libellé par le script
     size: dict = field(default_factory=dict)         # la dernière mesure du diff
-    blocked_on: str = ""                             # "size" : le Critic attend que le Director accepte la taille
+    blocked_on: str = ""                             # ce que le Director lève : "size" (il accepte la taille), "failure", "policy", "rounds", "turns" (par `override`), ou "plan"
+    granted: int = 0                                 # les tours que le Director a donnés en plus de `max_round_trips` (par `override`)
+    last_message: dict = field(default_factory=dict)  # le dernier message d'un worker : {text, question_id}, que `override` reçoit tel quel si une vérification l'a refusé
+    waived: str = ""                                 # pendant un `override` : la vérification que le Director lève pour ce message, une fois ("policy", "rounds")
     notes: str = ""                                  # l'issue de dette technique où les notes de l'approbation sont allées (`#N`)
     nudges: dict = field(default_factory=dict)       # rôle → relances sans `worker_done`, remis à zéro à son prochain message
     checkpoint: str = ""                             # `HEAD` du worktree quand le dernier rôle a reçu la main
@@ -210,7 +237,6 @@ class Rehearsal:
     dancer_start: str = ""                           # le `HEAD` que le Dancer a reçu à sa première mission : ce qu'il a fait en part
     proven: str = ""                                 # le `HEAD` de la dernière preuve verte
     mutated: str = ""                                # le `HEAD` de la dernière mutation verte : la suivante part de là
-    renamed_tests: dict = field(default_factory=dict)  # les tests renommés que le Dancer déclare : ancien nom → nouveau
     refused_reports: int = 0                         # rapports du Dancer refusés pour une ligne `Red:` manquante
     received: list = field(default_factory=list)     # les ids des messages Orca déjà traités : `receive --run` ne les rejoue pas
     frictions: dict = field(default_factory=dict)    # à sa fin : {seconds, frictions} (`ballet_frictions`), aussi au journal
@@ -326,9 +352,18 @@ def receive(rehearsal_id, message_path, question_id, home, tools):
     try:
         header, text = _message(message_path)
         step = _handle(rehearsal, header, text, question_id, config, home, tools)
+    except Refusal as refusal:
+        return _refused(rehearsal, refusal, home)
     except (RehearsalError, ballet_github.GitHubError) as error:
         step = Step("escalate", str(error))
     return _settle(rehearsal, step, home, tools)
+
+
+def _refused(rehearsal, refusal, home):
+    """Le message du Director est refusé : la Rehearsal reste comme elle était (même statut, même motif), sans nouvelle
+    escalade ni annonce à Maestro ; le refus dit quoi faire à la place, et le journal le garde."""
+    _log(home, rehearsal, "refused", {"reason": str(refusal)})
+    return Step(STEP_OF_STATUS[rehearsal.status], rehearsal.reason, [str(refusal)])
 
 
 def receive_from_orca(rehearsal_id, wanted, home, tools, by="message"):
@@ -444,7 +479,7 @@ def nudge(rehearsal_id, home, tools):
         return Step("wait", done=[f"the mutation (round {rehearsal.mutation['round']}) is running in the background: nobody to remind"])
     role = _awaited_role(rehearsal, home)
     if role == "director":
-        return _settle(rehearsal, Step("escalate", "waiting on the Director: answer the pending question with an `answer` message, from the director"), home, tools)
+        return _settle(rehearsal, Step("escalate", f"question: waiting on the Director. {CAN_ANSWER}"), home, tools)
     if not role or role not in rehearsal.dispatches:
         return Step("wait", done=[f"nobody to remind: no worker of Rehearsal {rehearsal.id} is known to be awaited"])
     _remind(rehearsal, role, home, tools)
@@ -698,7 +733,16 @@ def _session_done_line(session):
 def _handle(rehearsal, header, text, question_id, config, home, tools):
     _log(home, rehearsal, "message", {**header, "text": text})
     rehearsal.nudges.pop(header["from"], None)
+    if header["from"] != "director" and header["type"] != "override":
+        _note_worker_message(rehearsal, text, question_id)
     return _route(rehearsal, header, text, question_id, config, home, tools)
+
+
+def _note_worker_message(rehearsal, text, question_id):
+    """Un worker écrit : ce qui le bloquait est fini, et son message est celui qu'un `override` recevrait tel quel."""
+    if rehearsal.blocked_on in LIFTED_BY_A_WORKER:
+        rehearsal.blocked_on = ""
+    rehearsal.last_message = {"text": text, "question_id": question_id}
 
 
 def _route(rehearsal, header, text, question_id, config, home, tools):
@@ -706,6 +750,8 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
     kind, sender = header["type"], header["from"]
     if _in_plan_review(rehearsal, header):
         return _plan_review(rehearsal, header, text, config, home, tools)
+    if kind == "override":
+        return _override(rehearsal, header, text, config, home, tools)
     if kind in ("revise", "approve"):
         raise RehearsalError(f"a `{kind}` message answers a plan in review, and no plan waits for the Director")
     if kind == "question":
@@ -721,7 +767,8 @@ def _route(rehearsal, header, text, question_id, config, home, tools):
     if kind == "verdict" and sender == "critic":
         return _after_verdict(rehearsal, verdict_of(text), text, config, home, tools)
     if kind == "escalation":
-        return Step("escalate", f"{sender} escalates: see its message")
+        rehearsal.blocked_on = "failure"
+        return Step("escalate", f"failure: the {sender} escalates: see its message. {_can_override(WORKER_GOES_ON)}")
     raise RehearsalError(f"no transition for a {kind} from the {sender}")
 
 
@@ -731,7 +778,9 @@ def _worker_stopped(rehearsal, message, home, tools):
     payload = ballet_orca.payload(message)
     role = _worker_role(rehearsal, message)
     if not role or payload.get("stopReason") != "finished" or rehearsal.nudges.get(role, 0) >= MAX_NUDGES:
-        raise RehearsalError(f"Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}")
+        rehearsal.blocked_on = "failure"
+        raise RehearsalError(f"failure: Orca: {message.get('subject', 'a worker stopped')}: {message.get('body', '')[:300]}. "
+                             f"{_can_override(WORKER_GOES_ON)}")
     rehearsal.nudges[role] = rehearsal.nudges.get(role, 0) + 1
     tools.orca(["orchestration", "send", "--to", f"dispatch:{rehearsal.dispatches[role]}",
                 "--subject", f"{rehearsal.id} · {role}: send your worker_done", "--body", REPORT_REMINDER])
@@ -748,7 +797,7 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
     if to != "director" and header["from"] in ANSWERING_ROLES:
         found = _verified_and_owned(rehearsal, header["from"], config, home, tools)
         if found:
-            return Step("escalate", f"policy: the {header['from']} broke the rules before asking: {'; '.join(found)}", step.done)
+            return _policy_escalation(rehearsal, f"the {header['from']} broke the rules before asking", found, step.done)
     rehearsal.pending.append({"id": question_id, "from": header["from"], "to": to})
     if to == "director":
         return Step("escalate", _for_the_director(header), step.done)
@@ -762,7 +811,7 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
 def _for_the_director(header):
     """Le Conductor ne fait que relayer : une question qui lui est adressée va au Director."""
     asked = "the Conductor, who only relays" if header["to"] == "conductor" else "the Director"
-    return f"the {header['from']} asks {asked}: answer with an `answer` message, from the director"
+    return f"question: the {header['from']} asks {asked}. {CAN_ANSWER}"
 
 
 def _relay_answer(rehearsal, header, text, config, home, tools):
@@ -771,7 +820,7 @@ def _relay_answer(rehearsal, header, text, config, home, tools):
     if header["from"] in ANSWERING_ROLES:
         found = _verified_and_owned(rehearsal, header["from"], config, home, tools)
         if found:
-            return Step("escalate", f"policy: the {header['from']} broke the rules while answering: {'; '.join(found)}")
+            return _policy_escalation(rehearsal, f"the {header['from']} broke the rules while answering", found)
     step = Step("wait", done=[_publish_exchange(rehearsal, "answer", text, home, tools)])
     tools.orca(["orchestration", "reply", "--id", question["id"], "--body", text])
     _log_handoff(rehearsal, header["to"], "reply", text, home)
@@ -943,8 +992,7 @@ def _plan_line(planned, issues):
 def _after_code(rehearsal, report, config, home, tools):
     """Le rapport d'abord (une ligne `Red:` par tâche faite), puis la politique et la preuve : rien n'est poussé en
     violation ni rouge. La preuve verte, la branche part au Critic, et la mutation en arrière-plan, en même temps."""
-    rehearsal.renamed_tests.update(_declared_renames(report))
-    without_red = _tasks_without_red(report)
+    without_red = [] if rehearsal.waived == "policy" else _tasks_without_red(report)
     if without_red:
         return _refused_report(rehearsal, without_red, config, home, tools)
     found = _policy(rehearsal, "dancer", config, home, tools)
@@ -987,17 +1035,12 @@ def _done_task(line):
     return found.group(2) if found and found.group(1) in "xX" else None
 
 
-def _declared_renames(report):
-    """Les tests que le Dancer déclare renommés : `- Renamed test: <ancien> → <nouveau>`."""
-    return {match.group(1).strip("` "): match.group(2).strip("` ") for match in RENAMED_TEST.finditer(report)}
-
-
 def _refused_report(rehearsal, without_red, config, home, tools):
     """Un rapport sans le rouge d'une tâche n'est pas reçu : rien n'est lancé ; une seconde fois, escalade."""
     rehearsal.refused_reports += 1
     listed = "; ".join(without_red)
     if rehearsal.refused_reports > MAX_POLICY_RESENDS:
-        return Step("escalate", f"the Dancer's report has no `Red:` line again for: {listed}")
+        return _policy_escalation(rehearsal, f"the Dancer's report has no `Red:` line again for: {listed}", [])
     _ask_role(rehearsal, "dancer", _red_fix_assignment(without_red), config, home, tools)
     return Step("wait", done=[f"Dancer report refused, nothing run: no `Red:` line for {listed}"])
 
@@ -1017,9 +1060,9 @@ def _publish_code(rehearsal, report, step, config, home, tools):
     step.done.append(_size_line(rehearsal))
     if _blocked_by_size(rehearsal, size, config, tools):
         rehearsal.blocked_on = "size"
-        return Step("escalate", f"diff of {size.counted} lines, over max_diff_lines ({config['escalation']['max_diff_lines']}) "
-                    f"in strict mode: label #{rehearsal.pull_request} ballet:size-accepted, or ballet:rejected with a comment, "
-                    "then resume", step.done)
+        return Step("escalate", f"size: diff of {size.counted} lines, over max_diff_lines ({config['escalation']['max_diff_lines']}) "
+                    f"in strict mode. {_can_override('the pull request goes to the Critic as it is')} Or label "
+                    f"#{rehearsal.pull_request} ballet:size-accepted, or ballet:rejected with a comment, then resume", step.done)
     return _to_the_critic(rehearsal, step, config, home, tools)
 
 
@@ -1040,7 +1083,7 @@ def _file_notes(rehearsal, text, step, tools):
 
 
 def _to_the_critic(rehearsal, step, config, home, tools):
-    _ask_role(rehearsal, "critic", _critic_assignment(rehearsal, config), config, home, tools)
+    _ask_role(rehearsal, "critic", _critic_assignment(rehearsal, config, tools), config, home, tools)
     step.done.append(f"critic asked to review #{rehearsal.pull_request}, round {_review_round(rehearsal)}")
     return step
 
@@ -1090,16 +1133,19 @@ def _decide(rehearsal, verdict, text, red, step, config, home, tools):
     Premiere ; sinon le Dancer reprend, en un seul tour, avec les points du Critic et les survivants de la mutation."""
     if red:
         rehearsal.red_mutations += 1
-        if rehearsal.red_mutations > config["escalation"]["max_round_trips"]:
+        if rehearsal.red_mutations > _max_round_trips(rehearsal, config):
             names = ", ".join(outcome.tool for outcome in red)
-            return Step("escalate", f"mutation: red {rehearsal.red_mutations} times, over max_round_trips ({names})", step.done)
+            rehearsal.mutation_red = [asdict(outcome) for outcome in red]
+            return _turns_escalation(rehearsal, f"mutation red {rehearsal.red_mutations} times, over max_round_trips "
+                                     f"({_max_round_trips(rehearsal, config)}) ({names})", step.done)
     if verdict == "APPROVED" and not red:
         _file_notes(rehearsal, text, step, tools)
         return _then_premiere(rehearsal, step, config, tools)
     if verdict == "REJECTED":
         rehearsal.round_trips += 1
-        if rehearsal.round_trips > config["escalation"]["max_round_trips"]:
-            return Step("escalate", f"{rehearsal.round_trips} rejections, over max_round_trips", step.done)
+        if rehearsal.round_trips > _max_round_trips(rehearsal, config):
+            return _turns_escalation(rehearsal, f"{rehearsal.round_trips} rejections, over max_round_trips "
+                                     f"({_max_round_trips(rehearsal, config)})", step.done)
     else:
         _label(rehearsal, "REJECTED", tools)
     _ask_role(rehearsal, "dancer", _fix_assignment(rehearsal, verdict, red, config), config, home, tools)
@@ -1110,7 +1156,7 @@ def _decide(rehearsal, verdict, text, red, step, config, home, tools):
 def _fix_line(rehearsal, verdict, red, config):
     """Ce que le Dancer reprend, en une ligne : les points du Critic, les survivants, ou les deux."""
     names = ", ".join(outcome.tool for outcome in red)
-    mutation = f"mutation red ({names}, {rehearsal.red_mutations}/{config['escalation']['max_round_trips']})" if red else ""
+    mutation = f"mutation red ({names}, {rehearsal.red_mutations}/{_max_round_trips(rehearsal, config)})" if red else ""
     if verdict == "APPROVED":
         return f"approved, but {mutation}: ballet:rejected, dancer asked to kill the survivors, then the Critic reviews again"
     with_mutation = f" and {mutation}" if red else ""
@@ -1124,13 +1170,107 @@ def _held_red(rehearsal):
     return red
 
 
+# --- le Director force : `override` -------------------------------------------
+
+
+def _override(rehearsal, header, text, config, home, tools):
+    """Le Director lève ce qui bloque la Rehearsal sans qu'aucune question l'attende, avec sa raison (le corps du message).
+    Chaque blocage a son plus petit geste : un worker en panne est relancé avec son contexte, un message refusé par la
+    politique (ou par le plafond de tours d'échange) est reçu tel quel une fois, la taille part au Critic, le plafond
+    d'allers-retours gagne un tour. La décision est marquée du Director au journal et publiée sur l'issue."""
+    if header["from"] != "director":
+        raise RehearsalError(f"an `override` comes from the director, not from the {header['from']}")
+    reason = _body_of(text)
+    if not reason:
+        raise Refusal("override refused: it needs the Director's reason in its body")
+    kind = _blocking(rehearsal)
+    step = _lift(rehearsal, kind, reason, config, home, tools)
+    _log(home, rehearsal, "director-decision", {"override": kind, "reason": reason})
+    step.done.insert(0, _publish_exchange(rehearsal, "override", text, home, tools))
+    return step
+
+
+def _blocking(rehearsal):
+    """Ce que l'override lève ; refusé quand une question attend le Director (c'est une `answer`) ou que rien ne bloque."""
+    waiting = [question for question in rehearsal.pending if question["to"] == "director"]
+    if waiting:
+        raise Refusal(f"override refused: the {waiting[0]['from']} waits for the Director's answer: write an `answer` message "
+                      f"(`to: {waiting[0]['from']}`), not an `override`")
+    if rehearsal.status != "escalated" or rehearsal.blocked_on not in LIFTABLE:
+        raise Refusal("override refused: nothing blocks this Rehearsal that an `override` lifts (a policy refusal, a failed "
+                      "worker, a size or a number of turns over its limit)")
+    return rehearsal.blocked_on
+
+
+def _lift(rehearsal, kind, reason, config, home, tools):
+    if kind == "failure":
+        return _restart_worker(rehearsal, reason, config, home, tools)
+    if kind in ("policy", "rounds"):
+        return _receive_as_it_is(rehearsal, kind, config, home, tools)
+    if kind == "size":
+        return _size_accepted(rehearsal, config, home, tools)
+    return _one_more_turn(rehearsal, reason, config, home, tools)
+
+
+def _restart_worker(rehearsal, reason, config, home, tools):
+    """Le worker tombé en erreur (la limite de 5 h d'Orca, un arrêt répété) est relancé dans sa session, avec son contexte,
+    comme le fait un nudge ; il reprend avec les mots du Director."""
+    role = _awaited_role(rehearsal, home)
+    if role not in rehearsal.dispatches:
+        raise Refusal(f"override refused: no worker of Rehearsal {rehearsal.id} is known to restart")
+    rehearsal.blocked_on = ""
+    rehearsal.nudges.pop(role, None)
+    _ask_role(rehearsal, role, _restart_assignment(reason), config, home, tools)
+    return Step("wait", done=[f"the {role} restarted with its context: the Director lifted what stopped it"])
+
+
+def _receive_as_it_is(rehearsal, kind, config, home, tools):
+    """Le dernier message du worker, que la politique (ou le plafond de tours d'échange) a refusé, est reçu une fois comme
+    s'il était en règle ; tout le reste de son traitement (la preuve, la mutation, le Critic) reste à faire."""
+    held = rehearsal.last_message
+    if not held:
+        raise Refusal("override refused: no message of a worker is held for it")
+    header, text = _parsed(held["text"])
+    rehearsal.blocked_on, rehearsal.waived = "", kind
+    try:
+        return _route(rehearsal, header, text, held["question_id"], config, home, tools)
+    finally:
+        rehearsal.waived = ""
+
+
+def _size_accepted(rehearsal, config, home, tools):
+    rehearsal.blocked_on = ""
+    return _to_the_critic(rehearsal, Step("wait", done=[f"the Director accepts the size of #{rehearsal.pull_request}"]), config, home, tools)
+
+
+def _one_more_turn(rehearsal, reason, config, home, tools):
+    """Le plafond d'allers-retours gagne un tour : le Dancer reprend avec les mots du Director, les points du Critic et les
+    survivants de la mutation que l'escalade a gardés ; si cela échoue encore, la Rehearsal escalade de nouveau."""
+    rehearsal.blocked_on, rehearsal.granted = "", rehearsal.granted + 1
+    _ask_role(rehearsal, "dancer", _one_more_turn_assignment(rehearsal, reason, _held_red(rehearsal), config), config, home, tools)
+    return Step("wait", done=[f"the Director gives the dancer one more turn (max_round_trips now {_max_round_trips(rehearsal, config)})"])
+
+
+def _body_of(text):
+    """Le corps d'un message : ce qui suit sa ligne d'en-tête."""
+    return text.split("\n", 1)[1].strip() if "\n" in text else ""
+
+
+def _answer_refused(rehearsal, asker):
+    waiting = [question for question in rehearsal.pending if question["to"] == "director"]
+    pending = (f" The {waiting[0]['from']} waits for the Director: answer it with `to: {waiting[0]['from']}`." if waiting else "")
+    return (f"answer refused: no pending question from the {asker} to the director.{pending} An `answer` only answers a question; "
+            "to lift what blocks the Rehearsal (a policy refusal, a failed worker, a size or a number of turns over its limit), "
+            "write an `override` message, from the director, with your reason.")
+
+
 def _apply_decision(rehearsal, config, home, tools):
     """`ballet:approved` : la Premiere ; `ballet:rejected` : le Dancer reprend avec les commentaires du Director.
     Un plan en review ne se reprend pas : il attend un message du Director."""
     if rehearsal.blocked_on == "plan":
         return Step("escalate", _plan_to_review(rehearsal.plan_issue))
     if not rehearsal.pull_request:
-        raise RehearsalError("no pull request yet: answer the pending question with an `answer` message (receive)")
+        raise RehearsalError(f"no pull request yet: {_what_the_director_can_do(rehearsal)}")
     decision = ballet_github.director_decision(rehearsal.pull_request, run=tools.gh)
     if rehearsal.blocked_on == "size":
         decision["size_accepted"] = ballet_github.size_accepted(rehearsal.pull_request, run=tools.gh)
@@ -1144,12 +1284,21 @@ def _apply_decision(rehearsal, config, home, tools):
     if decision["verdict"] == "REJECTED":
         return _back_to_the_dancer(rehearsal, decision["comments"], config, home, tools)
     if decision.get("size_accepted"):
-        rehearsal.blocked_on = ""
-        return _to_the_critic(rehearsal, Step("wait", done=[f"the Director accepts the size of #{rehearsal.pull_request}"]),
-                              config, home, tools)
+        return _size_accepted(rehearsal, config, home, tools)
     size_option = "ballet:size-accepted to send it to the Critic, " if rehearsal.blocked_on == "size" else ""
+    override = f" Or write an `override` message, from the director, with your reason ({BLOCKS[rehearsal.blocked_on]})." if rehearsal.blocked_on in LIFTABLE else ""
     return Step("escalate", f"nothing decided yet on #{rehearsal.pull_request}: label it {size_option}ballet:approved, "
-                "or ballet:rejected with a comment saying what to fix, then resume")
+                f"or ballet:rejected with a comment saying what to fix, then resume.{override}")
+
+
+def _what_the_director_can_do(rehearsal):
+    """Sans pull request à décider : répondre à la question en attente, lever le blocage par `override`, sinon rien."""
+    if rehearsal.pending:
+        return "answer the pending question with an `answer` message (receive)"
+    if rehearsal.blocked_on in LIFTABLE:
+        return (f"the Rehearsal is blocked by {BLOCKS[rehearsal.blocked_on]}, not by a question: write an `override` message, "
+                "from the director, with your reason (receive)")
+    return "no question waits for an answer, and no block an `override` lifts: see the escalation's reason"
 
 
 def _back_to_the_dancer(rehearsal, comments, config, home, tools):
@@ -1165,13 +1314,18 @@ def _back_to_the_dancer(rehearsal, comments, config, home, tools):
 def _policy(rehearsal, role, config, home, tools, answering=False):
     """Les violations du passage qui s'achève, journalisées à chaque fois ; en règle, ses branches font foi."""
     git = tools.git(rehearsal.worktree)
-    passage = ballet_policy.Passage(role, rehearsal.branch, rehearsal.checkpoint, rehearsal.refs, rehearsal.owned, answering,
-                                    rehearsal.dancer_start, rehearsal.base, rehearsal.renamed_tests)
-    found = ballet_policy.violations(passage, ballet_policy.policy_of(config), git)
+    if rehearsal.waived == "policy":
+        return _waived_policy(rehearsal, role, git, home)
+    found = ballet_policy.violations(_passage(rehearsal, role, answering), ballet_policy.policy_of(config), git)
     _log(home, rehearsal, "policy", {"role": role, "violations": found})
     if not found:
         rehearsal.refs = ballet_policy.refs(git)
     return found
+
+
+def _passage(rehearsal, role, answering=False):
+    return ballet_policy.Passage(role, rehearsal.branch, rehearsal.checkpoint, rehearsal.refs, rehearsal.owned, answering,
+                                 rehearsal.dancer_start, rehearsal.base)
 
 
 def _refused_by_policy(rehearsal, role, found, config, home, tools):
@@ -1179,9 +1333,41 @@ def _refused_by_policy(rehearsal, role, found, config, home, tools):
     rehearsal.violations[role] = rehearsal.violations.get(role, 0) + 1
     listed = "; ".join(found)
     if role == "critic" or rehearsal.violations[role] > MAX_POLICY_RESENDS:
-        return Step("escalate", f"policy: the {role} broke the rules: {listed}")
+        return _policy_escalation(rehearsal, f"the {role} broke the rules", found)
     _ask_role(rehearsal, role, _policy_fix_assignment(found), config, home, tools)
     return Step("wait", done=[f"policy refused the {role}'s work, sent back once: {listed}"])
+
+
+def _policy_escalation(rehearsal, what, found, done=None):
+    """Une escalade de politique : le Director peut recevoir le message tel quel, une fois (`override`)."""
+    rehearsal.blocked_on = "policy"
+    listed = f": {'; '.join(found)}" if found else ""
+    return Step("escalate", f"policy: {what}{listed}. {_can_override('the branch is received as it is, once')}", done or [])
+
+
+def _turns_escalation(rehearsal, what, done=None):
+    """Une escalade de tours : le Director peut donner un tour de plus au Dancer (`override`)."""
+    rehearsal.blocked_on = "turns"
+    return Step("escalate", f"turns: {what}. {_can_override('the dancer gets one more turn')}", done or [])
+
+
+def _can_override(effect):
+    return f"The Director can `override` (an `override` message, from the director, with their reason): {effect}."
+
+
+def _max_round_trips(rehearsal, config):
+    """Le plafond d'allers-retours, avec les tours que le Director a donnés en plus."""
+    return config["escalation"]["max_round_trips"] + rehearsal.granted
+
+
+def _waived_policy(rehearsal, role, git, home):
+    """Le Director reçoit ce passage tel quel : la politique n'est pas rejouée, le journal le dit. Les commits du Dancer
+    deviennent ceux qu'il a acceptés (`owned`) : la même violation ne lui est pas reprochée au tour suivant, une nouvelle l'est."""
+    _log(home, rehearsal, "policy", {"role": role, "violations": [], "waived_by": "director"})
+    rehearsal.refs = ballet_policy.refs(git)
+    if role == "dancer":
+        rehearsal.owned += [commit for commit in ballet_policy.commits_since(rehearsal.dancer_start, git) if commit not in rehearsal.owned]
+    return []
 
 
 def _prove(rehearsal, config, home, tools):
@@ -1235,11 +1421,12 @@ def _refused_by_proof(rehearsal, proof, config, home, tools):
         return Step("escalate", f"proof: `{command}` still running after {config['escalation']['proof_timeout_seconds']}s "
                     "(proof_timeout_seconds)")
     rehearsal.red_proofs += 1
-    if rehearsal.red_proofs > config["escalation"]["max_round_trips"]:
-        return Step("escalate", f"proof: `{command}` red {rehearsal.red_proofs} times, over max_round_trips")
+    if rehearsal.red_proofs > _max_round_trips(rehearsal, config):
+        return _turns_escalation(rehearsal, f"proof `{command}` red {rehearsal.red_proofs} times, over max_round_trips "
+                                 f"({_max_round_trips(rehearsal, config)})")
     _ask_role(rehearsal, "dancer", _proof_fix_assignment(command, proof), config, home, tools)
     return Step("wait", done=[f"proof red, nothing pushed: dancer asked to fix it ({rehearsal.red_proofs}/"
-                              f"{config['escalation']['max_round_trips']})"])
+                              f"{_max_round_trips(rehearsal, config)})"])
 
 
 def _proof_command(config):
@@ -1505,7 +1692,7 @@ def _size_line(rehearsal):
 
 
 def _round_trips_line(rehearsal, config):
-    return f"Dancer ↔ Critic round trips: {rehearsal.round_trips} of {config['escalation']['max_round_trips']}"
+    return f"Dancer ↔ Critic round trips: {rehearsal.round_trips} of {_max_round_trips(rehearsal, config)}"
 
 
 def _mutation_lines(rehearsal):
@@ -1612,11 +1799,22 @@ def _review_round(rehearsal):
     return max(rehearsal.reviews, rehearsal.round_trips) + 1
 
 
-def _critic_assignment(rehearsal, config):
+def _critic_assignment(rehearsal, config, tools):
     return (f"Review pull request #{rehearsal.pull_request} of issue #{rehearsal.issue}, round {_review_round(rehearsal)}: "
             f"the branch `{rehearsal.branch}` against the plan. Ballet already ran the proof (`{_proof_command(config)}`) "
             f"on {rehearsal.proven[:7] or 'HEAD'}, green; the mutation test, when the profile has one, runs alongside your "
-            "review and Ballet weighs it with your verdict: run neither.")
+            "review and Ballet weighs it with your verdict: run neither."
+            f"{_changed_tests_part(rehearsal, config, tools)}")
+
+
+def _changed_tests_part(rehearsal, config, tools):
+    """Les tests que le diff retire ou renomme : ce que le Dancer a le droit de faire, et que le Critic juge. Rien à dire, rien d'écrit."""
+    removed = ballet_policy.removed_tests(_passage(rehearsal, "dancer"), ballet_policy.policy_of(config), tools.git(rehearsal.worktree))
+    if not removed:
+        return ""
+    listed = "\n".join(f"- {test}" for test in removed)
+    return ("\n\nTests the diff removes or renames (the Dancer may change a test; judge each one: legitimate when a refactoring "
+            f"or the plan made its rule obsolete, blocking when the behaviour it pinned is lost):\n\n{listed}")
 
 
 def _red_fix_assignment(without_red):
@@ -1634,6 +1832,19 @@ def _director_fix_assignment(rehearsal, comments, red, config):
             f"{mutation}\n\nFix each one, then report again (`read-pr {rehearsal.pull_request}` for the whole pull request).")
 
 
+def _restart_assignment(reason):
+    return ("The Director lifted what stopped you. Resume exactly where you stopped (this session keeps your context), then "
+            f"send your worker_done as before. Their words:\n\n{_quote(reason)}")
+
+
+def _one_more_turn_assignment(rehearsal, reason, red, config):
+    review = f" The Critic's points: `read-pr {rehearsal.pull_request}`." if rehearsal.pull_request else ""
+    mutation = f"\n\n{_mutation_part(red, config)}" if red else ""
+    return ("The Director lets you go past the limit of turns: one more, the last unless it works. Their words, to take "
+            f"first:\n\n{_quote(reason)}\n\nThen fix what still blocks (Ballet's proof, the Critic's points, the "
+            f"survivors).{review}{mutation}\n\nNew commits only, the worktree clean. Then report again.")
+
+
 def _policy_fix_assignment(found):
     listed = "\n".join(f"- {violation}" for violation in found)
     return (f"Ballet's policy refused your work: nothing was pushed.\n\n{listed}\n\nFix it with new commits "
@@ -1644,8 +1855,8 @@ def _policy_fix_assignment(found):
 def _proof_fix_assignment(command, proof):
     tail = "\n".join(proof.output.rstrip().splitlines()[-PROOF_OUTPUT_LINES:])
     return (f"Ballet ran the proof (`{command}`) on your branch: it is red. Nothing was pushed, and the Critic was not "
-            f"asked. The end of its output:\n\n```\n{tail}\n```\n\nMake it green with new commits, never by touching "
-            "an existing test, and leave the worktree clean. Then report again.")
+            f"asked. The end of its output:\n\n```\n{tail}\n```\n\nMake it green with new commits, never by weakening "
+            "a test that still states a rule, and leave the worktree clean. Then report again.")
 
 
 def _mutation_part(red, config):
@@ -1692,14 +1903,18 @@ def _count_round(rehearsal, header, config):
     key = f"{header['subject']}|{pair[0]}>{pair[1]}"
     rehearsal.rounds[key] = max(rehearsal.rounds.get(key, 0), header["round"])
     limit = config["escalation"]["max_exchange_rounds"]
-    if header["round"] > limit:
-        raise RehearsalError(f"round {header['round']} on {header['subject']} between {pair[0]} and {pair[1]}, over max_exchange_rounds ({limit})")
+    if header["round"] > limit and rehearsal.waived != "rounds":
+        rehearsal.blocked_on = "rounds"
+        raise RehearsalError(f"turns: round {header['round']} on {header['subject']} between {pair[0]} and {pair[1]}, over "
+                             f"max_exchange_rounds ({limit}). {_can_override('the message goes through, one round more')}")
 
 
 def _pending_question(rehearsal, asker, answerer):
     for question in rehearsal.pending:
         if question["from"] == asker and question["to"] == answerer:
             return question
+    if answerer == "director":
+        raise Refusal(_answer_refused(rehearsal, asker))
     raise RehearsalError(f"no pending question from the {asker} to the {answerer}")
 
 
@@ -1783,7 +1998,13 @@ def load(rehearsal_id, home):
     saved = ballet_store.load(home, ballet_store.REHEARSAL, rehearsal_id)
     if saved is None:
         raise RehearsalError(f"no Rehearsal {rehearsal_id} in project {ballet_store.project_of(home)}")
-    return Rehearsal(**saved)
+    return Rehearsal(**_known_fields(saved))
+
+
+def _known_fields(saved):
+    """Un état gardé par une version d'avant peut porter un champ disparu depuis (`renamed_tests`) : il est laissé de côté."""
+    names = {declared.name for declared in fields(Rehearsal)}
+    return {name: value for name, value in saved.items() if name in names}
 
 
 def _exists(rehearsal_id, home):

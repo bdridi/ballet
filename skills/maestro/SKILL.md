@@ -68,6 +68,13 @@ If `wait` is refused with **`this session is not Maestro anymore`** (another ses
   ```
 
   The script types `Director answers: <answer>` into the Conductor's terminal; the Conductor writes the Ballet message itself and receives it. You never write that message, and you do not run the Conductor's scripts. An unknown item or a dead terminal is refused: say so.
+- **`tell --override <project>#<item> <reason>`**: carry the Director's decision to **force** what blocks that Conductor, when no question waits for an answer. An escalation tells which: its reason starts with `failure` (a worker stopped on an error, such as Orca's 5-hour limit), `policy`, `size` or `turns`, and says that the Director can `override`; one that starts with `question` is answered with `tell` alone. Use `--override` only on the Director's word to force it (they say so, or answer yes to your offer), and the reason is **their words**, as they said them, nothing added: it is written in the issue and read by the worker it restarts. Say before sending that it goes to the Conductor's terminal, then run:
+
+  ```sh
+  python3 <path>/scripts/ballet_maestro.py tell --override <project>#<item> "<their reason>"
+  ```
+
+  The script types `Director overrides: <reason>` into the Conductor's terminal; the Conductor writes the `override` message and receives it. If the Director's `tell` (an answer) comes back refused by the Conductor (`answer refused`), offer `tell --override` instead; never send both. Relay what the Conductor says it did.
 - **Ready items** (on each `ready` message, on `recap`, after a `done` or a `gone`, and whenever the Director asks): the script already decided, you relay its verdict.
   - **`DECISION: launch`**: the project entrusts this type to the automatic launch and nothing is paused. Launch it now with `ballet_launch.py rehearsal <project> <N>` (below), then tell the Director **afterwards** what left: the item, its title, the terminal, the Remote Control URL.
   - **`DECISION: wait (blocked by #M, open)`**: the item is `ready` but depends on an issue that is still open (GitHub's native "Blocked by" links, which the Dramaturg sets). **Do not launch it, and do not ask**: it starts when every blocker is closed, and the Monitor tells you then (`<project>#<N> · ready`, its body ending `unblocked: #M closed`). You may mention it in a summary ("#7 waits for #3"), nothing more. `ballet_launch.py` refuses it anyway, and names the open blocker.

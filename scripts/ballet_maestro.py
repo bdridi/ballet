@@ -155,7 +155,7 @@ MAESTRO_COMMAND_VARIABLE = "BALLET_MAESTRO_COMMAND"
 DEFAULT_AGENT = "claude"
 NUDGEABLE = ("rehearsal", "workshop")   # les genres de Conductor qui ont une commande `nudge`
 USAGE = ("usage: mailbox | monitor | maestro | project add <alias> <path> | project list | claim [--take-over] | wait --owner <token> "
-         "| recap --owner <token> | status | ready | pause | resume | tell <project>#<item> <text> | nudge <project>#<item>")
+         "| recap --owner <token> | status | ready | pause | resume | tell [--override] <project>#<item> <text> | nudge <project>#<item>")
 
 
 class MaestroError(Exception):
@@ -482,10 +482,13 @@ def _is_running(line):
     return bool(line) and ballet_conductors.state_of(line) == ballet_conductors.RUNNING
 
 
-def tell(target, text, orca, state=None):
+def tell(target, text, orca, state=None, override=False):
     """La réponse du Director, tapée dans le terminal du Conductor de `<projet>#<élément>` : le Conductor l'écrit en
-    message Ballet et la reçoit lui-même. Un élément inconnu, ou un terminal disparu, est refusé."""
-    return _type_into_terminal(target, f"Director answers: {text}", orca, state)
+    message Ballet et la reçoit lui-même. `override` : sa raison pour passer outre ce qui bloque, sans question en
+    attente (le Conductor en fait un message `override`, pas une `answer`). Un élément inconnu, ou un terminal
+    disparu, est refusé."""
+    said = "Director overrides" if override else "Director answers"
+    return _type_into_terminal(target, f"{said}: {text}", orca, state)
 
 
 def nudge(target, orca, state=None):
@@ -1051,6 +1054,8 @@ def _command(arguments, orca):
         return pause()
     if arguments == ["resume"]:
         return resume()
+    if arguments[:2] == ["tell", "--override"] and len(arguments) >= 4:
+        return tell(arguments[2], " ".join(arguments[3:]), orca, override=True)
     if arguments[:1] == ["tell"] and len(arguments) >= 3:
         return tell(arguments[1], " ".join(arguments[2:]), orca)
     if arguments[:1] == ["nudge"] and len(arguments) == 2:

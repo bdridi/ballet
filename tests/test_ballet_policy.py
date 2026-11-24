@@ -150,20 +150,21 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.commit({"AGENTS.md": "rules\nand mine\n"})
         self.assertEqual(self.repo.violations(passage), ["AGENTS.md: a forbidden zone of [policy] forbidden_zones"])
 
-    def test_un_test_existant_supprime_ou_renomme_est_une_violation(self):
+    def test_un_test_existant_retire_ou_renomme_n_est_plus_une_violation(self):
         passage = self.repo.passage("dancer")
         self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
-        self.assertEqual(self.repo.violations(passage), ["src/a.test.ts: existing test removed or renamed: sorts by deadline"])
-
-    def test_un_renommage_declare_par_le_dancer_n_est_pas_une_violation(self):
-        passage = self.repo.passage("dancer", renamed={"sorts by deadline": "sorts by due date"})
-        self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts by due date")})
         self.assertEqual(self.repo.violations(passage), [])
 
-    def test_un_renommage_declare_vers_un_nom_absent_reste_une_violation(self):
-        passage = self.repo.passage("dancer", renamed={"sorts by deadline": "sorts by due date"})
-        self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
-        self.assertEqual(self.repo.violations(passage), ["src/a.test.ts: existing test removed or renamed: sorts by deadline"])
+    def test_les_tests_retires_ou_renommes_par_le_diff_sont_listes_avec_leur_fichier(self):
+        passage = self.repo.passage("dancer")
+        self.repo.commit({"src/a.test.ts": SPEC.replace("sorts by deadline", "sorts by due date")})
+        self.assertEqual(ballet_policy.removed_tests(passage, self.repo.policy(), self.repo.git),
+                         ["src/a.test.ts: sorts by deadline"])
+
+    def test_un_test_ajoute_ou_inchange_n_est_pas_dans_la_liste(self):
+        passage = self.repo.passage("dancer")
+        self.repo.commit({"src/a.test.ts": SPEC + 'it("filters", () => {});\n'})
+        self.assertEqual(ballet_policy.removed_tests(passage, self.repo.policy(), self.repo.git), [])
 
     def test_la_branche_se_compare_a_son_point_de_depart_et_non_a_origin_main(self):
         self.repo.git(["checkout", "-q", "main"])
@@ -177,13 +178,15 @@ class BalletPolicyTest(unittest.TestCase):
     def test_un_fichier_de_tests_existant_supprime_perd_tous_ses_tests(self):
         passage = self.repo.passage("dancer")
         self.repo.remove("src/a.test.ts")
-        self.assertEqual(len(self.repo.violations(passage)), 2)
+        self.assertEqual(self.repo.violations(passage), [])
+        self.assertEqual(ballet_policy.removed_tests(passage, self.repo.policy(), self.repo.git),
+                         ["src/a.test.ts: lists the stock", "src/a.test.ts: sorts by deadline"])
 
-    def test_un_test_cree_sur_la_branche_peut_y_etre_renomme(self):
+    def test_un_test_cree_sur_la_branche_puis_renomme_n_est_pas_dans_la_liste(self):
         passage = self.repo.passage("dancer")
         self.repo.commit({"src/b.test.ts": 'it("first name", () => {});\n'})
         self.repo.commit({"src/b.test.ts": 'it("better name", () => {});\n'})
-        self.assertEqual(self.repo.violations(passage), [])
+        self.assertEqual(ballet_policy.removed_tests(passage, self.repo.policy(), self.repo.git), [])
 
     def test_reconnait_les_tests_rust_python_et_gherkin(self):
         rust = "#[test]\nfn keeps_days() {}\n\n#[tokio::test]\n#[ignore]\nasync fn reads() {}\n"
@@ -245,8 +248,8 @@ class BalletPolicyTest(unittest.TestCase):
         self.repo.git(["update-ref", "refs/remotes/origin/main", "HEAD"])
         passage = self.repo.passage("dancer")
         self.repo.commit({"a_test.go": "func TestRead(t *testing.T) {}\n", "src/a.test.ts": SPEC.replace("sorts by deadline", "sorts")})
-        self.assertEqual(self.repo.violations(passage), ["a_test.go: existing test removed or renamed: TestReads",
-                                                         "src/a.test.ts: existing test removed or renamed: sorts by deadline"])
+        self.assertEqual(ballet_policy.removed_tests(passage, self.repo.policy(), self.repo.git),
+                         ["a_test.go: TestReads", "src/a.test.ts: sorts by deadline"])
 
     def test_le_projet_etend_le_choreographer_sans_recopier_la_methode(self):
         self.repo.profile = PROFILE + '\n[policy.roles.choreographer]\nextra_writes = ["docs/*"]\n'

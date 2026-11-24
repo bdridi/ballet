@@ -9,7 +9,7 @@
      beyond `[escalation] max_exchange_rounds`. A first line that is not valid JSON is sent back.
        ballet   always "message"
        from, to dramaturg | choreographer | dancer | critic | conductor | director
-       type     question | answer | report | verdict | escalation | revise | approve
+       type     question | answer | report | verdict | escalation | revise | approve | override
        subject  FEAT-NNN, BUG-NNN, TASK-NNN, or the issue "#N" once created
        round    integer: the exchange round on this subject, between these two roles
 
@@ -23,4 +23,7 @@
        escalation: the reason, and what the Director must decide.
        revise:     the Director only, in a plan review: numbered remarks the Choreographer takes in its plan.
        approve:    the Director only, in a plan review: the plan is approved, the Dancer starts.
+       override:   the Director only, `to: conductor`: lifts what blocks the Rehearsal when no question waits (a policy
+                   refusal, a worker that failed, a diff too big, too many rounds). The body is the Director's reason, in their
+                   words: the worker it restarts, and the Rehearsal's journal and issue, read it. An `answer` only answers a question.
      This comment is not part of a message. -->

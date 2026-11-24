@@ -600,6 +600,14 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(send[send.index("--text") + 1], "Director answers: approve the plan")
         self.assertIn("--enter", send)
 
+    def test_tell_override_ecrit_la_raison_du_director_sous_son_propre_prefixe(self):
+        self.known_conductor()
+        self.orca.terminals.append("term_9")
+        self.assertEqual(ballet_maestro.tell("antimurphy#12", "the limit is lifted", self.orca, override=True),
+                         "told antimurphy#12 (terminal term_9)")
+        send = self.orca.ran("terminal", "send")[0]
+        self.assertEqual(send[send.index("--text") + 1], "Director overrides: the limit is lifted")
+
     def test_tell_refuse_un_element_inconnu_et_liste_ceux_qu_il_connait(self):
         self.known_conductor()
         with self.assertRaises(ballet_maestro.MaestroError) as refused:
@@ -1232,6 +1240,13 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(self.run_main("tell", "antimurphy#12", "yes", "go")[0], 0)
         send = self.orca.ran("terminal", "send")[0]
         self.assertEqual(send[send.index("--text") + 1], "Director answers: yes go")
+
+    def test_la_ligne_de_commande_tell_override_joint_les_mots_de_la_raison(self):
+        self.known_conductor()
+        self.orca.terminals.append("term_9")
+        self.assertEqual(self.run_main("tell", "--override", "antimurphy#12", "limit", "lifted")[0], 0)
+        send = self.orca.ran("terminal", "send")[0]
+        self.assertEqual(send[send.index("--text") + 1], "Director overrides: limit lifted")
 
     def test_un_wait_sans_jeton_est_un_usage_invalide(self):
         self.assertEqual(self.run_main("wait")[0], 2)
