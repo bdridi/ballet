@@ -387,11 +387,11 @@ def _open_terminal(launch, orca, state):
 
 
 def _conductor_command(launch, state=None):
-    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control <nom> <prompt> --model <modèle> <socle allégé> --allowedTools …` :
+    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control <nom> <prompt> --model <modèle> <socle allégé> <statusline> --allowedTools …` :
     le prompt avant les options, et `--allowedTools` en dernier (il prend tout ce qui le suit)."""
     agent = shlex.split(os.environ.get(COMMAND_VARIABLE) or DEFAULT_AGENT)
     command = shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--model", _conductor_model(launch.home, state),
-                          *ballet_session.lean_options(ballet_session.CONDUCTOR_TOOLS),
+                          *ballet_session.lean_options(ballet_session.CONDUCTOR_TOOLS), *ballet_session.statusline_options(),
                           "--allowedTools", RUN_PYTHON, work_files_rule()])
     return ballet_session.with_environment(command, {})
 

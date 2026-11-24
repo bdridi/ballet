@@ -18,6 +18,7 @@ import ballet_store  # noqa: E402
 import ballet_launch  # noqa: E402
 import ballet_maestro  # noqa: E402
 import ballet_program  # noqa: E402
+import ballet_session  # noqa: E402
 from ballet_launch import LaunchError  # noqa: E402
 from ballet_rehearsal import Rehearsal, Session  # noqa: E402
 
@@ -174,7 +175,7 @@ class BalletLaunchTest(unittest.TestCase):
         words = self.command_words()
         self.assertEqual(words, ["claude", "--remote-control", "antimurphy#12", "/ballet:rehearsal #12",
                                  "--model", "haiku", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-                                 "--tools", "Bash,Read,Write,Edit,Skill",
+                                 "--tools", "Bash,Read,Write,Edit,Skill", *ballet_session.statusline_options(),
                                  "--allowedTools", "Bash(python3:*)", ballet_launch.work_files_rule()])
         self.assertLess(words.index("/ballet:rehearsal #12"), words.index("--allowedTools"))
 

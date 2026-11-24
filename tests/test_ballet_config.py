@@ -232,6 +232,21 @@ class ConfigTest(unittest.TestCase):
                 self.write_project_config(VALID_PROJECT + f"\n[conductor]\nmodel = {value}\n")
                 self.assertProblem("[conductor] model must be a model name")
 
+    def test_la_sonde_de_capacite_a_ses_defauts_et_reste_valide(self):
+        self.write_project_config(VALID_PROJECT)
+        config = ballet_config.effective_config(self.project)
+        self.assertEqual(config["capacity"], {"five_hour_threshold": 90, "seven_day_threshold": 90, "stale_after_minutes": 30})
+        self.assertEqual(ballet_config.find_problems(config), [])
+
+    def test_un_seuil_de_capacite_a_zero_coupe_la_sonde_sans_etre_un_probleme(self):
+        self.write_project_config(VALID_PROJECT + "\n[capacity]\nfive_hour_threshold = 0\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_une_sonde_de_capacite_mal_reglee_est_refusee(self):
+        self.write_project_config(VALID_PROJECT + "\n[capacity]\nseven_day_threshold = 150\nstale_after_minutes = 0\n")
+        self.assertProblem("[capacity] seven_day_threshold must be a whole number from 0 to 100")
+        self.assertProblem("[capacity] stale_after_minutes must be a whole number, 1 or more")
+
     def test_exclusions_qui_ne_sont_pas_une_liste_sont_refusees(self):
         self.write_project_config(VALID_PROJECT + '\n[escalation]\ndiff_exclude = "*.lock"\n')
         self.assertProblem("diff_exclude must be a list of globs")

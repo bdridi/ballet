@@ -117,3 +117,11 @@ diff_exclude = ["*.lock", "pnpm-lock.yaml", "package-lock.json"]   # hors du com
 [mutation]
 enabled = true                   # false : le nœud ne lance rien (`mutation-skipped`), les entrées du profil restent
 timeout_seconds = 3600           # le budget de tous les outils, lancés en arrière-plan ; encore en cours après, escalade
+
+# La sonde de capacité (OPP-88) : Maestro ne lance rien de nouveau quand la fenêtre de 5 h de Claude est presque pleine
+# (elle pourrait s'arrêter en plein vol), et demande au Director quand c'est celle de 7 jours. Les seuils sont des pourcentages
+# UTILISÉS. Une affaire de machine, pas de projet : `[capacity]` de `~/.ballet/maestro.toml` surcharge ces valeurs, clé par clé.
+[capacity]
+five_hour_threshold = 90         # 0 : pas de sonde sur cette fenêtre ; au-dessus, `DECISION: standby` pour tout nouveau lancement
+seven_day_threshold = 90         # 0 : pas de sonde ; au-dessus, Maestro demande au Director avant de lancer
+stale_after_minutes = 30         # un chiffre plus vieux est inconnu : jamais de standby sur un vieux chiffre

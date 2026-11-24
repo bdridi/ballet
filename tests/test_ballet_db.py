@@ -45,8 +45,8 @@ class BalletDbTest(unittest.TestCase):
 
     def test_une_base_neuve_monte_a_la_derniere_migration_du_plugin(self):
         with ballet_db.reading() as connection:
-            self.assertEqual(ballet_db.version(connection), 2)
-            self.assertEqual(self.tables(connection), ["conductors", "events", "nodes", "ready", "rehearsals", "runtime", "sessions", "workshops"])
+            self.assertEqual(ballet_db.version(connection), 3)
+            self.assertEqual(self.tables(connection), ["capacity_alerts", "conductors", "events", "nodes", "ready", "rehearsals", "runtime", "sessions", "workshops"])
         self.assertTrue((self.state / "ballet.db").is_file())
 
     def test_rouvrir_ne_refait_rien(self):
@@ -95,7 +95,7 @@ class BalletDbTest(unittest.TestCase):
         connection = sqlite3.connect(self.state / "ballet.db")
         connection.execute("PRAGMA user_version = 99")
         connection.close()
-        with self.assertRaisesRegex(ballet_db.DatabaseError, "version 99, this plugin knows 2"):
+        with self.assertRaisesRegex(ballet_db.DatabaseError, "version 99, this plugin knows 3"):
             ballet_db.connect()
 
     def test_un_nom_de_migration_hors_forme_est_refuse(self):

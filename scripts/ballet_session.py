@@ -1,5 +1,5 @@
 """Les options communes des sessions Claude que Ballet lance dans un terminal Orca (le Conductor, Maestro) : un socle allégé,
-un cache d'une heure.
+un cache d'une heure, la statusline qui note la capacité.
 
 Une session `claude` démarre avec un socle fixe de tokens (prompt système, définitions d'outils, serveurs MCP du poste,
 skills), relu à chaque tour. Mesuré sur `claude -p` (2.1.330), un poste avec quelques plugins et des connecteurs :
@@ -16,23 +16,37 @@ en arrière-plan. Les deux chargent leurs skills (`Skill`).
 Le cache de prompt dure une heure (`CLAUDE_CODE_PROMPT_CACHE_TTL=1h`, Claude Code ≥ 2.1.242) : au-delà du quota d'abonnement,
 ou sur une clé d'API, le défaut tombe à 5 minutes, et chaque attente (mutation, Critic) réécrit tout le contexte.
 
+La statusline (`ballet_statusline.py`, OPP-88) est le seul endroit où Claude Code donne la part consommée de ses fenêtres de
+5 heures et de 7 jours (`rate_limits`) : `--settings` la branche sur ces sessions, et la commande lance à la suite celle de
+l'utilisateur (Orca), qu'un `--settings` remplacerait sinon. Seules les sessions de Maestro et des Conductors la portent : la
+fenêtre est celle du compte, n'importe laquelle la voit.
+
 Les workers (`ballet_orca.start_worker`) n'ont ni l'un ni l'autre : `orca orchestration worker-start` n'accepte que
 `--model` et `--effort`, pas d'options ni de variables pour `claude`. Orca les lit dans ses propres réglages d'agent
 (`agentDefaultArgs` et `agentDefaultEnv`, par agent, pour tout lancement), que le Director pose une fois dans Orca.
 """
 
+import json
 import shlex
+from pathlib import Path
 
 CACHE_TTL_VARIABLE = "CLAUDE_CODE_PROMPT_CACHE_TTL"
 CACHE_TTL = "1h"
 NO_MCP_SERVERS = ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
 CONDUCTOR_TOOLS = "Bash,Read,Write,Edit,Skill"
 MAESTRO_TOOLS = "Bash,Read,Skill"
+STATUSLINE_SCRIPT = Path(__file__).with_name("ballet_statusline.py")
 
 
 def lean_options(tools):
     """Les options d'une session sans serveur MCP, avec les seuls outils intégrés donnés (`--tools`)."""
     return [*NO_MCP_SERVERS, "--tools", tools]
+
+
+def statusline_options():
+    """Les options qui branchent la statusline de Ballet (`--settings`, un JSON : le chemin du script est quoté dedans)."""
+    command = f"python3 {shlex.quote(str(STATUSLINE_SCRIPT))}"
+    return ["--settings", json.dumps({"statusLine": {"type": "command", "command": command}})]
 
 
 def with_environment(command, variables):

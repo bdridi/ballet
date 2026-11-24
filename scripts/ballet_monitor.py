@@ -9,7 +9,7 @@ Il ne lance jamais rien et ne parle jamais au Director : il écrit dans la boît
 **Règle : le Monitor ne poste que des événements, c'est-à-dire des faits** (quoi, quand, des chiffres, des liens), jamais une
 instruction ni une décision (« relance-le », « ferme-le », « redémarre »). Les décisions appartiennent à Maestro : les lignes
 `DECISION:` que son script écrit sous le message (`ballet_maestro.py`), puis son skill. Un message du Monitor se lit sans
-savoir ce que Maestro en fera. Cinq choses seulement :
+savoir ce que Maestro en fera. Six choses seulement :
 
 - **Un élément qui devient lançable.** Pour chaque projet de `maestro.toml`, la file GitHub est lue par `ballet_program.py` (les
   `Feature`, `Bug` et `Task` au champ `Ballet status` `ready`, avec leurs bloqueurs ouverts : les liens « Blocked by » de
@@ -43,6 +43,14 @@ savoir ce que Maestro en fera. Cinq choses seulement :
   travaille, même sans rien envoyer). Un nœud qui attend un script (preuve, mutation) ou le Director (un enfant
   ouvert joué par `script` ou `human`) n'est pas idle. Le corps dit le silence et le rôle attendu (le tour ouvert) ; Maestro
   décide (`DECISION: nudge`, puis `ask the Director`).
+- **La fenêtre de 5 h ou de 7 jours de Claude presque pleine** (OPP-88). Le pourcentage utilisé que note la statusline de Ballet
+  (`ballet_capacity.py`) est comparé, à chaque tour, au seuil de chaque fenêtre (`[capacity] five_hour_threshold` et
+  `seven_day_threshold` : 90 par défaut, 0 : pas de sonde ; `maestro.toml` surcharge le plugin). Il écrit à Maestro
+  `capacity · <fenêtre> · above threshold` au franchissement du seuil (priorité `normal` pour 5 h, `high` pour 7 jours), puis
+  `capacity · <fenêtre> · below threshold` à la redescente, 5 points sous le seuil (pour ne pas clignoter autour de lui) ou
+  quand le chiffre devient inconnu (plus vieux que `stale_after_minutes`, ou sonde coupée) : jamais deux fois le même sens.
+  Le corps dit la fenêtre, le pourcentage, le seuil et l'heure de reset. L'état (« au-dessus depuis ») est la table
+  `capacity_alerts` de la base : c'est aussi ce que lit la règle de Maestro (`DECISION: standby`).
 
 Un envoi qui échoue n'est pas noté comme fait : le tour suivant le refait. `gh` ou Orca injoignable est une ligne d'erreur
 du tour, jamais une panne de `run`.
@@ -58,6 +66,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import ballet_capacity
 import ballet_conductors
 import ballet_context
 import ballet_db
@@ -77,6 +86,7 @@ IDLE_EVENT = "idle"
 NUDGE = "nudge"
 PLAYS = ("rehearsal", "workshop")
 PLAY_TABLES = {"rehearsal": ("rehearsals", "id"), "workshop": ("workshops", "item")}   # où lire l'état d'un jeu (son worktree)           # les nœuds que joue un Conductor
+CAPACITY_HARNESS = "claude"   # le seul harnais qui donne sa capacité pour l'instant (`ballet_statusline.py`) : les autres, plus tard
 USAGE = "usage: once | run [--interval <seconds>]"
 
 
@@ -95,7 +105,8 @@ class Report:
 
 
 def once(orca, queue=ballet_program.ready_items, state=None):
-    """Un tour : la file de chaque projet, les Conductors disparus, finis ou silencieux, puis le contexte de Maestro."""
+    """Un tour : la file de chaque projet, les Conductors disparus, finis ou silencieux, le contexte de Maestro, puis la
+    capacité de Claude."""
     report = Report()
     _attempt(report, "state", lambda: ballet_legacy.refuse_if_pending(state))
     if report.errors:
@@ -106,6 +117,7 @@ def once(orca, queue=ballet_program.ready_items, state=None):
     _attempt(report, "finished Conductors", lambda: _watch_finished(orca, state, report))
     _attempt(report, "Maestro context", lambda: _watch_context(orca, state, report))
     _attempt(report, "idle Conductors", lambda: _watch_idle(orca, state, report))
+    _attempt(report, "capacity", lambda: _watch_capacity(orca, state, report))
     return report
 
 
@@ -296,6 +308,60 @@ def _tell_context(used, window, threshold, session, orca, state, report):
     _save_context_told(session, state)
 
 
+# --- la capacité de Claude ---------------------------------------------------------
+
+
+def _watch_capacity(orca, state, report):
+    """Chaque fenêtre (5 h, 7 jours) comparée à son seuil : un avis au franchissement, un autre à la redescente, jamais
+    deux fois le même sens. Une fenêtre sans seuil (0) ou au chiffre inconnu n'est jamais au-dessus."""
+    settings = ballet_maestro.capacity_settings(ballet_maestro.read_config(state))
+    readings = ballet_capacity.read(CAPACITY_HARNESS, settings["stale_after_minutes"], state)
+    alerts = read_capacity_alerts(state)
+    for window in ballet_capacity.WINDOWS:
+        _attempt(report, f"{window} capacity",
+                 lambda: _watch_window(window, settings, readings[window], alerts.get(window), orca, state, report))
+
+
+def _watch_window(window, settings, reading, alert, orca, state, report):
+    threshold = settings[f"{window}_threshold"]
+    used = reading["used_percent"] if reading else None
+    if alert is None and ballet_capacity.is_above(used, threshold):
+        _tell_above(window, threshold, reading, orca, state, report)
+    elif alert is not None and ballet_capacity.is_back_under(used, threshold):
+        _tell_back_under(window, settings, reading, alert, orca, state, report)
+
+
+def _tell_above(window, threshold, reading, orca, state, report):
+    body = f"{window} window is {_percent(reading['used_percent'])} used · threshold {threshold}% · {_resets(reading['resets_at'])}"
+    _send(f"capacity · {window} · above threshold", body, "high" if window == ballet_capacity.SEVEN_DAY else "normal", orca, state, report)
+    _save_capacity_alert(window, threshold, reading, state)
+
+
+def _tell_back_under(window, settings, reading, alert, orca, state, report):
+    _send(f"capacity · {window} · below threshold", _back_under_body(window, settings, reading, alert), "normal", orca, state, report)
+    _clear_capacity_alert(window, state)
+
+
+def _back_under_body(window, settings, reading, alert):
+    """Les faits de la redescente : le chiffre qui l'a levée, ou pourquoi il n'y en a plus (inconnu, sonde coupée)."""
+    threshold = settings[f"{window}_threshold"]
+    was = f"it was {_percent(alert['used_percent'])} used · threshold {alert['threshold']}% · {_resets(alert['resets_at'])}"
+    if not threshold:
+        return f"{window} window probe is off (threshold 0) · {was}"
+    if not reading:
+        return f"{window} window is unknown: no reading in the last {settings['stale_after_minutes']} min · {was}"
+    return (f"{window} window is {_percent(reading['used_percent'])} used · back under threshold {threshold}% "
+            f"· {_resets(reading['resets_at'])}")
+
+
+def _percent(used):
+    return f"{round(used)}%"
+
+
+def _resets(moment):
+    return f"resets at {moment}" if moment else "reset time unknown"
+
+
 # --- un Conductor qui n'écrit plus ------------------------------------------------
 
 
@@ -447,6 +513,26 @@ def read_ready(state=None):
 def read_context_told(state=None):
     """L'id de la session Maestro dont le dépassement du seuil a été signalé ; vide si aucune."""
     return ballet_runtime.read(state)["context_told_session"]
+
+
+def read_capacity_alerts(state=None):
+    """Les fenêtres que le Monitor a signalées au-dessus de leur seuil et qui n'en sont pas redescendues : fenêtre →
+    `{above_since, used_percent, resets_at, threshold}`. C'est ce que lit la règle de lancement de Maestro."""
+    with ballet_db.reading(state) as connection:
+        return {row["window"]: {name: row[name] for name in ("above_since", "used_percent", "resets_at", "threshold")}
+                for row in connection.execute("SELECT * FROM capacity_alerts")}
+
+
+def _save_capacity_alert(window, threshold, reading, state):
+    with ballet_db.writing(state) as connection:
+        connection.execute("INSERT OR REPLACE INTO capacity_alerts (window, above_since, used_percent, resets_at, threshold) "
+                           "VALUES (?, ?, ?, ?, ?)",
+                           (window, ballet_journal.now_iso(), reading["used_percent"], reading["resets_at"], threshold))
+
+
+def _clear_capacity_alert(window, state):
+    with ballet_db.writing(state) as connection:
+        connection.execute("DELETE FROM capacity_alerts WHERE window = ?", (window,))
 
 
 def _save_ready(alias, items, state):

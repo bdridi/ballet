@@ -39,6 +39,12 @@ l'écrivent :
     idle_after_minutes = 20             un Conductor dont la Rehearsal (ou le Workshop) n'a rien écrit depuis ce temps : le
                                         Monitor le signale (`<projet>#<élément> · idle`), au plus deux fois ; 0 : jamais
 
+    [capacity]                (facultatif ; surcharge, clé par clé, la table `[capacity]` du `config.toml` du plugin)
+    five_hour_threshold = 90            le pourcentage UTILISÉ de la fenêtre de 5 h de Claude au-delà duquel plus rien de
+                                        nouveau ne part (`DECISION: standby`) ; 0 : pas de sonde
+    seven_day_threshold = 90            de même pour la fenêtre de 7 jours : Maestro demande alors au Director ; 0 : pas de sonde
+    stale_after_minutes = 30            un chiffre plus vieux est inconnu (jamais de standby sur un vieux chiffre)
+
 L'état, lui, vit dans la base (`ballet_runtime.py`, OPP-79) : la boîte (un terminal Orca vide, à elle seule, et la Run
 créée `--from` lui ; la Run d'une boîte recréée, que `recap` relit une dernière fois puis oublie), le bail, les terminaux de
 Maestro et du Monitor, la pause et le redémarrage en cours. Le bail note le jeton de la session Maestro (`claim`), le
@@ -55,6 +61,13 @@ Les dépendances (les liens « Blocked by » de GitHub, lus par `ballet_program.
 règle `auto_launch` : un élément prêt dont un bloqueur est ouvert est `DECISION: wait (blocked by #M, open)` ; une dépendance
 douteuse (bloqueur fermé *not planned*, cycle, bloqueur illisible) est `DECISION: ask the Director (<raison>)`, même pour un
 type confié à l'auto. `ready` et `status` montrent aussi ces éléments bloqués.
+
+La capacité de Claude (OPP-88) passe après toutes ces vérifications, pour ce que la règle aurait lancé : quand le Monitor a signalé
+la fenêtre de 5 h au-dessus de son seuil (`capacity · five_hour · above threshold`, état dans la table `capacity_alerts`), la
+décision est `DECISION: standby (<faits>)` (aucun NOUVEAU lancement ; les Conductors en cours continuent) ; au-dessus du seuil de
+7 jours, `DECISION: ask the Director (<faits>)` ; la fenêtre de 5 h passe d'abord. À la redescente (`… below threshold`, que
+Maestro lit comme n'importe quel événement), `wait` et `recap` écrivent `DECISION: resume (run ready and apply each verdict)` :
+`ready` rend `launch` de nouveau. Le lancement que le Director demande (`ballet_launch.py`) ne lit pas la capacité : il juge.
 
 Sous chaque `status` `<projet>#<élément> · finished` du Monitor, `wait` et `recap` écrivent `DECISION: close` (Maestro
 ferme le terminal par `ballet_launch.py close`, puis le dit) ou `DECISION: ask the Director (<raison>)` quand la ligne du
@@ -113,6 +126,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import ballet_capacity
 import ballet_conductors
 import ballet_db
 import ballet_legacy
@@ -136,6 +150,7 @@ SESSION_VARIABLE = "CLAUDE_CODE_SESSION_ID"
 FINISHED_SUBJECT = re.compile(r"^(\S+#\S+) · finished$")   # le Monitor : un Conductor fini, terminal encore ouvert
 IDLE_SUBJECT = re.compile(r"^(\S+#\S+) · idle$")               # le Monitor : la Rehearsal ou le Workshop d'un Conductor n'écrit plus
 IDLE_NOTICE = re.compile(r"\bidle notice (\d+) of \d+")
+CAPACITY_SUBJECT = re.compile(r"^capacity · (five_hour|seven_day) · (above|below) threshold$")   # le Monitor : une fenêtre de Claude franchit son seuil
 CONTEXT_SUBJECT = "maestro · context over threshold"          # le Monitor : le contexte de Maestro a passé le seuil
 SESSION_IN_BODY = re.compile(r"\bsession (\S+)\s*$")
 TERMINAL_IN_BODY = re.compile(r"\bterminal (term_\S+?)[,.\s]")
@@ -224,12 +239,12 @@ def maestro(orca, state=None):
 
 
 def _maestro_command(state=None):
-    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control 'ballet maestro' '/ballet:maestro' --model <modèle> <socle allégé>` :
+    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control 'ballet maestro' '/ballet:maestro' --model <modèle> <socle allégé> <statusline>` :
     le prompt avant les options, comme pour un Conductor ; le modèle de `[maestro] model` ; avec `BALLET_HOME` quand il est
     posé : la session lit le même dossier d'état."""
     agent = shlex.split(os.environ.get(MAESTRO_COMMAND_VARIABLE) or DEFAULT_AGENT)
     command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT, "--model", maestro_model(read_config(state)),
-                          *ballet_session.lean_options(ballet_session.MAESTRO_TOOLS)])
+                          *ballet_session.lean_options(ballet_session.MAESTRO_TOOLS), *ballet_session.statusline_options()])
     home = os.environ.get("BALLET_HOME")
     return ballet_session.with_environment(command, {"BALLET_HOME": home} if home else {})
 
@@ -403,7 +418,23 @@ def _decision(project, kind, config, state, number=None, seen=None):
     last = _last_conductor_state(f"{project}#{number}", state) if number is not None else ""
     if last in (ballet_conductors.GONE, ballet_conductors.STOPPED):
         return f"ask the Director (its last Conductor is {last}: relaunching on its own could loop)"
-    return "launch"
+    return _capacity_hold(state) or "launch"
+
+
+def _capacity_hold(state):
+    """Ce que la capacité de Claude change à un lancement que la règle laissait partir (OPP-88), d'après les fenêtres que le
+    Monitor a signalées au-dessus de leur seuil : `standby (<faits>)` pour celle de 5 h (rien de nouveau ne part, ce qui tourne
+    continue), `ask the Director (<faits>)` pour celle de 7 jours ; vide sinon. La fenêtre de 5 h passe d'abord : tant qu'elle
+    est pleine, rien ne part de toute façon."""
+    import ballet_monitor
+    alerts = ballet_monitor.read_capacity_alerts(state)
+    return next((_capacity_verdict(window, alerts[window]) for window in ballet_capacity.WINDOWS if window in alerts), "")
+
+
+def _capacity_verdict(window, alert):
+    facts = (f"the {window} window is {round(alert['used_percent'])}% used, threshold {alert['threshold']}%, "
+             f"{'resets at ' + alert['resets_at'] if alert['resets_at'] else 'reset time unknown'}")
+    return f"standby ({facts})" if window == ballet_capacity.FIVE_HOUR else f"ask the Director ({facts})"
 
 
 def _dependency_decision(project, number, state, seen=None):
@@ -718,8 +749,8 @@ def _message_text(message, config, state, tag=""):
 
 def _body_with_decisions(message, config, state):
     """Le corps du message ; sous chaque élément d'un `status` `· ready` du Monitor, la décision de la règle de lancement ;
-    sous un `· finished`, celle de fermer le Conductor ; sous un `· idle`, celle de le relancer ; sous un `context over
-    threshold`, celle de redémarrer."""
+    sous un `· finished`, celle de fermer le Conductor ; sous un `· idle`, celle de le relancer ; sous un `capacity · …`,
+    celle de la capacité ; sous un `context over threshold`, celle de redémarrer."""
     import ballet_monitor
     body = message.get("body", "")
     if message.get("type") == "status" and message.get("subject") == CONTEXT_SUBJECT:
@@ -730,6 +761,9 @@ def _body_with_decisions(message, config, state):
     idle = IDLE_SUBJECT.match(message.get("subject", ""))
     if message.get("type") == "status" and idle:
         return f"{body}\nDECISION: {idle_decision(idle.group(1), body, state)}"
+    capacity = CAPACITY_SUBJECT.match(message.get("subject", ""))
+    if message.get("type") == "status" and capacity:
+        return f"{body}\nDECISION: {capacity_decision(capacity.group(1), capacity.group(2), state)}"
     project = ballet_monitor.project_of_ready_subject(message.get("subject", ""))
     if message.get("type") != "status" or not project:
         return body
@@ -771,6 +805,17 @@ def idle_decision(key, body, state=None):
     if found and found.group(1) == "1":
         return "nudge"
     return "ask the Director (still idle after a reminder: offer to stop it)"
+
+
+def capacity_decision(window, way, state=None):
+    """La décision sous un `capacity · <fenêtre> · above|below threshold` du Monitor, d'après l'état d'aujourd'hui : au-dessus,
+    celle de la règle de lancement (`standby`, ou `ask the Director` pour 7 jours) ; redescendue, `resume` (relire `ready`). Un
+    événement que l'état a déjà dépassé (levé depuis, ou franchi de nouveau) est `wait`. C'est ici que cela se décide."""
+    import ballet_monitor
+    alert = ballet_monitor.read_capacity_alerts(state).get(window)
+    if way == "above":
+        return _capacity_verdict(window, alert) if alert else f"wait ({window} window is back under its threshold now)"
+    return f"wait ({window} window is above its threshold again)" if alert else "resume (run ready and apply each verdict)"
 
 
 def restart_decision(body, runtime):
@@ -833,6 +878,14 @@ def idle_minutes(config):
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise MaestroError(f"[conductors] idle_after_minutes in {CONFIG_NAME} must be a whole number, 0 or more, not {value!r}")
     return value
+
+
+def capacity_settings(config):
+    """La config de la sonde de capacité (`[capacity]` de `maestro.toml` sur les défauts du plugin) ; invalide, elle lève."""
+    try:
+        return ballet_capacity.settings(config)
+    except ballet_capacity.CapacityError as error:
+        raise MaestroError(f"{error} (in {CONFIG_NAME})") from error
 
 
 def _terminal_named(body):

@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import ballet_capacity  # noqa: E402
 import ballet_conductors  # noqa: E402
 import ballet_db  # noqa: E402
 import ballet_maestro  # noqa: E402
@@ -805,6 +806,153 @@ class BalletMonitorTest(unittest.TestCase):
         before = sorted(path.name for path in (self.root / "claude").rglob("*"))
         self.turn()
         self.assertEqual(sorted(path.name for path in (self.root / "claude").rglob("*")), before)
+
+    # --- la capacité de Claude (OPP-88) ---
+
+    def capture(self, five_hour=None, seven_day=None, minutes_ago=0):
+        """Ce que la statusline de Claude a noté, il y a `minutes_ago` minutes (une fenêtre à None : absente)."""
+        reset = (datetime.now(timezone.utc) + timedelta(hours=2)).replace(microsecond=0).isoformat()
+        windows = {name: {"used_percent": used, "resets_at": reset}
+                   for name, used in (("five_hour", five_hour), ("seven_day", seven_day)) if used is not None}
+        ballet_capacity.record("claude", windows, now=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago))
+        return reset
+
+    def set_capacity(self, **settings):
+        config = ballet_maestro.read_config()
+        config["capacity"] = {**config.get("capacity", {}), **settings}
+        ballet_maestro.write_config(config)
+
+    def capacity_events(self):
+        return [row for row in self.sent() if row[0].startswith("capacity · ")]
+
+    def test_la_fenetre_de_5_h_qui_passe_le_seuil_est_signalee_avec_les_faits(self):
+        reset = self.capture(five_hour=93.5)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · above threshold"])
+        subject, priority, body = self.capacity_events()[0]
+        self.assertEqual(priority, "normal")
+        self.assertEqual(body, f"five_hour window is 94% used · threshold 90% · resets at {reset}")
+
+    def test_l_evenement_ne_donne_aucune_instruction(self):
+        self.capture(five_hour=93)
+        self.turn()
+        self.capture(five_hour=70)
+        self.turn()
+        for _, _, body in self.capacity_events():
+            for word in ("standby", "launch", "should", "must", "decision", "wait", "ask"):
+                self.assertNotIn(word, body.lower())
+
+    def test_un_pourcentage_pile_au_seuil_est_signale(self):
+        self.capture(five_hour=90)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · above threshold"])
+
+    def test_sous_le_seuil_le_monitor_ne_dit_rien(self):
+        self.capture(five_hour=89.9, seven_day=10)
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(ballet_monitor.read_capacity_alerts(), {})
+
+    def test_le_franchissement_n_est_signale_qu_une_fois(self):
+        self.capture(five_hour=93)
+        self.turn()
+        self.capture(five_hour=97)
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(len(self.capacity_events()), 1)
+
+    def test_la_redescente_est_signalee_une_fois_la_marge_passee(self):
+        self.capture(five_hour=93)
+        self.turn()
+        self.capture(five_hour=85)   # sous le seuil, mais pas de 5 points : le chiffre peut remonter
+        self.assertEqual(self.turn().told, [])
+        self.capture(five_hour=84)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · below threshold"])
+        subject, priority, body = self.capacity_events()[1]
+        self.assertEqual(priority, "normal")
+        self.assertRegex(body, r"^five_hour window is 84% used · back under threshold 90% · resets at ")
+        self.assertEqual(ballet_monitor.read_capacity_alerts(), {})
+
+    def test_un_chiffre_qui_oscille_autour_du_seuil_ne_fait_pas_clignoter(self):
+        for used in (91, 89, 91, 88, 92, 86, 91):
+            self.capture(five_hour=used)
+            self.turn()
+        self.assertEqual(self.subjects(), ["capacity · five_hour · above threshold"])
+
+    def test_remonte_au_dessus_apres_une_redescente_il_est_signale_de_nouveau(self):
+        for used in (93, 70, 91):
+            self.capture(five_hour=used)
+            self.turn()
+        self.assertEqual(self.subjects(), ["capacity · five_hour · above threshold", "capacity · five_hour · below threshold",
+                                           "capacity · five_hour · above threshold"])
+
+    def test_la_fenetre_hebdomadaire_est_signalee_en_haute_priorite_avec_son_propre_seuil(self):
+        self.set_capacity(seven_day_threshold=80)
+        self.capture(five_hour=50, seven_day=82)
+        self.assertEqual(self.turn().told, ["capacity · seven_day · above threshold"])
+        self.assertEqual(self.capacity_events()[0][1], "high")
+        self.assertIn("seven_day window is 82% used · threshold 80%", self.capacity_events()[0][2])
+
+    def test_chaque_fenetre_a_son_etat(self):
+        self.capture(five_hour=95, seven_day=95)
+        self.assertEqual(sorted(self.turn().told), ["capacity · five_hour · above threshold", "capacity · seven_day · above threshold"])
+        self.capture(five_hour=40, seven_day=95)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · below threshold"])
+        self.assertEqual(list(ballet_monitor.read_capacity_alerts()), ["seven_day"])
+
+    def test_l_etat_garde_le_chiffre_le_reset_et_le_seuil_du_franchissement(self):
+        reset = self.capture(five_hour=93)
+        self.turn()
+        alert = ballet_monitor.read_capacity_alerts()["five_hour"]
+        self.assertEqual((alert["used_percent"], alert["resets_at"], alert["threshold"]), (93, reset, 90))
+        self.assertTrue(alert["above_since"])
+
+    def test_un_chiffre_perime_est_inconnu_jamais_un_depassement(self):
+        self.capture(five_hour=99, minutes_ago=45)
+        self.assertEqual(self.turn().told, [])
+
+    def test_un_depassement_dont_le_chiffre_vieillit_redevient_inconnu_et_le_dit(self):
+        self.capture(five_hour=93)
+        self.turn()
+        self.capture(five_hour=93, minutes_ago=45)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · below threshold"])
+        body = self.capacity_events()[1][2]
+        self.assertTrue(body.startswith("five_hour window is unknown: no reading in the last 30 min · it was 93% used · threshold 90%"), body)
+        self.assertEqual(ballet_monitor.read_capacity_alerts(), {})
+
+    def test_sans_capture_une_cle_d_api_par_exemple_le_monitor_ne_dit_rien(self):
+        self.assertEqual(self.turn().told, [])
+        self.assertEqual(self.turn().errors, [])
+
+    def test_un_seuil_a_zero_coupe_la_sonde_de_sa_fenetre(self):
+        self.set_capacity(five_hour_threshold=0)
+        self.capture(five_hour=99, seven_day=99)
+        self.assertEqual(self.turn().told, ["capacity · seven_day · above threshold"])
+
+    def test_couper_la_sonde_pendant_un_depassement_le_leve_et_le_dit(self):
+        self.capture(five_hour=93)
+        self.turn()
+        self.set_capacity(five_hour_threshold=0)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · below threshold"])
+        self.assertIn("probe is off", self.capacity_events()[1][2])
+
+    def test_les_seuils_et_le_delai_viennent_de_la_config_de_la_machine(self):
+        self.set_capacity(five_hour_threshold=70, stale_after_minutes=5)
+        self.capture(five_hour=75, minutes_ago=6)
+        self.assertEqual(self.turn().told, [])
+        self.capture(five_hour=75, minutes_ago=4)
+        self.assertEqual(self.turn().told, ["capacity · five_hour · above threshold"])
+        self.assertIn("threshold 70%", self.capacity_events()[0][2])
+
+    def test_une_config_invalide_est_une_erreur_du_tour_sans_arreter_les_autres_veilles(self):
+        self.set_capacity(five_hour_threshold=150)
+        self.queue.queues["antimurphy"] = [item(12)]
+        report = self.turn()
+        self.assertEqual(report.told, ["antimurphy · ready (1 already)"])
+        self.assertTrue(any("five_hour_threshold" in error for error in report.errors), report.errors)
+
+    def test_un_envoi_qui_echoue_n_est_pas_note_et_revient_au_tour_suivant(self):
+        self.capture(five_hour=93)
+        self.orca.send_failures = 1
+        self.assertEqual(len(self.turn().errors), 1)
+        self.assertEqual(ballet_monitor.read_capacity_alerts(), {})
+        self.assertEqual(self.turn().told, ["capacity · five_hour · above threshold"])
 
     # --- run ---
 

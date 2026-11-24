@@ -10,6 +10,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import ballet_capacity
+
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 PROJECT_CONFIG = Path(".ballet") / "config.toml"
 PERIMETER_KEYS = ("writes", "except", "extra_writes", "extra_except", "branches")
@@ -40,6 +42,7 @@ def find_problems(config, plugin_root=PLUGIN_ROOT):
         + _rehearsal_problems(config)
         + _workshop_problems(config)
         + _conductor_problems(config)
+        + _capacity_problems(config)
         + _threshold_problems(config)
         + _mutation_problems(config)
         + _policy_problems(config)
@@ -213,6 +216,11 @@ def _conductor_problems(config):
     if not isinstance(model, str) or not model.strip():
         return ["[conductor] model must be a model name (haiku, sonnet…)"]
     return []
+
+
+def _capacity_problems(config):
+    """La sonde de capacité : ses règles sont celles de `ballet_capacity.py`, qui lit aussi la config de la machine."""
+    return ballet_capacity.problems(_table(config, "capacity"))
 
 
 def _threshold_problems(config):

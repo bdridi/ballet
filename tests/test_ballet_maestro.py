@@ -16,12 +16,14 @@ import ballet_conductors  # noqa: E402
 import ballet_maestro  # noqa: E402
 import ballet_monitor  # noqa: E402
 import ballet_runtime  # noqa: E402
+import ballet_session  # noqa: E402
 import ballet_store  # noqa: E402
 from ballet_rehearsal import Rehearsal, Session, Step  # noqa: E402
 from ballet_workshop import Workshop  # noqa: E402
 
 
-LEAN_OPTIONS = "--strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --tools Bash,Read,Skill"
+LEAN_OPTIONS = ("--strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --tools Bash,Read,Skill "
+                + shlex.join(ballet_session.statusline_options()))   # le socle allégé, puis la statusline de la sonde de capacité
 EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": "", "session": ""}
 
 
@@ -833,6 +835,115 @@ class BalletMaestroTest(unittest.TestCase):
         config["projects"]["antimurphy"] = {"path": str(self.root), "auto_launch": "Task"}
         ballet_maestro.write_config(config)
         self.assertIn("auto_launch must be a list", ballet_maestro.decision("antimurphy", "Task"))
+
+    # --- la capacité de Claude (OPP-88) : standby au-dessus de 5 h, le Director au-dessus de 7 jours ---
+
+    RESET = "2026-11-24T15:00:00+00:00"
+
+    def above(self, window, used=93.0, threshold=90):
+        """Le Monitor a signalé cette fenêtre au-dessus de son seuil."""
+        reading = {"used_percent": used, "resets_at": self.RESET}
+        ballet_monitor._save_capacity_alert(window, threshold, reading, None)
+
+    def back_under(self, window):
+        ballet_monitor._clear_capacity_alert(window, None)
+
+    def test_au_dessus_du_seuil_de_5_h_aucun_nouveau_lancement_ne_part_et_les_faits_sont_dans_la_decision(self):
+        self.trust("antimurphy", "Task")
+        self.above("five_hour")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"),
+                         f"standby (the five_hour window is 93% used, threshold 90%, resets at {self.RESET})")
+
+    def test_redescendu_sous_le_seuil_le_lancement_reprend(self):
+        self.trust("antimurphy", "Task")
+        self.above("five_hour")
+        self.back_under("five_hour")
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "launch")
+
+    def test_au_dessus_du_seuil_hebdomadaire_maestro_demande_au_director(self):
+        self.trust("antimurphy", "Task")
+        self.above("seven_day", used=91, threshold=85)
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"),
+                         f"ask the Director (the seven_day window is 91% used, threshold 85%, resets at {self.RESET})")
+
+    def test_les_deux_fenetres_au_dessus_la_fenetre_de_5_h_attend_d_abord(self):
+        self.trust("antimurphy", "Task")
+        self.above("five_hour")
+        self.above("seven_day")
+        self.assertTrue(ballet_maestro.decision("antimurphy", "Task").startswith("standby (the five_hour window"))
+        self.back_under("five_hour")
+        self.assertTrue(ballet_maestro.decision("antimurphy", "Task").startswith("ask the Director (the seven_day window"))
+
+    def test_la_capacite_ne_change_que_ce_qui_aurait_ete_lance(self):
+        self.trust("antimurphy", "Task")
+        self.above("five_hour")
+        self.assertIn("ask the Director (Feature is not in auto_launch", ballet_maestro.decision("antimurphy", "Feature"))
+        ballet_maestro.pause()
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "ask the Director (auto launch is paused)")
+
+    def test_un_element_bloque_reste_wait_meme_au_dessus_du_seuil(self):
+        self.trust("antimurphy", "Task")
+        self.above("five_hour")
+        self.seen_ready("antimurphy", (7, "Task", "", "Bloqué"))
+        ballet_monitor._save_ready("antimurphy", [{**ballet_monitor.read_ready()["antimurphy"][0],
+                                                   "blocked_by": [{"item": "#3", "number": 3, "repo": "a/b", "url": "https://x/3"}]}], None)
+        self.assertIn("DECISION: wait (blocked by #3, open)", ballet_maestro.ready())
+
+    def test_ready_montre_le_standby_de_chaque_element_a_lancer(self):
+        self.trust("antimurphy", "Task")
+        self.above("five_hour")
+        self.seen_ready("antimurphy", (7, "Task", "Urgent", "Le premier"))
+        self.assertEqual(ballet_maestro.ready(),
+                         f"antimurphy#7  Task  Urgent  Le premier  https://x/7  DECISION: standby (the five_hour window is 93% used, "
+                         f"threshold 90%, resets at {self.RESET})")
+
+    CAPACITY = "capacity · {window} · {way} threshold"
+
+    def capacity_message(self, window="five_hour", way="above"):
+        return {"type": "status", "subject": self.CAPACITY.format(window=window, way=way), "from": "term_monitor",
+                "body": f"{window} window is 93% used · threshold 90% · resets at {self.RESET}"}
+
+    def test_wait_ecrit_standby_sous_le_depassement_de_5_h(self):
+        owner = self.claimed()
+        self.above("five_hour")
+        self.orca.batches = [[self.capacity_message()]]
+        output = ballet_maestro.wait(owner, self.orca)
+        self.assertIn(f"resets at {self.RESET}\nDECISION: standby (the five_hour window is 93% used, threshold 90%, resets at {self.RESET})", output)
+
+    def test_wait_demande_au_director_sous_le_depassement_hebdomadaire(self):
+        owner = self.claimed()
+        self.above("seven_day")
+        self.orca.batches = [[self.capacity_message("seven_day")]]
+        self.assertIn("DECISION: ask the Director (the seven_day window is 93% used", ballet_maestro.wait(owner, self.orca))
+
+    def test_wait_dit_de_relire_ready_sous_la_redescente(self):
+        owner = self.claimed()
+        self.orca.batches = [[self.capacity_message(way="below")]]
+        self.assertIn("DECISION: resume (run ready and apply each verdict)", ballet_maestro.wait(owner, self.orca))
+
+    def test_un_depassement_deja_leve_ou_une_redescente_deja_reperdue_attendent(self):
+        owner = self.claimed()
+        self.orca.batches = [[self.capacity_message()]]
+        self.assertIn("DECISION: wait (five_hour window is back under its threshold now)", ballet_maestro.wait(owner, self.orca))
+        self.above("five_hour")
+        self.orca.batches = [[self.capacity_message(way="below")]]
+        self.assertIn("DECISION: wait (five_hour window is above its threshold again)", ballet_maestro.wait(owner, self.orca))
+
+    def test_recap_ecrit_aussi_la_decision_de_capacite_et_ne_note_pas_le_monitor_comme_un_conductor(self):
+        owner = self.claimed()
+        self.above("five_hour")
+        event = self.capacity_message()
+        self.orca.history = [self.row(1, subject=event["subject"], body=event["body"])]
+        self.assertIn("DECISION: standby (the five_hour window", ballet_maestro.recap(owner, self.orca))
+        self.assertEqual(ballet_conductors.read(), {})
+
+    def test_une_config_de_capacite_invalide_ne_bloque_pas_les_decisions(self):
+        """Le Monitor la signale à chaque tour ; la règle, elle, ne lit que l'état qu'il a noté."""
+        self.trust("antimurphy", "Task")
+        config = ballet_maestro.read_config()
+        config["capacity"] = {"five_hour_threshold": 150}
+        ballet_maestro.write_config(config)
+        self.assertEqual(ballet_maestro.decision("antimurphy", "Task"), "launch")
 
     # --- pause, resume ---
 

@@ -145,7 +145,7 @@ class BalletStageTest(unittest.TestCase):
     def test_la_sante_dit_la_base_les_limites_et_le_monitor(self):
         self.set_ready([])
         health = self.stage()["health"]
-        self.assertEqual((health["db"]["user_version"], health["limits"]["launched_today"], health["legacy_pending"]), (2, 0, False))
+        self.assertEqual((health["db"]["user_version"], health["limits"]["launched_today"], health["legacy_pending"]), (3, 0, False))
         self.assertEqual(health["monitor"]["seen_at"], "2026-11-22T20:00:00+00:00")
         self.assertIsNone(health["maestro"]["context_percent"])
 
