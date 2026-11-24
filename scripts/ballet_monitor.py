@@ -75,6 +75,7 @@ import ballet_legacy
 import ballet_maestro
 import ballet_program
 import ballet_runtime
+import ballet_version
 from ballet_maestro import MaestroError
 
 DEFAULT_INTERVAL = 180
@@ -122,7 +123,9 @@ def once(orca, queue=ballet_program.ready_items, state=None):
 
 
 def run(interval, orca, queue=ballet_program.ready_items, state=None, tours=None, sleep=time.sleep):
-    """Des tours à la suite, `interval` secondes entre deux ; `tours` les borne (les tests). Une erreur ne l'arrête pas."""
+    """Des tours à la suite, `interval` secondes entre deux ; `tours` les borne (les tests). Une erreur ne l'arrête pas.
+    Au démarrage, le Monitor note la version du plugin qu'il a chargée : la Scène la compare à la version installée."""
+    _note_version(state)
     done = 0
     while tours is None or done < tours:
         if done:
@@ -133,6 +136,12 @@ def run(interval, orca, queue=ballet_program.ready_items, state=None, tours=None
         except Exception as error:  # le Monitor doit survivre à ce qu'il n'a pas prévu : le tour suivant réessaie
             report = Report(errors=[f"turn failed: {error}"])
         _show(report)
+
+
+def _note_version(state):
+    report = Report()
+    _attempt(report, "version not noted", lambda: ballet_runtime.update(state, monitor_version=ballet_version.running()))
+    _show(report)
 
 
 def _attempt(report, label, step):

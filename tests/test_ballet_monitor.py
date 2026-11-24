@@ -963,6 +963,26 @@ class BalletMonitorTest(unittest.TestCase):
             ballet_monitor.run(30, self.orca, self.queue, tours=3, sleep=pauses.append)
         self.assertEqual((len(self.queue.asked), pauses), (3, [30, 30]))
 
+    def test_run_note_sa_version_au_demarrage(self):
+        self.queue.queues["antimurphy"] = []
+        with mock.patch.object(ballet_monitor.ballet_version, "running", return_value="0.48.0"), redirect_stdout(io.StringIO()):
+            ballet_monitor.run(1, self.orca, self.queue, tours=1, sleep=lambda seconds: None)
+        self.assertEqual(ballet_runtime.read()["monitor_version"], "0.48.0")
+
+    def test_un_tour_seul_ne_note_pas_de_version(self):
+        self.queue.queues["antimurphy"] = []
+        with mock.patch.object(ballet_monitor.ballet_version, "running", return_value="0.48.0"):
+            ballet_monitor.once(self.orca, self.queue)
+        self.assertEqual(ballet_runtime.read()["monitor_version"], "")
+
+    def test_une_version_qui_ne_se_note_pas_n_arrete_pas_run(self):
+        self.queue.queues["antimurphy"] = []
+        err = io.StringIO()
+        with mock.patch.object(ballet_monitor.ballet_runtime, "update", side_effect=OSError("disk full")), redirect_stderr(err), redirect_stdout(io.StringIO()):
+            ballet_monitor.run(1, self.orca, self.queue, tours=1, sleep=lambda seconds: None)
+        self.assertIn("problem: version not noted: disk full", err.getvalue())
+        self.assertEqual(len(self.queue.asked), 1)
+
     def test_une_erreur_passagere_n_arrete_pas_run(self):
         self.queue.queues["antimurphy"] = ballet_program.ProgramError("gh did not answer")
         err = io.StringIO()

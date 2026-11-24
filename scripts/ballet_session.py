@@ -13,6 +13,13 @@ dont le rôle ne se sert pas (agents, tâches planifiées, worktrees, navigateur
 (`Write`, `Edit`) et lance des scripts (`Bash`) ; Maestro lance des scripts et lit (`Bash`, `Read`), dont l'attente de sa boîte
 en arrière-plan. Les deux chargent leurs skills (`Skill`).
 
+Maestro porte aussi `PushNotification` (OPP-91), l'outil qui prévient l'appareil du Director quand une escalade ou une demande
+l'attend : `--tools` l'accepte tel quel (il est chargé, pas différé derrière `ToolSearch`). Mesuré (2.1.331, mêmes conditions) :
++ 577 tokens de socle, relus à chaque tour de Maestro (16 870 → 17 447). `[maestro] push = false` le retire, à la création de la
+session. L'outil n'envoie vers le mobile que si Remote Control est connecté (Maestro est lancé avec `--remote-control`) et que
+le réglage `agentPushNotifEnabled` de Claude Code est vrai (`/config`, « push when Claude decides ») ; sinon il répond « not sent »
+sans rien lever.
+
 Le cache de prompt dure une heure (`CLAUDE_CODE_PROMPT_CACHE_TTL=1h`, Claude Code ≥ 2.1.242) : au-delà du quota d'abonnement,
 ou sur une clé d'API, le défaut tombe à 5 minutes, et chaque attente (mutation, Critic) réécrit tout le contexte.
 
@@ -35,12 +42,18 @@ CACHE_TTL = "1h"
 NO_MCP_SERVERS = ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
 CONDUCTOR_TOOLS = "Bash,Read,Write,Edit,Skill"
 MAESTRO_TOOLS = "Bash,Read,Skill"
+PUSH_TOOL = "PushNotification"
 STATUSLINE_SCRIPT = Path(__file__).with_name("ballet_statusline.py")
 
 
 def lean_options(tools):
     """Les options d'une session sans serveur MCP, avec les seuls outils intégrés donnés (`--tools`)."""
     return [*NO_MCP_SERVERS, "--tools", tools]
+
+
+def maestro_tools(push):
+    """Les outils de Maestro : ceux de son rôle, plus l'outil de push (`PushNotification`) quand `[maestro] push` le veut."""
+    return f"{MAESTRO_TOOLS},{PUSH_TOOL}" if push else MAESTRO_TOOLS
 
 
 def statusline_options():

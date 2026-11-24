@@ -520,17 +520,24 @@ function dashboard() {
       <div class="card"><h3>Les rôles <em>· tours d'agents</em></h3>${rolesTable()}</div></div>
     <div><h3>Dernières escalades</h3>${escalations()}</div>`;
 }
+function versionNotes() {
+  // Un processus qui tourne dans une autre version que l'installée (Maestro avec un bail, le Monitor qui répond encore) ; une version inconnue y figure.
+  const H = STAGE.health, V = H.versions, seen = H.monitor.seen_at, monitorUp = seen && secs(seen) < 3 * H.monitor.interval_s;
+  return [H.maestro.lease_owner ? V.maestro.note : '', monitorUp ? V.monitor.note : ''].filter(Boolean);
+}
 function healthStrip() {
-  const H = STAGE.health, M = H.maestro, ctx = M.context_percent, seen = H.monitor.seen_at, fresh = seen && secs(seen) < 3 * H.monitor.interval_s;
+  const H = STAGE.health, M = H.maestro, V = H.versions, ctx = M.context_percent, seen = H.monitor.seen_at, fresh = seen && secs(seen) < 3 * H.monitor.interval_s;
   const card = (state, title, line, detail) => `<div class="hmini" ${tip(detail)}><div class="st"><i class="dot ${state}"></i>${title}</div><small>${line}</small></div>`;
+  const ver = v => v.version ? `v${v.version}` : 'version inconnue', behind = v => v.note ? 'warn' : '';
+  const notes = versionNotes();
   return `<div class="hstrip">${[
-    card(fresh ? '' : 'bad', 'Monitor', seen ? `dernier tour ${ago(seen)}` : 'jamais vu', `Un tour toutes les ${H.monitor.interval_s} s par défaut · terminal ${H.monitor.terminal || '—'}`),
-    card(!M.lease_owner ? 'bad' : ctx != null && M.restart_at && ctx >= M.restart_at ? 'warn' : '', 'Maestro', M.lease_owner ? `${ctx != null ? `contexte ${ctx} %` : 'contexte inconnu'}${M.restart_at ? ` · redémarre à ${M.restart_at} %` : ''}` : 'pas de bail : Maestro ne tourne pas',
-      M.lease_owner ? `Bail ${M.lease_pid ? 'en attente sur la boîte, pid ' + M.lease_pid : 'pris'}${M.lease_renewed_at ? ' · renouvelé ' + ago(M.lease_renewed_at) : ''} · session ${M.session || '—'}` : 'Lancer /ballet:maestro'),
+    card(fresh ? behind(V.monitor) : 'bad', 'Monitor', seen ? `dernier tour ${ago(seen)} · ${ver(V.monitor)}` : `jamais vu · ${ver(V.monitor)}`, `Un tour toutes les ${H.monitor.interval_s} s par défaut · terminal ${H.monitor.terminal || '—'} · plugin installé v${V.installed || '?'}`),
+    card(!M.lease_owner ? 'bad' : ctx != null && M.restart_at && ctx >= M.restart_at ? 'warn' : behind(V.maestro), 'Maestro', M.lease_owner ? `${ctx != null ? `contexte ${ctx} %` : 'contexte inconnu'}${M.restart_at ? ` · redémarre à ${M.restart_at} %` : ''} · ${ver(V.maestro)}` : 'pas de bail : Maestro ne tourne pas',
+      M.lease_owner ? `Bail ${M.lease_pid ? 'en attente sur la boîte, pid ' + M.lease_pid : 'pris'}${M.lease_renewed_at ? ' · renouvelé ' + ago(M.lease_renewed_at) : ''} · session ${M.session || '—'} · plugin installé v${V.installed || '?'}` : 'Lancer /ballet:maestro'),
     card(H.mailbox.terminal && H.mailbox.run ? '' : 'bad', 'Boîte de Maestro', H.mailbox.run ? 'prête' : 'absente', H.mailbox.run ? `run ${H.mailbox.run} · terminal ${H.mailbox.terminal}` : '/ballet:setup la recrée'),
     card(H.paused_at ? 'warn' : '', 'Lancements', `${running().length} / ${H.limits.max_running} en cours · ${H.limits.launched_today} / ${H.limits.max_per_day} aujourd'hui`, H.paused_at ? `En pause depuis ${H.paused_at}` : 'Pas en pause'),
     card(H.legacy_pending ? 'warn' : '', 'Base', `v${H.db.user_version} · ${H.db.size_kb} Ko · ${H.db.events} événements`, H.legacy_pending ? 'Un ancien état attend la reprise' : '~/.ballet/ballet.db, à jour'),
-  ].join('')}</div>`;
+  ].join('')}</div>${notes.map(n => `<div class="callout"><b>Version</b> · ${esc(n)}</div>`).join('')}`;
 }
 function kpis() {
   const t1 = startOfDay(now()) + DAY, days = [...Array(7)].map((_, i) => t1 - (7 - i) * DAY);
@@ -732,7 +739,7 @@ async function render() {
   const rt = route();
   document.getElementById('project').innerHTML = [['all', 'Tous les projets'], ...STAGE.projects.map(p => [p.alias, p.alias])].map(([k, l]) => `<option value="${k}" ${project === k ? 'selected' : ''}>${l}</option>`).join('');
   document.getElementById('nav').innerHTML = NAV.map(([k, l]) => `<a href="#/${k}" class="${rt.page === k || (k === 'tickets' && rt.page === 'ticket') || (k === 'rehearsals' && rt.page === 'play') ? 'on' : ''}">${l}</a>`).join('');
-  const H = STAGE.health, ok = !H.paused_at && !H.legacy_pending && H.monitor.seen_at && secs(H.monitor.seen_at) < 3 * H.monitor.interval_s;
+  const H = STAGE.health, ok = !H.paused_at && !H.legacy_pending && !versionNotes().length && H.monitor.seen_at && secs(H.monitor.seen_at) < 3 * H.monitor.interval_s;
   const h = document.getElementById('health'); h.className = 'health' + (ok ? '' : ' warn'); h.innerHTML = `<i class="fa-solid fa-heart-pulse"></i>${ok ? 'Ballet OK' : 'Ballet à vérifier'}`;
   document.getElementById('side').innerHTML = side(rt);
   document.getElementById('page').innerHTML = (PAGES[rt.page] || PAGES.dashboard)(rt.id);

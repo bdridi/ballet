@@ -14,6 +14,9 @@ contexte) ; le remote git de chaque projet (les liens vers GitHub). Les titres d
 arrière-plan puis gardés : la page s'ouvre tout de suite et les reçoit au tour suivant. Une issue que le Workshop a publiée
 `proposed` y figure tant qu'elle n'est ni dans la file ni jouée : l'accepter se fait sur GitHub.
 
+La santé dit aussi les versions (`ballet_version.py`, OPP-90) : celle du plugin installé, et celles que Maestro et le Monitor font
+tourner, notées par chacun dans `runtime` en démarrant ; une version différente de l'installée, ou inconnue, est dite en clair.
+
 Chaque représentation porte ses frictions (celles gardées à sa fin, sinon calculées sur le moment par `ballet_frictions`) et
 son coût, par rôle, en tokens et en équivalent dollars (`ballet_cost`, lu dans les journaux de Claude Code) : gardé dans
 son état quand la fin l'a écrit, sinon calculé en arrière-plan, une fois pour une représentation finie, toutes les
@@ -48,6 +51,7 @@ import ballet_monitor
 import ballet_runtime
 import ballet_state
 import ballet_store
+import ballet_version
 
 STAGE = Path(__file__).resolve().parent.parent / "stage"
 FILES = {
@@ -457,6 +461,7 @@ def _health(connection, config, state):
         "legacy_pending": bool(ballet_legacy.pending(state)),
         "db": _database(connection, state),
         "limits": _limits(connection, config, state),
+        "versions": _versions(runtime),
     }
 
 
@@ -482,6 +487,15 @@ def _context_tokens(session):
     return CONTEXT[transcript][1]
 
 
+def _versions(runtime):
+    """La version installée du plugin, et celles de Maestro et du Monitor telles qu'ils tournent, chacune avec ce qu'il y a à
+    dire quand elle diffère de l'installée (`ballet_version.stale_note`) : une version inconnue n'est pas une version égale."""
+    installed = ballet_version.installed()
+    note = lambda role, version: {"version": version, "note": ballet_version.stale_note(role, version, installed)}
+    return {"installed": installed, "maestro": note("Maestro", runtime["maestro_version"]),
+            "monitor": note("Monitor", runtime["monitor_version"])}
+
+
 def _database(connection, state):
     path = ballet_db.database_path(state)
     return {"user_version": ballet_db.version(connection), "size_kb": path.stat().st_size // 1024 if path.exists() else 0,
@@ -502,6 +516,7 @@ def _version(connection):
     stamps = [connection.execute("SELECT max(id) FROM events").fetchone()[0]]
     stamps += [tuple(connection.execute(f"SELECT max(updated_at), count(*) FROM {table}").fetchone()) for table in ("sessions", "rehearsals", "workshops")]
     stamps += [connection.execute("SELECT max(seen_at) FROM ready").fetchone()[0], tuple(ballet_runtime.read_in(connection).values())]
+    stamps.append(ballet_version.installed())
     with _LOCK:
         stamps.append(len(TITLES))
         stamps.append(sorted((node, at) for node, (at, _) in COSTS.items()))

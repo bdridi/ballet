@@ -21,6 +21,9 @@ l'écrivent :
     model = "sonnet"                  le modèle de la session Maestro ; pris à sa création : `/ballet:setup upgrade` l'applique
     restart_at_context_percent = 30   le contexte au-delà duquel le Monitor le signale pour un redémarrage ; 0 : jamais
     context_window_tokens = 1000000   la fenêtre de contexte du modèle de Maestro (le transcript ne la dit pas)
+    push = true                       Maestro prévient l'appareil du Director (outil `PushNotification`) à chaque escalade et à
+                                      chaque demande ; false : l'outil n'est pas donné à la session. Pris à sa création, comme
+                                      le modèle. Il faut Remote Control et `agentPushNotifEnabled` de Claude Code (OPP-91)
 
     [projects.antimurphy]     un projet par alias
     path = "/chemin/vers/antimurphy"
@@ -88,7 +91,7 @@ ou `DECISION: wait (<élément> is <état> now)` quand le Conductor n'est plus `
 
 `maestro` lance la session Maestro elle-même, comme `monitor` lance le Monitor : un terminal Orca `maestro` où tourne
 `CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' '/ballet:maestro' --strict-mcp-config --mcp-config
-'{"mcpServers":{}}' --tools Bash,Read,Skill` (le prompt avant les options ; le socle allégé et le cache d'une heure viennent
+'{"mcpServers":{}}' --tools Bash,Read,Skill,PushNotification` (le prompt avant les options ; le socle allégé et le cache d'une heure viennent
 de `ballet_session.py` ; `BALLET_MAESTRO_COMMAND` remplace `claude`, pour essayer sans tokens ; `BALLET_HOME` est transmis
 s'il est posé). Il ne fait rien quand le terminal noté vit
 encore, ni quand une session Maestro tient un bail vivant (deux sessions se disputeraient la boîte : il le dit et ne crée
@@ -134,6 +137,7 @@ import ballet_program
 import ballet_runtime
 import ballet_session
 import ballet_state
+import ballet_version
 
 CONFIG_NAME = "maestro.toml"
 LOCK_NAME = "maestro.lock"
@@ -243,8 +247,10 @@ def _maestro_command(state=None):
     le prompt avant les options, comme pour un Conductor ; le modèle de `[maestro] model` ; avec `BALLET_HOME` quand il est
     posé : la session lit le même dossier d'état."""
     agent = shlex.split(os.environ.get(MAESTRO_COMMAND_VARIABLE) or DEFAULT_AGENT)
-    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT, "--model", maestro_model(read_config(state)),
-                          *ballet_session.lean_options(ballet_session.MAESTRO_TOOLS), *ballet_session.statusline_options()])
+    config = read_config(state)
+    tools = ballet_session.maestro_tools(push_enabled(config))
+    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT, "--model", maestro_model(config),
+                          *ballet_session.lean_options(tools), *ballet_session.statusline_options()])
     home = os.environ.get("BALLET_HOME")
     return ballet_session.with_environment(command, {"BALLET_HOME": home} if home else {})
 
@@ -317,7 +323,8 @@ def project_of(home, config):
 def claim(take_over=False, state=None):
     """Le bail de lecture de la boîte, pour une seule session : refusé quand une autre le tient vivant, sauf `take_over`,
     qui arrête d'abord l'attente de l'ancien propriétaire. Rend le jeton de la nouvelle propriétaire. Le bail note aussi l'id
-    de sa session Claude : le Monitor lit le contexte de Maestro dans ce transcript."""
+    de sa session Claude (le Monitor lit le contexte de Maestro dans ce transcript) et la version du plugin qu'elle a chargée
+    (la Scène la compare à la version installée)."""
     with ballet_db.writing(state) as connection:
         lease = _lease(ballet_runtime.read_in(connection))
         if _lease_alive(lease) and not take_over:
@@ -325,7 +332,8 @@ def claim(take_over=False, state=None):
         _stop_the_wait(lease["pid"])
         owner = secrets.token_hex(8)
         ballet_runtime.update_in(connection, lease_owner=owner, lease_pid=0, lease_renewed_at=_now(),
-                                 lease_session=os.environ.get(SESSION_VARIABLE, ""))
+                                 lease_session=os.environ.get(SESSION_VARIABLE, ""),
+                                 maestro_version=ballet_version.running())
     return f"lease claimed, owner {owner}"
 
 
@@ -834,6 +842,14 @@ def restart_decision(body, runtime):
 def maestro_model(config):
     """`[maestro] model` : le modèle de la session Maestro ; `sonnet` sans la clé."""
     return _model(config, "maestro", DEFAULT_MAESTRO_MODEL)
+
+
+def push_enabled(config):
+    """`[maestro] push` : vrai (par défaut) quand Maestro porte l'outil de push et prévient l'appareil du Director ; un booléen."""
+    value = config.get("maestro", {}).get("push", True)
+    if not isinstance(value, bool):
+        raise MaestroError(f"[maestro] push in {CONFIG_NAME} must be true or false, not {value!r}")
+    return value
 
 
 def conductor_model(config):

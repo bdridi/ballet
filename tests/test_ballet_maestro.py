@@ -22,7 +22,7 @@ from ballet_rehearsal import Rehearsal, Session, Step  # noqa: E402
 from ballet_workshop import Workshop  # noqa: E402
 
 
-LEAN_OPTIONS = ("--strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --tools Bash,Read,Skill "
+LEAN_OPTIONS = ("--strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --tools Bash,Read,Skill,PushNotification "
                 + shlex.join(ballet_session.statusline_options()))   # le socle allégé, puis la statusline de la sonde de capacité
 EMPTY_LEASE = {"owner": "", "pid": 0, "renewed": "", "session": ""}
 
@@ -332,6 +332,18 @@ class BalletMaestroTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "5d5057ed-f4f9"}):
             ballet_maestro.claim()
         self.assertEqual(self.lease()["session"], "5d5057ed-f4f9")
+
+    def test_claim_note_la_version_du_plugin_que_la_session_a_chargee(self):
+        with mock.patch.object(ballet_maestro.ballet_version, "running", return_value="0.48.0"):
+            ballet_maestro.claim()
+        self.assertEqual(self.runtime()["maestro_version"], "0.48.0")
+
+    def test_un_claim_refuse_ne_change_pas_la_version_notee(self):
+        with mock.patch.object(ballet_maestro.ballet_version, "running", return_value="0.45.0"):
+            ballet_maestro.claim()
+        with mock.patch.object(ballet_maestro.ballet_version, "running", return_value="0.48.0"), self.assertRaises(ballet_maestro.MaestroError):
+            ballet_maestro.claim()
+        self.assertEqual(self.runtime()["maestro_version"], "0.45.0")
 
     def test_claim_hors_de_claude_laisse_la_session_vide(self):
         with mock.patch.dict("os.environ", clear=False) as environment:
@@ -714,7 +726,27 @@ class BalletMaestroTest(unittest.TestCase):
             words = shlex.split(ballet_maestro._maestro_command())
         self.assertIn("--strict-mcp-config", words)
         self.assertEqual(json.loads(words[words.index("--mcp-config") + 1]), {"mcpServers": {}})
+        self.assertEqual(words[words.index("--tools") + 1].split(","), ["Bash", "Read", "Skill", "PushNotification"])
+
+    def test_maestro_sans_push_ne_prend_pas_l_outil_de_push(self):
+        ballet_maestro.write_config({"projects": {}, "maestro": {"push": False}})
+        with mock.patch.dict("os.environ", {"BALLET_MAESTRO_COMMAND": "claude"}):
+            words = shlex.split(ballet_maestro._maestro_command())
         self.assertEqual(words[words.index("--tools") + 1].split(","), ["Bash", "Read", "Skill"])
+
+    def test_un_push_invalide_est_refuse_a_la_creation_de_la_session(self):
+        ballet_maestro.write_config({"projects": {}, "maestro": {"push": "yes"}})
+        with self.assertRaisesRegex(ballet_maestro.MaestroError, "\\[maestro\\] push in maestro.toml must be true or false"):
+            ballet_maestro._maestro_command()
+
+    def test_le_push_est_vrai_par_defaut_et_booleen(self):
+        self.assertTrue(ballet_maestro.push_enabled({}))
+        self.assertTrue(ballet_maestro.push_enabled({"maestro": {"push": True}}))
+        self.assertFalse(ballet_maestro.push_enabled({"maestro": {"push": False}}))
+        for wrong in ("true", 1, 0, None):
+            with self.subTest(value=wrong), self.assertRaises(ballet_maestro.MaestroError) as refused:
+                ballet_maestro.push_enabled({"maestro": {"push": wrong}})
+            self.assertIn("[maestro] push", str(refused.exception))
 
     def test_maestro_est_idempotent_tant_que_le_terminal_vit(self):
         ballet_maestro.maestro(self.orca)

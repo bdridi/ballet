@@ -20,6 +20,10 @@ class BalletSessionTest(unittest.TestCase):
             self.assertIn("Skill", tools.split(","))
             self.assertIn("Bash", tools.split(","))
 
+    def test_maestro_prend_l_outil_de_push_quand_le_push_est_voulu(self):
+        self.assertEqual(ballet_session.maestro_tools(push=True), "Bash,Read,Skill,PushNotification")
+        self.assertEqual(ballet_session.maestro_tools(push=False), "Bash,Read,Skill")
+
     def test_la_commande_porte_le_cache_d_une_heure_apres_les_variables_donnees(self):
         command = ballet_session.with_environment("claude --remote-control x", {"BALLET_HOME": "/a b"})
         self.assertEqual(shlex.split(command),

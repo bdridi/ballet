@@ -9,6 +9,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import ballet_db  # noqa: E402
+import ballet_runtime  # noqa: E402
 import ballet_stage  # noqa: E402
 import ballet_store  # noqa: E402
 
@@ -145,9 +146,39 @@ class BalletStageTest(unittest.TestCase):
     def test_la_sante_dit_la_base_les_limites_et_le_monitor(self):
         self.set_ready([])
         health = self.stage()["health"]
-        self.assertEqual((health["db"]["user_version"], health["limits"]["launched_today"], health["legacy_pending"]), (3, 0, False))
+        self.assertEqual((health["db"]["user_version"], health["limits"]["launched_today"], health["legacy_pending"]), (4, 0, False))
         self.assertEqual(health["monitor"]["seen_at"], "2026-11-22T20:00:00+00:00")
         self.assertIsNone(health["maestro"]["context_percent"])
+
+    # --- les versions : celle du plugin installé, celles de Maestro et du Monitor tels qu'ils tournent ---
+
+    def versions(self, installed="0.47.0", **running):
+        with ballet_db.writing() as connection:
+            ballet_runtime.update_in(connection, **running)
+        with mock.patch.object(ballet_stage.ballet_version, "installed", return_value=installed):
+            return self.stage()["health"]["versions"]
+
+    def test_la_scene_dit_la_version_installee_et_celles_qui_tournent(self):
+        versions = self.versions(maestro_version="0.47.0", monitor_version="0.47.0")
+        self.assertEqual(versions, {"installed": "0.47.0", "maestro": {"version": "0.47.0", "note": ""},
+                                    "monitor": {"version": "0.47.0", "note": ""}})
+
+    def test_un_monitor_plus_ancien_que_l_installee_est_dit_en_clair(self):
+        versions = self.versions(maestro_version="0.47.0", monitor_version="0.45.0")
+        self.assertEqual(versions["monitor"], {"version": "0.45.0", "note": "Monitor 0.45.0, installed 0.47.0 : run /ballet:setup upgrade"})
+        self.assertEqual(versions["maestro"]["note"], "")
+
+    def test_une_version_qui_n_a_rien_note_est_inconnue_pas_egale(self):
+        versions = self.versions()
+        self.assertEqual(versions["maestro"], {"version": "", "note": "Maestro version unknown, installed 0.47.0 : run /ballet:setup upgrade"})
+        self.assertEqual(versions["monitor"]["note"], "Monitor version unknown, installed 0.47.0 : run /ballet:setup upgrade")
+
+    def test_la_page_change_quand_la_version_installee_change(self):
+        with mock.patch.object(ballet_stage.ballet_version, "installed", return_value="0.47.0"):
+            before = ballet_stage.snapshot()["version"]
+        with mock.patch.object(ballet_stage.ballet_version, "installed", return_value="0.48.0"):
+            after = ballet_stage.snapshot()["version"]
+        self.assertNotEqual(before, after)
 
     def test_un_projet_connu_de_la_base_seulement_est_liste(self):
         self.log("begin")

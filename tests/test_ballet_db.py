@@ -45,7 +45,7 @@ class BalletDbTest(unittest.TestCase):
 
     def test_une_base_neuve_monte_a_la_derniere_migration_du_plugin(self):
         with ballet_db.reading() as connection:
-            self.assertEqual(ballet_db.version(connection), 3)
+            self.assertEqual(ballet_db.version(connection), 4)
             self.assertEqual(self.tables(connection), ["capacity_alerts", "conductors", "events", "nodes", "ready", "rehearsals", "runtime", "sessions", "workshops"])
         self.assertTrue((self.state / "ballet.db").is_file())
 
@@ -95,7 +95,7 @@ class BalletDbTest(unittest.TestCase):
         connection = sqlite3.connect(self.state / "ballet.db")
         connection.execute("PRAGMA user_version = 99")
         connection.close()
-        with self.assertRaisesRegex(ballet_db.DatabaseError, "version 99, this plugin knows 3"):
+        with self.assertRaisesRegex(ballet_db.DatabaseError, "version 99, this plugin knows 4"):
             ballet_db.connect()
 
     def test_un_nom_de_migration_hors_forme_est_refuse(self):
@@ -118,6 +118,23 @@ class BalletDbTest(unittest.TestCase):
     def test_le_runtime_vide_se_lit_sans_none(self):
         runtime = ballet_runtime.read()
         self.assertEqual((runtime["mailbox_run"], runtime["lease_pid"], runtime["restart_owns_pause"]), ("", 0, False))
+
+    def test_le_runtime_garde_la_version_de_maestro_et_celle_du_monitor(self):
+        ballet_runtime.update(maestro_version="0.48.0", monitor_version="0.47.0")
+        runtime = ballet_runtime.read()
+        self.assertEqual((runtime["maestro_version"], runtime["monitor_version"]), ("0.48.0", "0.47.0"))
+
+    def test_une_base_d_avant_les_versions_les_lit_vides_sans_erreur(self):
+        """Le runtime d'une base à la version 3 : ses lignes restent, les versions sont vides."""
+        before = self.root / "migrations-before"
+        before.mkdir()
+        for migration in sorted(ballet_db.MIGRATIONS.glob("000[123]_*.sql")):
+            (before / migration.name).write_text(migration.read_text(encoding="utf-8"), encoding="utf-8")
+        old = ballet_db.connect(migrations=before)
+        old.execute("UPDATE runtime SET mailbox_run = 'run_1' WHERE one = 1")
+        old.close()
+        runtime = ballet_runtime.read()
+        self.assertEqual((runtime["mailbox_run"], runtime["maestro_version"], runtime["monitor_version"]), ("run_1", "", ""))
 
     def test_le_runtime_refuse_un_champ_inconnu(self):
         with self.assertRaises(ValueError):
