@@ -2,6 +2,12 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
+## 0.44.1 — 2026-11-24 · `v0.44.1`
+
+- **Le modèle de Maestro se règle** : `[maestro] model` de `~/.ballet/maestro.toml` (`sonnet` par défaut), passé en `--model` à la création de sa session ; un changement s'applique au prochain `/ballet:setup upgrade` (ou `restart`). Le harness reste Claude Code.
+- **Le modèle des Conductors pour toute la machine** : `[conductors] model` de `~/.ballet/maestro.toml` (`haiku` par défaut) ; `[conductor] model` du profil d'un projet l'emporte pour ce projet, et n'est plus posé par le profil du plugin (une valeur par défaut là masquait le réglage machine). Maestro le prend à chaque lancement (`ballet_launch.py`). Une valeur invalide refuse le lancement, ou la création de Maestro.
+- PRD, README, skill Setup et profil à jour. 1057 tests verts.
+
 ## 0.44.0 — 2026-11-23 · `v0.44.0`
 
 Le temps et le coût d'une feature (~4 à 5 $ mesurés sur antimurphy, FEAT-007 et FEAT-008), sans rien retirer à la qualité. OPP-77 en partie.

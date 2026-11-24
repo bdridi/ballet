@@ -121,6 +121,11 @@ class BalletLaunchTest(unittest.TestCase):
     def workshop(self, item="", project="antimurphy"):
         return ballet_launch.launch_workshop(project, item, self.orca, url_wait=0)
 
+    def machine(self, **tables):
+        config = ballet_maestro.read_config()
+        config.update(tables)
+        ballet_maestro.write_config(config)
+
     def limits(self, **limits):
         config = ballet_maestro.read_config()
         config["limits"] = limits
@@ -181,6 +186,20 @@ class BalletLaunchTest(unittest.TestCase):
         (self.home / ".ballet" / "config.toml").write_text(PROFILE + '\n[conductor]\nmodel = "sonnet"\n', encoding="utf-8")
         self.rehearsal("#13")
         self.assertEqual(self.option(self.command_words(), "--model"), "sonnet")
+
+    def test_maestro_toml_change_le_modele_des_conductors_de_la_machine_et_le_profil_l_emporte(self):
+        self.machine(conductors={"model": "sonnet"})
+        self.rehearsal("#12")
+        self.assertEqual(self.option(self.command_words(), "--model"), "sonnet")
+        self.forget_launches()
+        (self.home / ".ballet").mkdir()
+        (self.home / ".ballet" / "config.toml").write_text(PROFILE + '\n[conductor]\nmodel = "opus"\n', encoding="utf-8")
+        self.rehearsal("#13")
+        self.assertEqual(self.option(self.command_words(), "--model"), "opus")
+
+    def test_un_modele_de_conductor_invalide_dans_maestro_toml_refuse_le_lancement(self):
+        self.machine(conductors={"model": ""})
+        self.assertRefused(lambda: self.rehearsal("#12"), "\\[conductors\\] model in maestro.toml must be a model name")
 
     def test_un_modele_de_conductor_qui_n_est_pas_un_nom_refuse_le_lancement(self):
         (self.home / ".ballet").mkdir()

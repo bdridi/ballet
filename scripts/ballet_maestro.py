@@ -18,6 +18,7 @@ La config vit dans `~/.ballet/maestro.toml` (`BALLET_HOME` pour un autre dossier
 l'écrivent :
 
     [maestro]                 les réglages de la session Maestro (facultatifs ; ces valeurs par défaut)
+    model = "sonnet"                  le modèle de la session Maestro ; pris à sa création : `/ballet:setup upgrade` l'applique
     restart_at_context_percent = 30   le contexte au-delà duquel le Monitor le signale pour un redémarrage ; 0 : jamais
     context_window_tokens = 1000000   la fenêtre de contexte du modèle de Maestro (le transcript ne la dit pas)
 
@@ -30,7 +31,9 @@ l'écrivent :
     max_running = 3           Conductors vivants en même temps, tous projets confondus
     max_per_day = 10          lancements par jour (jour local)
 
-    [conductors]              (facultatif ; cette valeur par défaut)
+    [conductors]              (facultatif ; ces valeurs par défaut)
+    model = "haiku"                     le modèle des Conductors de la machine ; `[conductor] model` du profil d'un projet
+                                        l'emporte pour ce projet
     close_finished_after_minutes = 10   un Conductor fini dont le terminal reste ouvert au-delà : le Monitor le signale
                                         (`<projet>#<élément> · finished`) et Maestro le ferme ; 0 : jamais
     idle_after_minutes = 20             un Conductor dont la Rehearsal (ou le Workshop) n'a rien écrit depuis ce temps : le
@@ -126,6 +129,8 @@ ANNOUNCED = ("escalate", "done")
 DEFAULT_CLOSE_MINUTES = 10
 DEFAULT_IDLE_MINUTES = 20
 DEFAULT_RESTART_PERCENT = 30
+DEFAULT_MAESTRO_MODEL = "sonnet"     # Maestro parle au Director et juge ce qu'il lui dit : plus qu'un relais
+DEFAULT_CONDUCTOR_MODEL = "haiku"    # le Conductor relaie des scripts déterministes
 DEFAULT_CONTEXT_WINDOW = 1_000_000   # mesuré par `claude -p` pour les modèles 5.5 (spike 0003) ; le transcript ne la dit pas
 SESSION_VARIABLE = "CLAUDE_CODE_SESSION_ID"
 FINISHED_SUBJECT = re.compile(r"^(\S+#\S+) · finished$")   # le Monitor : un Conductor fini, terminal encore ouvert
@@ -212,17 +217,18 @@ def maestro(orca, state=None):
         lease = _lease(runtime)
         if _lease_alive(lease):
             return f"maestro not created: {_lease_held_message(lease)}"
-        receipt = json.loads(orca(["terminal", "create", "--title", MAESTRO_TITLE, "--command", _maestro_command(), "--json"]))
+        receipt = json.loads(orca(["terminal", "create", "--title", MAESTRO_TITLE, "--command", _maestro_command(state), "--json"]))
         handle = first_id(receipt, "term_", "orca terminal create")
         ballet_runtime.update(state, maestro_terminal=handle)
         return f"maestro created: terminal {handle}"
 
 
-def _maestro_command():
-    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control 'ballet maestro' '/ballet:maestro' <socle allégé>` : le prompt avant
-    les options, comme pour un Conductor ; avec `BALLET_HOME` quand il est posé : la session lit le même dossier d'état."""
+def _maestro_command(state=None):
+    """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control 'ballet maestro' '/ballet:maestro' --model <modèle> <socle allégé>` :
+    le prompt avant les options, comme pour un Conductor ; le modèle de `[maestro] model` ; avec `BALLET_HOME` quand il est
+    posé : la session lit le même dossier d'état."""
     agent = shlex.split(os.environ.get(MAESTRO_COMMAND_VARIABLE) or DEFAULT_AGENT)
-    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT,
+    command = shlex.join([*agent, "--remote-control", MAESTRO_NAME, MAESTRO_PROMPT, "--model", maestro_model(read_config(state)),
                           *ballet_session.lean_options(ballet_session.MAESTRO_TOOLS)])
     home = os.environ.get("BALLET_HOME")
     return ballet_session.with_environment(command, {"BALLET_HOME": home} if home else {})
@@ -775,6 +781,23 @@ def restart_decision(body, runtime):
     if runtime["restart_terminal"]:
         return "wait (restart already scheduled)"
     return "restart"
+
+
+def maestro_model(config):
+    """`[maestro] model` : le modèle de la session Maestro ; `sonnet` sans la clé."""
+    return _model(config, "maestro", DEFAULT_MAESTRO_MODEL)
+
+
+def conductor_model(config):
+    """`[conductors] model` : le modèle des Conductors de la machine ; `haiku` sans la clé."""
+    return _model(config, "conductors", DEFAULT_CONDUCTOR_MODEL)
+
+
+def _model(config, table, default):
+    value = config.get(table, {}).get("model", default)
+    if not isinstance(value, str) or not value.strip():
+        raise MaestroError(f"[{table}] model in {CONFIG_NAME} must be a model name (haiku, sonnet, opus…), not {value!r}")
+    return value
 
 
 def restart_percent(config):

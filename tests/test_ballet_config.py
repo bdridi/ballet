@@ -216,9 +216,10 @@ class ConfigTest(unittest.TestCase):
                 self.write_project_config(VALID_PROJECT + f"\n[workshop]\nqueue_approval_skipped = {value}\n")
                 self.assertProblem("[workshop] queue_approval_skipped must be a list of issue types among Feature, Bug, Task")
 
-    def test_par_defaut_le_conductor_tourne_sur_haiku(self):
+    def test_sans_modele_de_conductor_le_profil_reste_valide_et_laisse_celui_de_la_machine(self):
         self.write_project_config(VALID_PROJECT)
-        self.assertEqual(ballet_config.effective_config(self.project)["conductor"]["model"], "haiku")
+        config = ballet_config.effective_config(self.project)
+        self.assertEqual(("model" in config.get("conductor", {}), ballet_config.find_problems(config)), (False, []))
 
     def test_un_projet_choisit_le_modele_de_son_conductor(self):
         self.write_project_config(VALID_PROJECT + '\n[conductor]\nmodel = "sonnet"\n')

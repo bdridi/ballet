@@ -12,7 +12,8 @@ Le Conductor est `CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control '<proj
 --strict-mcp-config --mcp-config '{"mcpServers":{}}' --tools Bash,Read,Write,Edit,Skill --allowedTools 'Bash(python3:*)'
 'Edit(~/.ballet/projects/**)'`, lancé par `orca terminal create --worktree path:<projet> --command …`. Le prompt vient avant
 les options : `--allowedTools` prend tout ce qui la suit pour ses valeurs. Le modèle est celui de `[conductor] model` du
-profil du projet (`haiku` : il ne fait que relayer des scripts) ; le socle allégé et le cache d'une heure sont ceux de
+profil du projet, sinon de `[conductors] model` de `maestro.toml` pour toute la machine, sinon `haiku` (il ne fait que
+relayer des scripts) ; le socle allégé et le cache d'une heure sont ceux de
 `ballet_session.py`. Un Conductor ne lance que les scripts de Ballet (`python3`) : `gh`, `git` et `orca`
 sont appelés par ces scripts, jamais par l'agent. Il n'écrit qu'un fichier, le message Ballet du Director
 (`inbox.md`, dans le dossier de travail du projet, sous `~/.ballet/projects/`) : `Edit(~/.ballet/projects/**)` (le dossier
@@ -134,7 +135,7 @@ def _launch(launch, orca, state, url_wait):
     """Les garde-fous, le terminal, la ligne du registre, puis l'URL Remote Control : un lancement à la fois."""
     with ballet_state.locked(state, LAUNCH_LOCK):
         _check_guardrails(launch, orca, state)
-        terminal = _open_terminal(launch, orca)
+        terminal = _open_terminal(launch, orca, state)
         ballet_conductors.record_launch(launch.key, launch.project, launch.item, launch.kind, terminal, state)
         url = _find_remote_control_url(terminal, orca, url_wait)
         if url:
@@ -372,11 +373,11 @@ def _workshop_item(text, home):
 # --- le terminal ------------------------------------------------------------------
 
 
-def _open_terminal(launch, orca):
+def _open_terminal(launch, orca, state):
     """Le terminal du Conductor, dans le dossier du projet ; un dossier qu'Orca ne connaît pas est refusé clairement."""
     try:
         receipt = json.loads(orca(["terminal", "create", "--worktree", f"path:{launch.home}", "--title", launch.key,
-                                   "--command", _conductor_command(launch), "--json"]))
+                                   "--command", _conductor_command(launch, state), "--json"]))
     except MaestroError as error:
         if "selector_not_found" in str(error):
             raise LaunchError(f"Orca does not know the folder {launch.home}: add it with `orca repo add --path {launch.home}` "
@@ -385,26 +386,37 @@ def _open_terminal(launch, orca):
     return ballet_maestro.first_id(receipt, "term_", "orca terminal create")
 
 
-def _conductor_command(launch):
+def _conductor_command(launch, state=None):
     """`CLAUDE_CODE_PROMPT_CACHE_TTL=1h <agent> --remote-control <nom> <prompt> --model <modèle> <socle allégé> --allowedTools …` :
     le prompt avant les options, et `--allowedTools` en dernier (il prend tout ce qui le suit)."""
     agent = shlex.split(os.environ.get(COMMAND_VARIABLE) or DEFAULT_AGENT)
-    command = shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--model", _conductor_model(launch.home),
+    command = shlex.join([*agent, "--remote-control", launch.key, launch.prompt, "--model", _conductor_model(launch.home, state),
                           *ballet_session.lean_options(ballet_session.CONDUCTOR_TOOLS),
                           "--allowedTools", RUN_PYTHON, work_files_rule()])
     return ballet_session.with_environment(command, {})
 
 
-def _conductor_model(home):
-    """Le modèle du Conductor : `[conductor] model` du profil du projet (`haiku` par défaut), il ne fait que relayer des scripts."""
+def _conductor_model(home, state):
+    """Le modèle du Conductor : `[conductor] model` du profil du projet, sinon `[conductors] model` de `maestro.toml` pour
+    toute la machine, sinon `haiku` : il ne fait que relayer des scripts."""
     try:
-        settings = ballet_config.effective_config(home).get("conductor")
+        settings = ballet_config.effective_config(home).get("conductor", {})
     except ballet_config.ConfigError as error:
         raise LaunchError(f"cannot read the profile of {home}: {error}") from error
-    model = settings.get("model") if isinstance(settings, dict) else None
+    if "model" not in settings:
+        return _machine_conductor_model(state)
+    model = settings["model"]
     if not isinstance(model, str) or not model.strip():
         raise LaunchError(f"[conductor] model in the profile of {home} must be a model name (haiku, sonnet…), not {model!r}")
     return model
+
+
+def _machine_conductor_model(state):
+    """`[conductors] model` de `maestro.toml`, pour toute la machine ; une valeur invalide refuse le lancement."""
+    try:
+        return ballet_maestro.conductor_model(ballet_maestro.read_config(state))
+    except MaestroError as error:
+        raise LaunchError(str(error)) from error
 
 
 def work_files_rule():

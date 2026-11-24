@@ -205,7 +205,11 @@ def _workshop_problems(config):
 
 
 def _conductor_problems(config):
-    model = _table(config, "conductor").get("model")
+    """`[conductor] model` est facultatif : absent, le Conductor prend celui de la machine (`maestro.toml`)."""
+    conductor = _table(config, "conductor")
+    if "model" not in conductor:
+        return []
+    model = conductor["model"]
     if not isinstance(model, str) or not model.strip():
         return ["[conductor] model must be a model name (haiku, sonnet…)"]
     return []

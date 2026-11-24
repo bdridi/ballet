@@ -20,8 +20,9 @@ model = "sonnet"                 # Critic ≠ Dancer : même CLI, modèles expli
 cli = "claude"
 model = "opus"
 
-[conductor]
-model = "haiku"                  # le modèle des sessions Conductor : il relaie des scripts déterministes, il ne pense pas
+# [conductor]
+# model = "sonnet"               # facultatif : le modèle des Conductors de ce projet ; absent, `[conductors] model` de
+#                                # ~/.ballet/maestro.toml pour toute la machine, sinon haiku (il relaie des scripts)
 
 [policy]
 # Une zone est un glob fnmatch (`*` traverse les `/`) : sans `/`, il vaut à toute profondeur ; avec, il part de la racine.

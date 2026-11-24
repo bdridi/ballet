@@ -671,7 +671,7 @@ class BalletMaestroTest(unittest.TestCase):
         self.assertEqual(create[create.index("--title") + 1], "maestro")
         self.assertEqual(create[create.index("--command") + 1],
                          f"BALLET_HOME={self.state} CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' /ballet:maestro "
-                         f"{LEAN_OPTIONS}")
+                         f"--model sonnet {LEAN_OPTIONS}")
         self.assertEqual(self.runtime()["maestro_terminal"], "term_1")
 
     def test_maestro_sans_ballet_home_ne_transmet_rien(self):
@@ -679,13 +679,25 @@ class BalletMaestroTest(unittest.TestCase):
             environment.pop("BALLET_HOME")
             environment.pop("BALLET_MAESTRO_COMMAND", None)
             self.assertEqual(ballet_maestro._maestro_command(),
-                             f"CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' /ballet:maestro {LEAN_OPTIONS}")
+                             f"CLAUDE_CODE_PROMPT_CACHE_TTL=1h claude --remote-control 'ballet maestro' /ballet:maestro --model sonnet {LEAN_OPTIONS}")
 
     def test_maestro_le_prompt_vient_avant_toute_option(self):
         with mock.patch.dict("os.environ", {"BALLET_MAESTRO_COMMAND": "echo fake-maestro"}):
             words = shlex.split(ballet_maestro._maestro_command())
         self.assertEqual(words[2:7], ["echo", "fake-maestro", "--remote-control", "ballet maestro", "/ballet:maestro"])
         self.assertEqual(words[1], "CLAUDE_CODE_PROMPT_CACHE_TTL=1h")
+
+    def test_le_modele_de_maestro_vient_de_maestro_toml(self):
+        config = ballet_maestro.read_config()
+        config["maestro"] = {"model": "opus"}
+        ballet_maestro.write_config(config)
+        words = shlex.split(ballet_maestro._maestro_command())
+        self.assertEqual(words[words.index("--model") + 1], "opus")
+
+    def test_un_modele_de_maestro_invalide_est_refuse(self):
+        ballet_maestro.write_config({"projects": {}, "maestro": {"model": 3}})
+        with self.assertRaisesRegex(ballet_maestro.MaestroError, "\\[maestro\\] model in maestro.toml must be a model name"):
+            ballet_maestro._maestro_command()
 
     def test_maestro_ne_charge_aucun_serveur_mcp_et_garde_ses_skills(self):
         with mock.patch.dict("os.environ", {"BALLET_MAESTRO_COMMAND": "claude"}):

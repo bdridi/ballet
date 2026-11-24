@@ -92,6 +92,8 @@ Which items Maestro launches by itself is the Director's choice, per project, in
 
 A Conductor that finished stays open in its terminal until Maestro closes it: the Monitor reports it after `close_finished_after_minutes` under `[conductors]` in `~/.ballet/maestro.toml` (10 by default; 0 never closes one). Mention it; change it only on the Director's word.
 
+The models: Ballet installs with Maestro on `sonnet` and the Conductors on `haiku`; both stay Claude Code, only the model changes. A project's Conductors take `[conductor] model` of its profile, else `[conductors] model` of `~/.ballet/maestro.toml` for the whole machine, else `haiku`; Maestro takes `[maestro] model` of `~/.ballet/maestro.toml`, read when its session is created: a change applies at the next `/ballet:setup upgrade` (or `restart`). Mention it; change it only on the Director's word.
+
 Maestro's own context is watched too: when it passes `restart_at_context_percent` under `[maestro]` in the same file (30 by default, of `context_window_tokens`, 1000000 by default; 0 never), the Monitor says so once and Maestro restarts itself, but only once no Conductor is working (`ballet_restart.py when-idle`). Mention it; change either key only on the Director's word.
 
 ## 6. Maestro itself
