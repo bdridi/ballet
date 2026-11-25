@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -298,11 +299,54 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertIn("field=FIELD-Rehearsal mode", gh.calls[-1])
         self.assertIn("option=OPT-autopilot", gh.calls[-1])
 
-    def test_publish_en_ligne_de_commande_accepte_mode(self):
-        self.assertEqual(ballet_github._publish_options(["--mode", "autopilot"]), "autopilot")
-        self.assertIsNone(ballet_github._publish_options([]))
+    def test_publish_en_ligne_de_commande_accepte_mode_et_taille(self):
+        self.assertEqual(ballet_github._publish_options(["--mode", "autopilot"]), {"--mode": "autopilot"})
+        self.assertEqual(ballet_github._publish_options(["--size", "S", "--mode", "assisted"]), {"--size": "S", "--mode": "assisted"})
+        self.assertEqual(ballet_github._publish_options([]), {})
         with self.assertRaisesRegex(ballet_github.GitHubError, "usage: publish"):
             ballet_github._publish_options(["--fast"])
+        with self.assertRaisesRegex(ballet_github.GitHubError, "usage: publish"):
+            ballet_github._publish_options(["--fast", "yes"])
+
+    def test_pose_la_taille_demandee_a_la_publication(self):
+        gh = FakeGh(fields={"Ballet status": STATUS_OPTIONS, "Size": ["S", "M"]})
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\nx\n"), "Feature", "ready", run=gh, size="S")
+        mutations = [call for call in gh.calls if any("setIssueFieldValue" in argument for argument in call)]
+        self.assertIn("field=FIELD-Size", mutations[-1])
+        self.assertIn("option=OPT-S", mutations[-1])
+
+    def test_sans_taille_demandee_la_publication_ne_touche_pas_au_champ_size(self):
+        gh = FakeGh()
+        ballet_github.publish_issue(self.file("d.md", "# FEAT-001 · Sign in\n\nx\n"), "Feature", "ready", run=gh)
+        self.assertFalse(any("FIELD-Size" in argument for call in gh.calls for argument in call))
+
+    def test_refuse_une_taille_inconnue_et_n_ecrit_rien(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Size 'L'"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh, size="L")
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Size 'XL'"):
+            ballet_github.set_size("#42", "XL", run=gh)
+        self.assertEqual(gh.calls, [])
+
+    def test_sans_champ_size_l_erreur_nomme_l_issue_et_init_project(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, r"issue #42 was created.*Size.*init-project"):
+            ballet_github.publish_issue(self.file("d.md", "# T\n\nx\n"), "Feature", "ready", run=gh, size="S")
+
+    def test_pose_la_taille_d_une_issue_existante(self):
+        gh = FakeGh(fields={"Ballet status": STATUS_OPTIONS, "Size": ["S", "M"]})
+        ballet_github.set_size("#42", "S", run=gh)
+        self.assertIn("field=FIELD-Size", gh.calls[-1])
+        self.assertIn("option=OPT-S", gh.calls[-1])
+
+    def test_sans_champ_size_set_size_renvoie_a_init_project(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "Size.*init-project"):
+            ballet_github.set_size("#42", "M", run=FakeGh())
+
+    def test_size_en_ligne_de_commande_pose_le_champ_et_le_dit(self):
+        gh = FakeGh(fields={"Ballet status": STATUS_OPTIONS, "Size": ["S", "M"]})
+        with mock.patch.object(ballet_github, "_run_gh", gh):
+            self.assertEqual(ballet_github._dispatch("size", ["42", "S"]), "#42 Size: S")
 
     def test_pose_le_statut_d_une_issue_existante(self):
         gh = FakeGh()
@@ -316,8 +360,9 @@ class BalletGitHubTest(unittest.TestCase):
             ballet_github.set_status("42", "wip", run=gh)
         self.assertEqual(gh.calls, [])
 
-    def test_lit_le_type_le_mode_l_approbation_du_plan_et_le_statut_d_une_issue(self):
-        values = [{"name": "assisted", "field": {"name": "Rehearsal mode"}}, {"name": "skipped", "field": {"name": "Plan approval"}},
+    def test_lit_le_type_le_mode_la_taille_l_approbation_du_plan_et_le_statut_d_une_issue(self):
+        values = [{"name": "assisted", "field": {"name": "Rehearsal mode"}}, {"name": "S", "field": {"name": "Size"}},
+                  {"name": "skipped", "field": {"name": "Plan approval"}},
                   {"name": "ready", "field": {"name": "Ballet status"}}, {}]
         answer = {"data": {"repository": {"issue": {"issueType": {"name": "Bug"}, "issueFieldValues": {"nodes": values}}}}}
         calls = []
@@ -326,13 +371,13 @@ class BalletGitHubTest(unittest.TestCase):
             calls.append(arguments)
             return json.dumps(answer)
         self.assertEqual(ballet_github.queue_fields("#12", run=gh),
-                         {"type": "Bug", "mode": "assisted", "plan_approval": "skipped", "status": "ready"})
+                         {"type": "Bug", "mode": "assisted", "size": "S", "plan_approval": "skipped", "status": "ready"})
         self.assertIn("number=12", calls[0])
 
     def test_une_issue_sans_type_ni_champ_se_lit_vide(self):
         answer = {"data": {"repository": {"issue": {"issueType": None, "issueFieldValues": {"nodes": []}}}}}
         self.assertEqual(ballet_github.queue_fields("12", run=lambda arguments: json.dumps(answer)),
-                         {"type": "", "mode": "", "plan_approval": "", "status": ""})
+                         {"type": "", "mode": "", "size": "", "plan_approval": "", "status": ""})
 
     def test_un_refus_de_github_sur_le_champ_nomme_l_issue(self):
         gh = FakeGh()

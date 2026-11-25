@@ -28,6 +28,7 @@ QUEUED_TYPES = ("Feature", "Bug", "Task")
 READY = "ready"
 STATUS_FIELD = "Ballet status"
 MODE_FIELD = "Rehearsal mode"
+SIZE_FIELD = "Size"
 PRIORITY_FIELD = "Priority"
 PRIORITIES = ("Urgent", "High", "Medium", "Low")
 UNDELIVERED_REASONS = ("NOT_PLANNED", "DUPLICATE")   # une issue fermée sans que son travail soit fait
@@ -132,6 +133,7 @@ def _item_of(issue, queue):
         "type": _type_of(issue),
         "priority": _field(issue, PRIORITY_FIELD),
         "mode": _field(issue, MODE_FIELD),
+        "size": _field(issue, SIZE_FIELD),
         "created_at": issue["createdAt"],
         "blocked_by": dependencies["blocked_by"],
         "launchable": not dependencies["blocked_by"],
