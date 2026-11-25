@@ -3,6 +3,7 @@
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
     python3 ballet_github.py publish <brouillon.md> <type> <statut> [--mode <mode>]   # crée l'issue (Feature, Bug ou Task) à son statut, et à son mode de Rehearsal si demandé ; affiche son numéro, et ses liens « blocked by »
     python3 ballet_github.py mode    <issue> <mode>              # pose le champ `Rehearsal mode` d'une issue publiée (assisted, autopilot)
+    python3 ballet_github.py accept  <issue>                     # le oui du Director : une issue `proposed` passe `ready` et entre dans la file
     python3 ballet_github.py block   <issue> --by <issue>        # pose un lien : la première issue est bloquée par la seconde (GitHub « Blocked by »)
     python3 ballet_github.py unblock <issue> --by <issue>        # retire ce lien
     python3 ballet_github.py decided-alone <issue>               # marque l'issue `ballet:decided-alone` : le Dramaturg a tranché sans le Director
@@ -238,6 +239,17 @@ def set_status(number, status, run=None):
     _set_field(number, STATUS_FIELD, status, run or _run_gh)
 
 
+def accept_issue(number, run=None):
+    """Le oui du Director sur une proposition : l'issue `proposed` passe `ready` et entre dans la file. Aucun autre statut
+    ne bouge par là : les autres appartiennent aux scripts de la Rehearsal."""
+    run = run or _run_gh
+    status = queue_fields(number, run)["status"]
+    if status != "proposed":
+        raise GitHubError(f"#{_issue_number(number)} is `{status or 'without Ballet status'}`, not `proposed`: "
+                          "only a proposed issue can be accepted")
+    set_status(number, "ready", run)
+
+
 def set_mode(number, mode, run=None):
     """Le champ `Rehearsal mode` de l'issue : comment sa Rehearsal tourne (`assisted` ou `autopilot`)."""
     _require_among(mode, REHEARSAL_MODES, MODE_FIELD)
@@ -455,6 +467,7 @@ def _dispatch(operation, arguments):
         "read": (read_issue, 1),
         "publish": (_publish_and_say, (3, 5)),
         "mode": (_set_mode_and_say, 2),
+        "accept": (_accept_and_say, 1),
         "block": (_block_by, 3),
         "unblock": (_unblock_by, 3),
         "decided-alone": (mark_decided_alone, 1),
@@ -495,6 +508,11 @@ def _publish_options(options):
     if len(options) != 2 or options[0] != "--mode":
         raise GitHubError("usage: publish <draft.md> <type> <status> [--mode assisted|autopilot]")
     return options[1]
+
+
+def _accept_and_say(number):
+    accept_issue(number)
+    return f"#{_issue_number(number)} {STATUS_FIELD}: ready"
 
 
 def _set_mode_and_say(number, mode):

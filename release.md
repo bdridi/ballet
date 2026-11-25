@@ -2,6 +2,16 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
+## 0.49.0 — 2026-11-25 · `v0.49.0`
+
+Le Workshop `assisted` reste une conversation, et le Dramaturg fait entrer une proposition dans la file. OPP-93 et OPP-94 (🆕, numérotées ici : elles ne sont jamais passées par `opportunities.md`).
+
+- **Pas de Conductor en Workshop `assisted` (OPP-93)** : un `/ballet:workshop` sans `--autopilot` lançait parfois une session de Conductor, parce que la description du skill Conductor disait « Use through `/ballet:rehearsal` or `/ballet:workshop` ». Elle dit maintenant `/ballet:workshop --autopilot` seulement, jamais un `/ballet:workshop` simple. Le skill Workshop pose l'interdit en clair : le Director tient lui-même le rôle du Conductor, donc ni `/ballet:conductor`, ni `ballet_workshop.py` ou `ballet_launch.py`, ni worktree ou worker ; tout argument autre que `--autopilot` (`--assisted` compris) donne le Workshop `assisted`.
+- **Le Dramaturg accepte une proposition (OPP-94)** : nouvelle opération `ballet_github.py accept <issue>`, qui fait passer `Ballet status` de `proposed` à `ready`. Elle refuse tout autre statut, qui appartient aux scripts de la Rehearsal. Le skill Dramaturg passe à cinq opérations et gagne la section *Accept a proposal* (lire l'issue, dire ce qu'elle a tranché seule, `accept` après le oui du Director, jamais en Workshop autopilot). Le PRD et les skills Workshop et Conductor le mentionnent.
+- Tests de `accept` (proposée → `ready` ; un autre statut ou une issue sans statut est refusé sans rien écrire). 1210 tests verts. **Pas vérifié en vrai** : `accept` sur une vraie issue GitHub, et un `/ballet:workshop` simple qui ne lance plus de Conductor.
+
+**Opportunités traitées** : OPP-93, OPP-94.
+
 ## 0.48.0 — 2026-11-24 · `v0.48.0`
 
 La Scène dit quelle version tourne, et Maestro prévient le Director sur son téléphone. OPP-90 et OPP-91 (🆕, numérotées ici : elles ne sont jamais passées par `opportunities.md`).

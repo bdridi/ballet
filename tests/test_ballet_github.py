@@ -188,6 +188,17 @@ class FakeGh:
         return sorted(on_the_pr)
 
 
+def with_status(gh, status):
+    """Un gh qui lit ce statut sur l'issue (la requête de la file) et confie tout le reste à `gh`."""
+    def run(arguments):
+        if any("issueType" in argument for argument in arguments):
+            values = [{"name": status, "field": {"name": "Ballet status"}}] if status else []
+            return json.dumps({"data": {"repository": {"issue": {"issueType": {"name": "Feature"},
+                                                                 "issueFieldValues": {"nodes": values}}}}})
+        return gh(arguments)
+    return run
+
+
 class FakeGit:
     def __init__(self):
         self.calls = []
@@ -315,6 +326,21 @@ class BalletGitHubTest(unittest.TestCase):
         with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Ballet status 'wip'"):
             ballet_github.set_status("42", "wip", run=gh)
         self.assertEqual(gh.calls, [])
+
+    def test_accepte_une_issue_proposee_elle_passe_ready(self):
+        gh = FakeGh()
+        ballet_github.accept_issue("#42", run=with_status(gh, "proposed"))
+        self.assertIn("option=OPT-ready", gh.calls[-1])
+
+    def test_refuse_d_accepter_une_issue_qui_n_est_pas_proposee_et_n_ecrit_rien(self):
+        gh = FakeGh()
+        with self.assertRaisesRegex(ballet_github.GitHubError, r"#42 is `in-rehearsal`, not `proposed`"):
+            ballet_github.accept_issue("42", run=with_status(gh, "in-rehearsal"))
+        self.assertEqual(gh.calls, [])
+
+    def test_refuse_d_accepter_une_issue_sans_statut(self):
+        with self.assertRaisesRegex(ballet_github.GitHubError, "without Ballet status"):
+            ballet_github.accept_issue("42", run=with_status(FakeGh(), ""))
 
     def test_lit_le_type_le_mode_l_approbation_du_plan_et_le_statut_d_une_issue(self):
         values = [{"name": "assisted", "field": {"name": "Rehearsal mode"}}, {"name": "skipped", "field": {"name": "Plan approval"}},
