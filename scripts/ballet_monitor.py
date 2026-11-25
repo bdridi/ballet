@@ -52,6 +52,11 @@ savoir ce que Maestro en fera. Six choses seulement :
   Le corps dit la fenêtre, le pourcentage, le seuil et l'heure de reset. L'état (« au-dessus depuis ») est la table
   `capacity_alerts` de la base : c'est aussi ce que lit la règle de Maestro (`DECISION: standby`).
 
+Le Monitor range aussi, sans rien dire à Maestro, les notes de coût des Workshops assisted (OPP-95) : à chaque tour, pour
+chaque projet, `ballet_workshop_costs.sweep` lit une page des issues mises à jour depuis sa marque et range leurs notes
+`ballet:cost` dans la base, où la Scène les lit sans jamais appeler GitHub. Un GitHub injoignable est une ligne d'erreur du
+tour, et la marque ne bouge pas.
+
 Un envoi qui échoue n'est pas noté comme fait : le tour suivant le refait. `gh` ou Orca injoignable est une ligne d'erreur
 du tour, jamais une panne de `run`.
 """
@@ -76,6 +81,7 @@ import ballet_maestro
 import ballet_program
 import ballet_runtime
 import ballet_version
+import ballet_workshop_costs
 from ballet_maestro import MaestroError
 
 DEFAULT_INTERVAL = 180
@@ -105,15 +111,17 @@ class Report:
 # --- les tours ----------------------------------------------------------------
 
 
-def once(orca, queue=ballet_program.ready_items, state=None):
-    """Un tour : la file de chaque projet, les Conductors disparus, finis ou silencieux, le contexte de Maestro, puis la
-    capacité de Claude."""
+def once(orca, queue=ballet_program.ready_items, state=None, costs=None):
+    """Un tour : la file de chaque projet, les notes de coût de ses Workshops assisted, les Conductors disparus, finis ou
+    silencieux, le contexte de Maestro, puis la capacité de Claude."""
+    costs = costs or ballet_workshop_costs.sweep
     report = Report()
     _attempt(report, "state", lambda: ballet_legacy.refuse_if_pending(state))
     if report.errors:
         return report
     for alias, home in _projects(state):
         _attempt(report, alias, lambda: _watch_ready(alias, home, orca, queue, state, report))
+        _attempt(report, f"{alias} assisted Workshop costs", lambda: costs(alias, home, state))
     _attempt(report, "Conductors", lambda: _watch_gone(orca, state, report))
     _attempt(report, "finished Conductors", lambda: _watch_finished(orca, state, report))
     _attempt(report, "Maestro context", lambda: _watch_context(orca, state, report))
@@ -148,7 +156,7 @@ def _attempt(report, label, step):
     """Une panne d'un projet ou d'Orca est une ligne d'erreur ; les autres étapes du tour continuent."""
     try:
         step()
-    except (ballet_program.ProgramError, MaestroError, *ballet_db.ERRORS, OSError, json.JSONDecodeError,
+    except (ballet_program.ProgramError, MaestroError, ballet_workshop_costs.WorkshopCostError, *ballet_db.ERRORS, OSError, json.JSONDecodeError,
             tomllib.TOMLDecodeError) as error:
         report.errors.append(f"{label}: {error}")
 

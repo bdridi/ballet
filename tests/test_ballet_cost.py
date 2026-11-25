@@ -150,3 +150,114 @@ class CostTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def publish_call(id, at, command="python3 ../../scripts/ballet_github.py publish /tmp/d.md Feature ready"):
+    return {"type": "assistant", "timestamp": at, "message": {"id": f"call-{id}", "model": "<synthetic>", "content": [
+        {"type": "tool_use", "id": id, "name": "Bash", "input": {"command": command}}]}}
+
+
+def tool_result(id, at, is_error=False):
+    return {"type": "user", "timestamp": at, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": id, "content": "42", "is_error": is_error}]}}
+
+
+HERE = "/work/demo"
+NOW = datetime(2026, 11, 19, 19, 0, tzinfo=timezone.utc)
+
+
+class SessionCostTest(unittest.TestCase):
+    """Le coût de la session qui publie (OPP-95) : sa tranche depuis le `publish` précédent, et sa note dans l'issue."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.projects = Path(self.directory.name)
+
+    def journal(self, records, session="sess-1", path=HERE):
+        folder = self.projects / ballet_cost.re.sub(r"[^A-Za-z0-9]", "-", path)
+        folder.mkdir(exist_ok=True)
+        (folder / f"{session}.jsonl").write_text("\n".join(json.dumps(record) for record in records) + "\n")
+        return folder
+
+    def measure(self, session="sess-1"):
+        return ballet_cost.of_this_session(cwd=HERE, session_id=session, projects=self.projects, now=NOW)
+
+    def note(self, **changes):
+        measure = self.measure()
+        text = ballet_cost.render_cost_note(measure)
+        payload = json.loads(ballet_cost.COST_NOTE.search(text).group(1))
+        payload.update(changes)
+        return f"line\n\n<!-- ballet:cost\n{json.dumps(payload)}\n-->"
+
+    def test_sans_publish_precedent_la_tranche_est_toute_la_session(self):
+        self.journal([answer("m1", at="2026-11-19T17:10:00Z", output=10), answer("m2", at="2026-11-19T17:20:00Z", output=5)])
+        measure = self.measure()
+        self.assertEqual((measure["segment"], measure["segment_total"]["output"], measure["session_total"]["output"]), (1, 15, 15))
+        self.assertEqual(measure["from"], datetime(2026, 11, 19, 17, 10, tzinfo=timezone.utc))
+
+    def test_deux_publish_coupent_la_session_en_tranches(self):
+        self.journal([answer("m1", at="2026-11-19T17:10:00Z", output=10), publish_call("t1", "2026-11-19T17:30:00Z"),
+                      tool_result("t1", "2026-11-19T17:30:05Z"), answer("m2", at="2026-11-19T17:40:00Z", output=7),
+                      publish_call("t2", "2026-11-19T17:50:00Z")])   # l'appel en cours : pas encore de résultat
+        measure = self.measure()
+        self.assertEqual((measure["segment"], measure["segment_total"]["output"], measure["session_total"]["output"]), (2, 7, 17))
+        self.assertEqual(measure["from"], datetime(2026, 11, 19, 17, 30, 5, tzinfo=timezone.utc))
+
+    def test_un_publish_refuse_ne_coupe_pas_la_tranche(self):
+        self.journal([answer("m1", at="2026-11-19T17:10:00Z", output=10), publish_call("t1", "2026-11-19T17:30:00Z"),
+                      tool_result("t1", "2026-11-19T17:30:05Z", is_error=True), answer("m2", at="2026-11-19T17:40:00Z", output=7)])
+        self.assertEqual((self.measure()["segment"], self.measure()["segment_total"]["output"]), (1, 17))
+
+    def test_les_sous_agents_de_la_session_sont_comptes(self):
+        folder = self.journal([answer("m1", output=10)])
+        (folder / "sess-1" / "subagents").mkdir(parents=True)
+        (folder / "sess-1" / "subagents" / "agent-1.jsonl").write_text(json.dumps(answer("s1", output=4)) + "\n")
+        self.assertEqual(self.measure()["segment_total"]["output"], 14)
+
+    def test_la_session_est_trouvee_meme_lancee_depuis_un_autre_dossier(self):
+        self.journal([answer("m1", output=3)], path="/elsewhere")
+        self.assertEqual(self.measure()["session"], "sess-1")
+
+    def test_un_journal_introuvable_le_dit(self):
+        self.assertIn("missing", self.measure("unknown"))
+
+    def test_la_note_se_relit_telle_quelle(self):
+        self.journal([answer("m1", output=1000, read=200_000)])
+        text = ballet_cost.render_cost_note(self.measure())
+        self.assertIn("**Assisted Workshop cost** · this issue:", text)
+        note = ballet_cost.parse_cost_note(text)
+        self.assertEqual((note["v"], note["kind"], note["session"], note["segment"]), (1, "workshop-assisted", "sess-1", 1))
+        self.assertEqual(note["tokens"]["claude-opus-5-5"]["cache_read"], 200_000)
+        self.assertIsNone(ballet_cost.cost_note_problem(text))
+
+    def test_un_bloc_tronque_est_illisible_sans_lever(self):
+        self.journal([answer("m1", output=10)])
+        truncated = ballet_cost.render_cost_note(self.measure())[:-30] + "-->"
+        self.assertIsNone(ballet_cost.parse_cost_note(truncated))
+        self.assertEqual(ballet_cost.cost_note_problem(truncated), "malformed")
+
+    def test_un_champ_du_mauvais_type_est_illisible(self):
+        self.journal([answer("m1", output=10)])
+        for changes in ({"usd": "0.5"}, {"segment": 0}, {"segment": True}, {"session": ""}, {"from": "hier"},
+                        {"tokens": {"claude-opus-5-5": {"input": -1}}}, {"kind": "rehearsal"}, {"kind": "workshop"}):
+            with self.subTest(changes=changes):
+                self.assertIsNone(ballet_cost.parse_cost_note(self.note(**changes)))
+                self.assertEqual(ballet_cost.cost_note_problem(self.note(**changes)), "malformed")
+
+    def test_un_champ_manquant_est_illisible(self):
+        self.journal([answer("m1", output=10)])
+        text = self.note()
+        payload = json.loads(ballet_cost.COST_NOTE.search(text).group(1))
+        del payload["to"]
+        self.assertIsNone(ballet_cost.parse_cost_note(f"<!-- ballet:cost {json.dumps(payload)} -->"))
+
+    def test_une_version_inconnue_est_dite_par_son_numero(self):
+        self.journal([answer("m1", output=10)])
+        self.assertIsNone(ballet_cost.parse_cost_note(self.note(v=2)))
+        self.assertEqual(ballet_cost.cost_note_problem(self.note(v=2)), "format v2")
+
+    def test_un_texte_sans_note_n_a_ni_note_ni_probleme(self):
+        for text in ("a plain comment", "", None, 42):
+            self.assertIsNone(ballet_cost.parse_cost_note(text))
+            self.assertIsNone(ballet_cost.cost_note_problem(text))

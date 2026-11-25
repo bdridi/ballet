@@ -22,6 +22,11 @@ son coût, par rôle, en tokens et en équivalent dollars (`ballet_cost`, lu dan
 son état quand la fin l'a écrit, sinon calculé en arrière-plan, une fois pour une représentation finie, toutes les
 `COST_REFRESH_SECONDS` pour une représentation en cours.
 
+Le coût des Workshops `assisted` (OPP-95) voyage dans l'issue, par le commentaire que `publish` y laisse
+(`<!-- ballet:cost {json} -->`) ; le Monitor le range dans la base (`ballet_workshop_costs.py`). La Scène ne lit jamais
+GitHub pour lui : elle reçoit de la base les sessions les plus récentes (`ballet_workshop_costs.read`), chaque tranche une
+fois, une tranche manquante dite « cost unknown » (jamais 0), une note illisible « cost unreadable (format vN) ».
+
 `/api/stage?since=<version>` répond `{"version", "unchanged": true}` quand rien n'a bougé. `/api/log?path=<fichier>` rend la
 fin d'une sortie gardée par le script (le journal d'une mutation), seulement sous `~/.ballet/projects/`. N'écoute que sur
 127.0.0.1.
@@ -52,6 +57,7 @@ import ballet_runtime
 import ballet_state
 import ballet_store
 import ballet_version
+import ballet_workshop_costs
 
 STAGE = Path(__file__).resolve().parent.parent / "stage"
 FILES = {
@@ -110,6 +116,7 @@ def snapshot(since="", state=None):
             "plays": plays,
             "ready": _ready(connection),
             "proposed": _proposed(connection, plays),
+            "workshop_costs": ballet_workshop_costs.read(state),
         }, "plays": trees}
 
 
@@ -516,6 +523,8 @@ def _version(connection):
     stamps = [connection.execute("SELECT max(id) FROM events").fetchone()[0]]
     stamps += [tuple(connection.execute(f"SELECT max(updated_at), count(*) FROM {table}").fetchone()) for table in ("sessions", "rehearsals", "workshops")]
     stamps += [connection.execute("SELECT max(seen_at) FROM ready").fetchone()[0], tuple(ballet_runtime.read_in(connection).values())]
+    stamps.append(tuple(connection.execute("SELECT max(ended_at), count(*), sum(usd) FROM workshop_costs").fetchone()))
+    stamps.append(connection.execute("SELECT count(*) FROM workshop_cost_problems").fetchone()[0])
     stamps.append(ballet_version.installed())
     with _LOCK:
         stamps.append(len(TITLES))

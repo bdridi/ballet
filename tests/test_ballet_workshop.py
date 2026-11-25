@@ -271,6 +271,13 @@ class BalletWorkshopTest(unittest.TestCase):
         self.assertTrue(self.world.ran("orca", "worktree", "rm"))
         self.assertEqual((self.state()["status"], self.state()["issue"], self.state()["ballet_status"]), ("done", "21", "proposed"))
 
+    def test_le_workshop_autopilot_ne_poste_pas_de_note_de_cout(self):
+        """Son coût est celui de sa session de Conductor, dans la base : la note `ballet:cost` est celle du Workshop assisted."""
+        self.begin()
+        self.reports()
+        comments = [command for command in self.world.commands if command[:3] == ["gh", "issue", "comment"]]
+        self.assertFalse(any("ballet:cost" in argument for command in comments for argument in command))
+
     def test_l_issue_publiee_est_le_brouillon_du_rapport_sans_son_en_tete(self):
         self.begin()
         self.reports()

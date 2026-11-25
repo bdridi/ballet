@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -310,8 +311,11 @@ class BalletGitHubTest(unittest.TestCase):
         self.assertIn("option=OPT-autopilot", gh.calls[-1])
 
     def test_publish_en_ligne_de_commande_accepte_mode(self):
-        self.assertEqual(ballet_github._publish_options(["--mode", "autopilot"]), "autopilot")
-        self.assertIsNone(ballet_github._publish_options([]))
+        self.assertEqual(ballet_github._publish_options(["--mode", "autopilot"]), ("autopilot", "assisted"))
+        self.assertEqual(ballet_github._publish_options([]), (None, "assisted"))
+        self.assertEqual(ballet_github._publish_options(["--workshop", "autopilot", "--mode", "assisted"]), ("assisted", "autopilot"))
+        with self.assertRaisesRegex(ballet_github.GitHubError, "unknown Workshop mode 'night'"):
+            ballet_github._publish_options(["--workshop", "night"])
         with self.assertRaisesRegex(ballet_github.GitHubError, "usage: publish"):
             ballet_github._publish_options(["--fast"])
 
@@ -341,6 +345,48 @@ class BalletGitHubTest(unittest.TestCase):
     def test_refuse_d_accepter_une_issue_sans_statut(self):
         with self.assertRaisesRegex(ballet_github.GitHubError, "without Ballet status"):
             ballet_github.accept_issue("42", run=with_status(FakeGh(), ""))
+
+    # --- le coût de la session qui publie (OPP-95) ---
+
+    MEASURE = {"session": "7f3a0000-1111", "segment": 2, "from": None, "to": None, "segment_rows": [], "unpriced": [],
+               "segment_total": {"input": 0, "output": 10, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 0, "usd": 0.54},
+               "session_total": {"input": 0, "output": 30, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 0, "usd": 1.2}}
+
+    def test_publier_commente_l_issue_avec_le_cout_de_sa_tranche(self):
+        gh = FakeGh()
+        said = ballet_github.comment_session_cost("42", run=gh, measure=self.MEASURE)
+        comment = gh.calls[-1]
+        self.assertEqual(comment[:3], ["issue", "comment", "42"])
+        self.assertIn("<!-- ballet:cost", comment[-1])
+        self.assertEqual(ballet_github.ballet_cost.parse_cost_note(comment[-1])["segment"], 2)
+        self.assertEqual(said, "cost posted on #42: segment 2 of session 7f3a0000, ≈ $0.54")
+
+    def test_un_journal_introuvable_ne_poste_rien_et_le_dit(self):
+        gh = FakeGh()
+        said = ballet_github.comment_session_cost("42", run=gh, measure={"missing": "the journal was not found"})
+        self.assertEqual(gh.calls, [])
+        self.assertEqual(said, "cost not posted on #42: the journal was not found")
+
+    def test_un_commentaire_refuse_ne_fait_pas_echouer_la_publication(self):
+        def gh(arguments):
+            raise ballet_github.GitHubError("gh failed")
+        said = ballet_github.comment_session_cost("42", run=gh, measure=self.MEASURE)
+        self.assertEqual(said, "cost not posted on #42: GitHubError: gh failed")
+
+    def test_un_workshop_assisted_poste_son_cout_un_workshop_autopilot_non(self):
+        posted = []
+        with mock.patch.object(ballet_github, "publish_issue_with_links", return_value=("42", [])), \
+                mock.patch.object(ballet_github, "comment_session_cost", lambda number: posted.append(number) or "cost posted"):
+            assisted = ballet_github._publish_and_say("d.md", "Feature", "ready")
+            autopilot = ballet_github._publish_and_say("d.md", "Feature", "proposed", "--workshop", "autopilot")
+        self.assertEqual(posted, ["42"])
+        self.assertEqual((assisted, autopilot), ("42\nnote: cost posted", "42"))
+
+    def test_la_publication_reussit_meme_quand_la_mesure_echoue(self):
+        with mock.patch.object(ballet_github, "publish_issue_with_links", return_value=("42", [])), \
+                mock.patch.object(ballet_github.ballet_cost, "of_this_session", side_effect=OSError("disk")):
+            said = ballet_github._publish_and_say("d.md", "Feature", "ready")
+        self.assertEqual(said, "42\nnote: cost not posted on #42: OSError: disk")
 
     def test_lit_le_type_le_mode_l_approbation_du_plan_et_le_statut_d_une_issue(self):
         values = [{"name": "assisted", "field": {"name": "Rehearsal mode"}}, {"name": "skipped", "field": {"name": "Plan approval"}},

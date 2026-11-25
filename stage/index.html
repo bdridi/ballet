@@ -419,7 +419,7 @@ const PAGES = {
         <td><div class="acts">${acceptActs(x)}</div></td></tr>`).join('')}</table></div>
       <div><h3>Prêt · ordre de jeu</h3>${ready.nav}<table class="list"><tr><th>#</th><th>Projet</th><th>Issue</th><th>Type</th><th>Prio</th><th>Mode</th><th>Titre</th><th>Lancement</th></tr>${ready.rows.map((x, i) => `<tr><td class="faint">${ready.first + i + 1}</td><td><span class="proj">${x.project}</span></td><td><b>${x.item}</b></td><td><span class="kind">${x.type}</span></td><td>${x.priority}</td><td>${x.mode}</td><td>${esc(x.title)}</td><td>${x.blocked_by.length ? `<span class="badge warn"><i class="fa-solid fa-link"></i> bloqué par ${x.blocked_by.join(', ')}</span>` : '<span class="muted">au prochain tour de Maestro</span>'}</td></tr>`).join('')}</table></div>`;
   },
-  workshops() { return `<h1>Workshops</h1>${sessionTable(sessions('workshop'), 'workshops')}`; },
+  workshops() { return `<div><h1>Workshops</h1><div class="hero-line">Une ligne par session : de Conductor (<code>autopilot</code>) ou de Claude Code avec le Director (<code>assisted</code>, son coût lu dans les issues qu'elle a publiées)</div></div>${workshopTable()}`; },
   rehearsals() { return `<div><h1>Rehearsals</h1><div class="hero-line">Une ligne par session de Conductor (<code>&lt;projet&gt;#&lt;élément&gt;</code>), avec les représentations qu'elle a jouées · <span class="legacy">repris</span> : historique d'avant la base, regroupé par feature</div></div>${sessionTable(sessions('rehearsal'), 'rehearsals')}`; },
   tickets() {
     const {rows, nav} = paged('tickets', tickets().sort((a, b) => (b.parent || b.key).localeCompare(a.parent || a.key) || a.key.localeCompare(b.key)));
@@ -608,6 +608,21 @@ function sessionTable(all, key) {
   return nav + `<table class="list"><tr><th>Conductor</th><th>Élément</th><th>Mode</th><th>État</th><th>Représentations jouées</th><th>Début</th><th>Durée</th><th>Coût</th></tr>${list.map(s =>
     `<tr data-href="#/play/${s.plays.at(-1).node}"><td><span class="proj">${s.project}</span> <b>#${esc(s.item)}</b> ${s.legacy ? '<span class="legacy">repris</span>' : ''}${s.simulated ? '<span class="sim">simulé</span>' : ''}</td><td>${esc(s.title)}</td><td>${s.mode}</td><td>${s.state === 'running' ? '<span class="outc running">en cours</span>' : `<span class="badge">${s.state}</span>`}</td>
       <td><div class="chips">${s.plays.map(x => `<a class="chip" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)}</a>`).join('')}</div></td><td class="muted">${dayOf(s.started_at)} ${clock(s.started_at)}</td><td class="num">${dur(secs(s.started_at, s.ended_at))}</td><td class="num">${costSum(s.plays)}</td></tr>`).join('')}</table>`;
+}
+/* Les Workshops : les sessions de Conductor (autopilot) et les sessions assisted (la note `ballet:cost` de leurs issues,
+   rangée par le Monitor), dans une seule liste paginée, la plus récente d'abord. */
+function workshopTable() {
+  const wc = STAGE.workshop_costs || {sessions:[], unreadable:[]};
+  const all = [...sessions('workshop').map(s => ({at:s.started_at, s})), ...wc.sessions.filter(inProject).map(a => ({at:a.from, a}))]
+    .sort((x, y) => x.at < y.at ? 1 : -1);
+  const {rows: list, nav} = paged('workshops', all), bad = wc.unreadable.filter(inProject);
+  const cost = a => `<span ${tip(`${tok(a.tokens)} tokens${a.unknown.length ? ' · ' + a.unknown.join(' · ') : ''}`)}>${usd(a.usd)}${a.unknown.length ? '+' : ''}</span>${a.unknown.length ? ` <span class="badge warn">${a.unknown.length} cost unknown</span>` : ''}`;
+  const assisted = a => `<tr><td><span class="proj">${a.project}</span> <span class="mono">${esc(a.session.slice(0, 8))}</span></td><td>${esc(a.issues.map(i => i.title).join(' · '))}</td><td>assisted</td><td><span class="badge">${a.issues.length} issue(s)</span></td>
+    <td><div class="chips">${a.issues.map(i => `<span class="chip" ${tip(`segment ${i.segment} · ${tok(i.tokens)} tokens · ${usd(i.usd)}`)}>${esc(i.item)}</span>`).join('')}</div></td><td class="muted">${dayOf(a.from)} ${clock(a.from)}</td><td class="num">${dur(secs(a.from, a.to))}</td><td class="num">${cost(a)}</td></tr>`;
+  return nav + `<table class="list"><tr><th>Session</th><th>Élément</th><th>Mode</th><th>État</th><th>Représentations · issues</th><th>Début</th><th>Durée</th><th>Coût</th></tr>${list.map(({s, a}) => a ? assisted(a) :
+    `<tr data-href="#/play/${s.plays.at(-1).node}"><td><span class="proj">${s.project}</span> <b>#${esc(s.item)}</b> ${s.legacy ? '<span class="legacy">repris</span>' : ''}${s.simulated ? '<span class="sim">simulé</span>' : ''}</td><td>${esc(s.title)}</td><td>${s.mode}</td><td>${s.state === 'running' ? '<span class="outc running">en cours</span>' : `<span class="badge">${s.state}</span>`}</td>
+      <td><div class="chips">${s.plays.map(x => `<a class="chip" href="#/play/${x.node}">${x.planning ? 'Plan' : esc(x.key)}</a>`).join('')}</div></td><td class="muted">${dayOf(s.started_at)} ${clock(s.started_at)}</td><td class="num">${dur(secs(s.started_at, s.ended_at))}</td><td class="num">${costSum(s.plays)}</td></tr>`).join('')}</table>
+    ${bad.length ? `<div class="diag-note">${bad.map(x => `<span class="proj">${x.project}</span> <b>${esc(x.item)}</b> ${esc(x.title)} · ${esc(x.problem)}`).join('<br>')}</div>` : ''}`;
 }
 function premiereTable(all, key) {
   const {rows: list, nav} = paged(key, all);

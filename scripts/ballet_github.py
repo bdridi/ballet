@@ -1,7 +1,7 @@
 """Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues et les PR.
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
-    python3 ballet_github.py publish <brouillon.md> <type> <statut> [--mode <mode>]   # crée l'issue (Feature, Bug ou Task) à son statut, et à son mode de Rehearsal si demandé ; affiche son numéro, et ses liens « blocked by »
+    python3 ballet_github.py publish <brouillon.md> <type> <statut> [--mode <mode>] [--workshop assisted|autopilot]   # crée l'issue (Feature, Bug ou Task) à son statut, et à son mode de Rehearsal si demandé ; affiche son numéro, ses liens « blocked by », et le coût posté d'un Workshop assisted
     python3 ballet_github.py mode    <issue> <mode>              # pose le champ `Rehearsal mode` d'une issue publiée (assisted, autopilot)
     python3 ballet_github.py accept  <issue>                     # le oui du Director : une issue `proposed` passe `ready` et entre dans la file
     python3 ballet_github.py block   <issue> --by <issue>        # pose un lien : la première issue est bloquée par la seconde (GitHub « Blocked by »)
@@ -37,6 +37,12 @@ l'espace specs parle (`features/FEAT-002-*.md`, ou une ligne de `backlog.md`) es
 publiée, par les issues ouvertes qui la citent. Une dépendance que personne ne connaît, ou un élément qui dépend de lui-même,
 refuse la publication avant de rien créer. `block` et `unblock` corrigent les liens d'issues déjà publiées (refus : une issue
 bloquée par elle-même, un cycle direct). Un lien déjà posé n'est pas reposé.
+En ligne de commande, `publish` est celui du Dramaturg d'un Workshop `assisted` (`--workshop assisted`, le défaut) : il
+commente ensuite l'issue avec le coût de la session qui l'a publiée, depuis son `publish` précédent
+(`ballet_cost.of_this_session`, OPP-95) : une ligne lisible et un bloc caché `<!-- ballet:cost {json} -->`
+(`kind: workshop-assisted`), que le Monitor range dans la base pour la Scène. Une mesure impossible ne fait jamais échouer
+la publication : une ligne `note:` le dit. `--workshop autopilot` ne commente pas ; le Workshop `autopilot` publie d'ailleurs
+par `ballet_workshop.py`, sans passer par ici : son coût est celui de sa session de Conductor, dans la base.
 Un message (review, commentaire) suit `templates/message.md` : en-tête JSON sur la première ligne, publié en entier.
 `review` poste chaque point qui commence par `fichier:ligne` (ou `fichier:début-fin`), sur une ligne du diff,
 en commentaire sur cette ligne ; le corps de la review garde le verdict, la preuve et les autres points.
@@ -70,6 +76,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ballet_config
+import ballet_cost
 from ballet_message import VERDICT_LINE, MessageError, read_message
 
 PLAN_HEADING = "## Plan"
@@ -80,6 +87,7 @@ STATUS_FIELD = "Ballet status"
 MODE_FIELD = "Rehearsal mode"
 PLAN_APPROVAL_FIELD = "Plan approval"
 REHEARSAL_MODES = ("assisted", "autopilot")
+WORKSHOP_MODES = ("assisted", "autopilot")   # qui publie : le Dramaturg avec le Director, ou le script d'un Conductor
 BALLET_STATUSES = ("proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done")
 NEXT_GLOBAL_ID = "X-Github-Next-Global-ID: 1"  # les ID d'issue et de champ au format actuel
 ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!) {
@@ -497,17 +505,38 @@ def _dispatch(operation, arguments):
 
 
 def _publish_and_say(draft_path, issue_type, status, *options):
-    number, notes = publish_issue_with_links(draft_path, issue_type, status, mode=_publish_options(list(options)))
+    mode, workshop = _publish_options(list(options))
+    number, notes = publish_issue_with_links(draft_path, issue_type, status, mode=mode)
+    if workshop == "assisted":
+        notes = notes + [comment_session_cost(number)]
     return "\n".join([number, *(f"note: {note}" for note in notes)])
 
 
+def comment_session_cost(number, run=None, measure=None):
+    """Commente l'issue avec le coût de la session qui l'a publiée ; rend la ligne `note:` qui le dit. Ne lève jamais : le
+    coût est un confort, la publication est déjà faite."""
+    try:
+        measure = measure or ballet_cost.of_this_session()
+        if "missing" in measure:
+            return f"cost not posted on #{number}: {measure['missing']}"
+        (run or _run_gh)(["issue", "comment", str(number), "--body", ballet_cost.render_cost_note(measure)])
+    except Exception as error:   # une mesure ou un commentaire raté ne défait pas la publication
+        return f"cost not posted on #{number}: {type(error).__name__}: {error}"
+    return f"cost posted on #{number}: segment {measure['segment']} of session {measure['session'][:8]}, ≈ ${measure['segment_total']['usd']:.2f}"
+
+
 def _publish_options(options):
-    """Les options de `publish` : rien, ou `--mode <mode>`."""
-    if not options:
-        return None
-    if len(options) != 2 or options[0] != "--mode":
-        raise GitHubError("usage: publish <draft.md> <type> <status> [--mode assisted|autopilot]")
-    return options[1]
+    """Les options de `publish` : `--mode <mode>` (aucun par défaut) et `--workshop assisted|autopilot` (`assisted` par
+    défaut : c'est le Dramaturg du Workshop assisted qui publie en ligne de commande)."""
+    usage = "usage: publish <draft.md> <type> <status> [--mode assisted|autopilot] [--workshop assisted|autopilot]"
+    if len(options) % 2:
+        raise GitHubError(usage)
+    pairs = dict(zip(options[::2], options[1::2]))
+    if set(pairs) - {"--mode", "--workshop"} or len(pairs) * 2 != len(options):
+        raise GitHubError(usage)
+    workshop = pairs.get("--workshop", "assisted")
+    _require_among(workshop, WORKSHOP_MODES, "Workshop mode")
+    return pairs.get("--mode"), workshop
 
 
 def _accept_and_say(number):

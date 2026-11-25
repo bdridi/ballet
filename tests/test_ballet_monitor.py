@@ -62,6 +62,9 @@ class BalletMonitorTest(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.orca = FakeOrca()
         self.queue = FakeQueue()
+        costs = mock.patch.object(ballet_monitor.ballet_workshop_costs, "sweep", lambda alias, home, state=None: None)
+        costs.start()
+        self.addCleanup(costs.stop)
         ballet_maestro.mailbox(self.orca)
         self.register("antimurphy")
 
@@ -300,6 +303,15 @@ class BalletMonitorTest(unittest.TestCase):
         self.assertEqual(report.errors, ["antimurphy: gh did not answer"])
         self.assertEqual(report.told, ["beta · ready (1 already)"])
         self.assertNotIn("antimurphy", ballet_monitor.read_ready())
+
+    def test_les_notes_de_cout_sont_balayees_pour_chaque_projet_et_un_echec_est_une_ligne_d_erreur(self):
+        swept = []
+        def costs(alias, home, state=None):
+            swept.append(alias)
+            raise ballet_monitor.ballet_workshop_costs.WorkshopCostError("gh did not answer")
+        report = ballet_monitor.once(self.orca, self.queue, costs=costs)
+        self.assertEqual(swept, ["antimurphy"])
+        self.assertIn("antimurphy assisted Workshop costs: gh did not answer", report.errors)
 
     def test_une_file_illisible_ne_vide_pas_ce_qui_etait_connu(self):
         self.queue.queues["antimurphy"] = [item(12)]

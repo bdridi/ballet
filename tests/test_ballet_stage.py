@@ -146,7 +146,7 @@ class BalletStageTest(unittest.TestCase):
     def test_la_sante_dit_la_base_les_limites_et_le_monitor(self):
         self.set_ready([])
         health = self.stage()["health"]
-        self.assertEqual((health["db"]["user_version"], health["limits"]["launched_today"], health["legacy_pending"]), (4, 0, False))
+        self.assertEqual((health["db"]["user_version"], health["limits"]["launched_today"], health["legacy_pending"]), (5, 0, False))
         self.assertEqual(health["monitor"]["seen_at"], "2026-11-22T20:00:00+00:00")
         self.assertIsNone(health["maestro"]["context_percent"])
 
@@ -279,6 +279,30 @@ class BalletStageTest(unittest.TestCase):
     @staticmethod
     def row(role, model, usd):
         return {"role": role, "model": model, "input": 100, "output": 0, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 1000, "usd": usd}
+
+    # --- le coût des Workshops assisted, lu dans la base (OPP-95) ---
+
+    def test_les_workshops_assisted_viennent_de_la_base_sans_appeler_github(self):
+        note = {"v": 1, "kind": "workshop-assisted", "session": "sess-1", "segment": 1, "from": "2026-11-25T09:00:00+00:00",
+                "to": "2026-11-25T10:00:00+00:00", "usd": 0.5, "tokens": {"claude-opus-5-5": dict.fromkeys(
+                    ("input", "output", "cache_write_5m", "cache_write_1h", "cache_read"), 25)}}
+        issues = [{"number": 7, "title": "FEAT-007 · View", "updatedAt": "2026-11-25T10:00:00Z",
+                   "comments": {"nodes": [{"id": "c1", "body": f"<!-- ballet:cost {json.dumps(note)} -->"}]}}]
+        answer = json.dumps({"data": {"repository": {"issues": {"nodes": issues}}}})
+        ballet_stage.ballet_workshop_costs.sweep("shop", self.home, run=lambda arguments, home: answer)
+        with mock.patch.object(ballet_stage.subprocess, "run", side_effect=AssertionError("the Scène called a program")):
+            costs = self.stage()["workshop_costs"]
+        [session] = costs["sessions"]
+        self.assertEqual((session["project"], session["usd"], session["tokens"], session["unknown"]), ("shop", 0.5, 125, []))
+        self.assertEqual(session["issues"][0]["item"], "#7")
+
+    def test_une_note_rangee_change_la_version_de_la_page(self):
+        version = ballet_stage.snapshot()["version"]
+        answer = json.dumps({"data": {"repository": {"issues": {"nodes": [
+            {"number": 7, "title": "A", "updatedAt": "2026-11-25T10:00:00Z", "comments": {"nodes": [{"id": "c1", "body": "<!-- ballet:cost {oops -->"}]}}]}}}})
+        ballet_stage.ballet_workshop_costs.sweep("shop", self.home, run=lambda arguments, home: answer)
+        self.assertNotIn("unchanged", ballet_stage.snapshot(version))
+        self.assertEqual(self.stage()["workshop_costs"]["unreadable"][0]["problem"], "cost unreadable (malformed)")
 
     # --- la sortie d'une étape du script ---
 
