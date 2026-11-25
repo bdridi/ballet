@@ -54,16 +54,16 @@ Then settle the technical choices, 2 to 4 questions per round, each with your re
 
 ## 3. One plan, or slices
 
-**One plan by default.** Every slice pays a fixed cost (a fresh Dancer and Critic, a worktree, a pull request, the proof, the mutation, the CI), so a feature is cut only when one Dancer session cannot hold it, and then into **3 slices at most**. `[escalation] max_diff_lines` (1500 by default) only marks a pull request too big to review: it does not cut slices.
+**One plan by default.** Every slice pays a fixed cost (a fresh Dancer and Critic, a worktree, a pull request, the proof, the mutation, the CI), so a feature is cut only when one Dancer session cannot hold it, and then into **2 or 3 slices, never one**: a single part is the feature itself, so write its plan on the feature's issue and create no slice. `[escalation] max_diff_lines` (1500 by default) only marks a pull request too big to review: it does not cut slices.
 
 **Estimate the diff, do not guess it.** Per task: the files it touches and the lines in each, **tests included** (they are often half of the diff), plus wiring, fixtures and config; lockfiles and `diff_exclude` aside. Estimates run low (by about half on FEAT-002), so count every file a criterion crosses, layer by layer. Over the threshold, the pull request is marked `ballet:oversized`, and in strict mode it stops before the Critic.
 
-Only if it does not fit, propose **slices**: an ordered list, each one a full Rehearsal (code, review, proof green, merge on `main`). **Cut by criterion, 3 slices at most, each one vertical.**
+Only if it does not fit, propose **slices**: an ordered list, each one a full Rehearsal (code, review, proof green, merge on `main`). **Cut by criterion, 2 or 3 slices (never one), each one vertical.**
 
 - **A slice delivers at least one whole criterion, end to end**: through every layer the criterion crosses (domain, API, client, screen…), its scenario passing at the end. Never half a criterion.
 - **Never cut by layer** (the API, then the client, then the screen): a slice that delivers no criterion is the exception. It is allowed only for the walking skeleton of an empty repo, or when the smallest criterion alone cannot fit under the threshold; the list then says why for that slice.
 - When a feature has many criteria, group them by the code they share; when one criterion is large, put it first, alone, so the next slices reuse its layers.
-- **Fewest slices**: before showing the list, try merging each slice with its neighbour; merge them unless the result no longer fits one Dancer session. More than 3: merge until there are 3.
+- **Fewest slices**: before showing the list, try merging each slice with its neighbour; merge them unless the result no longer fits one Dancer session. More than 3: merge until there are 3. Down to one: it is the feature, plan it on its issue and create no slice.
 - Each slice leaves `main` green and the product working.
 - Show the list first (slice, criteria covered, depends on, expected size in lines against the threshold), and write the plans only after the Director's yes (in auto mode, write them straight away).
 

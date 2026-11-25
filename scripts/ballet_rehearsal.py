@@ -167,6 +167,7 @@ MAX_POLICY_RESENDS = 1
 MAX_MISPLACED = 1         # un `report` mal placé du Choreographer est renvoyé une fois, puis escalade
 PROOF_OUTPUT_LINES = 60   # la fin de la sortie d'une preuve rouge, remise au Dancer
 ANSWERING_ROLES = ("choreographer", "dramaturg")   # vérifiés à chaque réponse, sur la branche de Rehearsal
+MIN_SLICES = 2            # au moins, quand une feature est découpée : une seule slice, c'est la feature elle-même
 MAX_SLICES = 3            # au plus, par feature : une slice par critère, ou par groupe de critères
 TASK_LINE = re.compile(r"^- \[([ xX])\]\s*(.+?)(?:\s+—\s+.*)?$")   # une tâche du rapport du Dancer
 RED_LINE = re.compile(r"^- Red:\s*\S")                                 # son rouge, sous elle
@@ -880,12 +881,20 @@ def _planned_issues(rehearsal, report, tools):
     planned = _report_issue(report) or rehearsal.issue
     if not planned:
         raise RehearsalError("the Choreographer reported no issue: its report needs `- Issue: #<n>`")
-    numbers = ballet_github.slices_of(planned, run=tools.gh) or [planned]
+    slices = ballet_github.slices_of(planned, run=tools.gh)
+    _refuse_a_single_slice(planned, slices)
+    numbers = slices or [planned]
     issues = [(number, *_issue(number, tools)) for number in numbers]
     without_tasks = [f"#{number}" for number, _, body in issues if not _has_tasks(body)]
     if without_tasks:
         raise RehearsalError(f"the Choreographer reported, but {', '.join(without_tasks)} has no tasks in its plan")
     return planned, issues
+
+
+def _refuse_a_single_slice(planned, slices):
+    """Une feature coupée en une seule slice ajoute une issue pour rien : cette part, c'est la feature, planifiée sur son issue."""
+    if slices and len(slices) < MIN_SLICES:
+        raise RehearsalError(f"issue #{planned} has a single slice #{slices[0]}: write its plan on #{planned} and drop the slice")
 
 
 def _hand_over(rehearsal, planned, first, home, tools):
@@ -1786,8 +1795,9 @@ def _auto_mode(rehearsal, config):
               "through the Conductor" if rehearsal.plan == "review" else "the Dancer starts on it as soon as you report")
     return (f"Auto mode (section *Auto mode* of your skill): nobody says yes in this session; {review}. Settle every "
             "choice yourself and write it in *Decisions*. Product gaps go to the Dramaturg; what neither of you can settle "
-            f"goes to the Director (a question `to: director`). Slices: one plan when it can; otherwise at most "
-            f"{MAX_SLICES} slices, cut by criterion: each one delivers one or more whole criteria end to end, never one "
+            f"goes to the Director (a question `to: director`). Slices: one plan when it can; otherwise {MIN_SLICES} or "
+            f"{MAX_SLICES} slices (never one: a single slice is the feature itself, plan it on its issue), cut by "
+            "criterion: each one delivers one or more whole criteria end to end, never one "
             f"layer (API, then client, then screen). `max_diff_lines` ({limit}) only marks a pull request too big to "
             "review: it does not cut slices. "
             "Commit your ADRs and `AGENTS.md` rules on this branch: they ship with the first slice. "

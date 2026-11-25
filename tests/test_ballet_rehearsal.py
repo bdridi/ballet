@@ -2480,7 +2480,7 @@ class PlanningTest(unittest.TestCase):
         text = self.journal("handoff")[0]["text"]
         self.assertIn("Auto mode", text)
         self.assertIn("nobody says yes in this session; the Director reviews the published plan before any code", text)
-        self.assertIn("at most 3 slices, cut by criterion", text)
+        self.assertIn("otherwise 2 or 3 slices (never one: a single slice is the feature itself, plan it on its issue), cut by criterion", text)
         self.assertIn("one or more whole criteria end to end", text)
         self.assertIn("only marks a pull request too big to review: it does not cut slices", text)
         self.assertIn("goes to the Director", text)
@@ -2675,6 +2675,11 @@ class PlanningTest(unittest.TestCase):
         self.world.issues["15"]["body"] = slice_body(13, UNPLANNED_ISSUE)
         lines = self.planned()
         self.assertEqual(lines[-1], "NEXT: escalate the Choreographer reported, but #15 has no tasks in its plan")
+
+    def test_une_feature_decoupee_en_une_seule_slice_escalade(self):
+        del self.world.issues["15"]
+        lines = self.planned()
+        self.assertEqual(lines[-1], "NEXT: escalate issue #13 has a single slice #14: write its plan on #13 and drop the slice")
 
     def test_une_question_au_dramaturg_sans_issue_n_est_que_journalisee(self):
         self.run_main("begin", "FEAT-002")
