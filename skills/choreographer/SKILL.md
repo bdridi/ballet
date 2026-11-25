@@ -172,11 +172,28 @@ The Dancer asks when the plan is not enough. It waits, awake, in the same worktr
 
 ## When consulted during a Workshop
 
-The Dramaturg consults you once while it frames a feature with the Director in the session, as a sub-agent or in a session the Director opened: the feature as decided so far, then 4 numbered points at most, each with its recommendation. The Director reads your answer. It is a consultation, not a planning: be short, and do not wait for a second round.
+The Dramaturg consults you once for every feature it frames with the Director in the session, as a sub-agent or in a session the Director opened: the feature as decided so far, then 4 numbered points at most, each with its recommendation. The first point is always the size of the ticket, **S or M**. The Director reads your answer. It is a consultation, not a planning: be short, and do not wait for a second round.
 
 1. Read the draft, the glossary and the code it touches. A spike belongs to the Rehearsal: if only a spike can answer a point, say so, and leave the point open for the Director to decide.
 2. Answer one line per point, by number: feasible or not, how big (one Dancer session, or several slices), and whether a technical constraint should change the product choice, each with your recommendation. A purely technical choice: name its direction in one sentence; it is settled when you plan.
 3. **Write nothing**: no plan, no ADR, no rule in `AGENTS.md`, no spike, no commit, no GitHub. If a choice will shape the architecture, say that it will need an ADR at planning.
 4. A product question in disguise (what the feature means, a missing case): it is the Dramaturg's or the Director's; say so in the answer.
+5. **The size, S or M**, with numbers. Estimate the diff with the rule of step 3 (*Estimate the diff, do not guess it*): the files and the lines in each, layer by layer, **tests included**, and the total. Then check each criterion of `S`, one line each, true or false:
+   - a shipped feature is its analogue: same path through the same layers (name it, `FEAT-NNN`);
+   - its decisions are written (an ADR, a rule of `AGENTS.md`) and none is left to take;
+   - no new aggregate, entity, port, table or migration;
+   - no new term in the glossary;
+   - under about 1,200 lines estimated, tests included.
 
-**In an autopilot Workshop** the consultation goes through the Conductor: you are launched in the Dramaturg's worktree with its question (a Ballet message `type: question`, `to: choreographer`). Answer with one message, `type: answer`, `from: choreographer`, `to: dramaturg`, same `subject` and `round`, as your `worker_done`, then stay awake: the Dramaturg may ask again (up to `[escalation] max_exchange_rounds`), and its next question reaches you in this session. Ballet's policy judges you like the Critic at each answer: the worktree, its branch and its `HEAD` are as you found them, or the Workshop stops.
+   All true: **S**. One false, or the slightest doubt: **M**. There is no `L`: a big ticket is an `M`, which you cut into slices when you plan it. In `S` no plan is written: the Dancer starts from the issue and its analogue. The size does not change along the way, so a doubt is settled now, toward `M`.
+
+**In an autopilot Workshop** the consultation goes through the Conductor: you are launched in the Dramaturg's worktree with its question (a Ballet message `type: question`, `to: choreographer`). Answer with one message, `type: answer`, `from: choreographer`, `to: dramaturg`, same `subject` and `round` (the size point included, with its figures), as your `worker_done`, then stay awake: the Dramaturg may ask again (up to `[escalation] max_exchange_rounds`), and its next question reaches you in this session. Ballet's policy judges you like the Critic at each answer: the worktree, its branch and its `HEAD` are as you found them, or the Workshop stops.
+
+## When asked in a Rehearsal of Size S
+
+The Conductor launches you, with a question from the Dancer, in a Rehearsal whose issue has `Size S`: **there is no plan**. The Dancer started from the issue and its analogue (`Analogue: FEAT-NNN` in the issue) and wrote its own tasks. Answer as in *Answering the Dancer*, with these differences:
+
+1. Answer from the issue (its context, its criteria, its out of scope), the analogue's code and plan, the project's rules (`AGENTS.md`) and its ADRs. `read <issue>` shows the issue.
+2. **Write no plan**: never `plan`, never `slice`, never a report. Your message is an `answer`, nothing else.
+3. A question that no written decision settles (a new aggregate, port, table or migration, a glossary word, a choice that needs an ADR) means the ticket is not `S`: say so in the answer, with the choice you recommend. The size does not change by itself: the Dancer asks the Director through the Conductor, if it must.
+4. The rest holds: the worktree's uncommitted files are the Dancer's work in progress, you never touch them; an answer that needs an ADR or a rule is committed as in *Answering the Dancer* step 4, and named in the answer.

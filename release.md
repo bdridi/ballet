@@ -2,6 +2,18 @@
 
 Le journal des versions du plugin, la plus récente en haut. Chaque version a son tag git (`vX.Y.Z`), une ligne par fonctionnalité ou changement, et la liste des opportunités qu'elle traite (elles sortent alors d'`opportunities.md`). Traitées hors de toute version, dans antimurphy : OPP-09 (l'outil de mutation porté par le projet), OPP-10 (`mutants.out/` ignoré), OPP-11 (la mutation observée sur de vraies Rehearsals), OPP-27 (`label` vérifié sur un vrai repo).
 
+## 0.46.0 — 2026-11-25 · `v0.46.0`
+
+La taille d'un ticket : ne pas payer le Choreographer (Opus, 1,5 à 2 $ par ticket) quand il n'y a rien à décider.
+
+- **Le champ `Size`** (`S`, `M` ; vide, `M`, rien ne change pour l'existant) : créé par `init-project` (`ballet_planning.py`) comme `Rehearsal mode`, lu avec `queue_fields` et par le programme de la Scène (`ballet_program.py`). `ballet_github.py publish … --size S|M` le pose à la publication, `size <issue> S|M` sur une issue déjà publiée ; une valeur inconnue est refusée avant toute écriture, un champ absent du projet renvoie à `/ballet:init-project`. `L` n'existe pas : un gros ticket est un `M`, que le Choreographer découpe en slices.
+- **La Rehearsal `S` sans plan** (`ballet_rehearsal.py`) : la taille est lue au démarrage comme le mode ; en `S`, le premier rôle est le Dancer, sur l'issue elle-même (critères, ligne `Analogue: FEAT-NNN`), qui écrit ses tâches (scénarios en rouge d'abord, puis une tâche par critère, sur la forme de l'analogue) ; même TDD, mêmes lignes `Red:`, même rapport. Aucune approbation de plan, même en `assisted` (`plan approval skipped (size S: no plan)`). Ses questions vont au Choreographer, lancé à la demande, qui répond sans plan, à partir de l'issue et de l'analogue. La consigne du Critic dit `Size S: the issue has no plan` : il juge le diff contre les critères, l'analogue, les règles et les ADR. Politique, preuve, mutation, taille du diff, Critic et Premiere inchangés. La taille est dans la ligne de début de session, dans `status` et dans l'événement `begin` du journal ; une taille inconnue refuse la session.
+- **Les skills** : `dramaturg` (consultation du Choreographer systématique pour une feature, toujours avec « S ou M ? » ; il inscrit la taille et l'analogue sans la décider seul ; en autopilot la taille va dans `## Decided alone`), `choreographer` (chiffre la taille avec sa règle d'estimation et les critères de `S` ; section *When asked in a Rehearsal of Size S*), `dancer` (*Without a plan (Size S)*), `critic` (*Size S*), `workshop`, `rehearsal`, `conductor`.
+- PRD (Size, rôles, Rehearsal, champs de l'issue) et README à jour. 1087 tests verts.
+- **Pas vérifié en vrai** : le champ `Size` sur un vrai propriétaire GitHub (création par `init-project`, écriture par `publish --size` et `size`), une Rehearsal `S` de bout en bout sur Orca (Dancer sans plan, question au Choreographer lancé à la demande, Critic sans plan), et le coût réel d'un `S` face à son analogue `M` (la mesure d'OPP-85, à faire sur la Scène). Le Workshop en autopilot ne pose pas encore le champ à la publication : la taille est dite dans `## Decided alone`, le Director la pose (`size <issue> S|M`) en acceptant la proposition.
+
+**Opportunités traitées** : OPP-85.
+
 ## 0.45.0 — 2026-11-24 · `v0.45.0`
 
 Les retours du Director sur la Scène.

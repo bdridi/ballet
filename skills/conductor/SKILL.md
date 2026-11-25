@@ -23,9 +23,10 @@ The lines before it (`- …`) say what the script did. Relay them to the Directo
 python3 <path>/scripts/ballet_rehearsal.py begin <item>
 ```
 
-The item comes from `/ballet:rehearsal`, one only: an issue (`#12`) of type `Feature`, `Bug` or `Task`, or a ready feature with no issue yet (`FEAT-002`). The script opens its **session** (kept in Ballet's base, under `#12` or `FEAT-002`) and refuses an item another session is already playing. It reads the mode on the issue's `Rehearsal mode` field (empty: `assisted`). For each Rehearsal, it checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `origin/main`, and starts the first role:
+The item comes from `/ballet:rehearsal`, one only: an issue (`#12`) of type `Feature`, `Bug` or `Task`, or a ready feature with no issue yet (`FEAT-002`). The script opens its **session** (kept in Ballet's base, under `#12` or `FEAT-002`) and refuses an item another session is already playing. It reads the mode on the issue's `Rehearsal mode` field (empty: `assisted`) and the size on its `Size` field (`S` or `M`; empty: `M`). For each Rehearsal, it checks the profile, opens the worktree and the branch `rehearsal/<ID>` from `origin/main`, and starts the first role:
 
 - an issue whose plan holds its tasks: the Dancer;
+- an issue of **`Size S`**, with or without a plan: the Dancer, on the issue itself (its criteria and its `Analogue: FEAT-NNN`), which writes its own tasks. No planning Rehearsal, no slices, no plan to review, even in `assisted`. Its questions go to the Choreographer, started on demand, which answers without a plan; the Critic is told there is none. Proof, mutation, diff size, Critic and Premiere are the same;
 - an issue without a plan, or a feature: the Choreographer alone, in auto mode. It writes the plan on the issue (and creates its slices; a feature with no issue yet, it publishes first) and reports; the script reads them on GitHub, puts them at the head of the session, and the first one goes on in the same worktree (`now playing: Rehearsal <ID> …`), with the Choreographer's ADRs.
 
 `<ID>` is the issue title's prefix (`FEAT-001.2`), or the feature (`FEAT-002`) while it is planned.
