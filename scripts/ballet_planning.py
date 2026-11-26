@@ -11,6 +11,7 @@ Ce qu'il faut à la file :
 - les types `Task`, `Bug`, `Feature` (là par défaut) et `Slice` ;
 - le champ `Ballet status` : où en est l'issue dans la file (`Status` est un nom réservé par GitHub) ;
 - le champ `Rehearsal mode` : comment la Rehearsal tourne (`assisted`, `autopilot`) ;
+- le champ `Size` : la taille du ticket (`S` : sans plan, le Dancer part de l'issue ; `M` : planifiée) ; vide, `S` pour un bug ou une tâche, `M` pour une feature ;
 - le champ `Plan approval` : si le plan attend le Director (`required`, `skipped`) ; vide, le profil décide ;
 - le champ `Priority` : l'ordre de la file, puis l'ancienneté.
 
@@ -42,6 +43,10 @@ ISSUE_FIELDS = (
     ("Rehearsal mode", "How its Rehearsal runs; empty means assisted.", (
         ("assisted", "BLUE", "The Director gets the escalations."),
         ("autopilot", "GREEN", "Without the Director: each role decides within its perimeter."),
+    )),
+    ("Size", "How big the ticket is; empty means M.", (
+        ("S", "GREEN", "No plan: the Dancer starts from the issue and its analogue."),
+        ("M", "BLUE", "Planned by the Choreographer, sliced when it is too big."),
     )),
     ("Plan approval", "In assisted, whether the plan waits for the Director; empty means the project's profile.", (
         ("required", "PURPLE", "The plan waits for the Director's approval before any code."),

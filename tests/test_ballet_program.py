@@ -16,9 +16,9 @@ def blocker(number, state="OPEN", reason=None, repo="acme/shop"):
             "repository": {"nameWithOwner": repo}}
 
 
-def issue(number, kind="Feature", status="ready", priority="", mode="", created="2026-11-01T10:00:00Z", title=None,
+def issue(number, kind="Feature", status="ready", priority="", mode="", size="", created="2026-11-01T10:00:00Z", title=None,
           blocked_by=(), total_blocked_by=None):
-    values = [("Ballet status", status), ("Priority", priority), ("Rehearsal mode", mode)]
+    values = [("Ballet status", status), ("Priority", priority), ("Rehearsal mode", mode), ("Size", size)]
     return {
         "number": number, "title": title or f"Issue {number}", "url": f"https://github.com/acme/shop/issues/{number}",
         "createdAt": created,
@@ -60,6 +60,11 @@ class ReadyItemsTest(unittest.TestCase):
             issue(5, priority="High", created="2026-11-03T10:00:00Z"),
         ))
         self.assertEqual([item["item"] for item in ballet_program.ready_items(run=github)], ["#3", "#5", "#4", "#1", "#2"])
+
+    def test_donne_la_taille_de_l_issue_et_la_laisse_vide_quand_elle_n_est_pas_posee(self):
+        items = ballet_program.ready_items(run=FakeGitHub(page(issue(12, size="S", created="2026-11-01T10:00:00Z"),
+                                                                issue(13, created="2026-11-02T10:00:00Z"))))
+        self.assertEqual([(item["item"], item["size"]) for item in items], [("#12", "S"), ("#13", "")])
 
     def test_donne_le_titre_le_type_la_priorite_et_le_mode(self):
         github = FakeGitHub(page(issue(12, "Bug", priority="High", mode="autopilot", title="Le panier se vide")))

@@ -40,11 +40,11 @@ class PrepareTest(unittest.TestCase):
         github = FakeGitHub(owner())
         report = ballet_planning.prepare(run=github)
         self.assertEqual(report["created"], ["issue type Slice", "issue field Ballet status", "issue field Rehearsal mode",
-                                             "issue field Plan approval", "issue field Priority"])
-        self.assertEqual(len(github.mutations), 5)
+                                             "issue field Size", "issue field Plan approval", "issue field Priority"])
+        self.assertEqual(len(github.mutations), 6)
 
     def test_rien_n_est_cree_quand_tout_existe(self):
-        fields = {"Ballet status": ALL_STATUS, "Rehearsal mode": ["assisted", "autopilot"],
+        fields = {"Ballet status": ALL_STATUS, "Rehearsal mode": ["assisted", "autopilot"], "Size": ["S", "M"],
                   "Plan approval": ["required", "skipped"], "Priority": ["Urgent", "High", "Medium", "Low"]}
         github = FakeGitHub(owner(types=("Task", "Bug", "Feature", "Slice"), fields=fields))
         report = ballet_planning.prepare(run=github)
@@ -58,6 +58,13 @@ class PrepareTest(unittest.TestCase):
         self.assertIn("issue field Ballet status", report["kept"])
         self.assertEqual(report["incomplete"], [("issue field Ballet status", ["proposed", "in-rehearsal", "plan-review", "escalated"])])
         self.assertFalse(any("Ballet status" in mutation for mutation in github.mutations))
+
+    def test_le_champ_size_a_les_options_s_et_m_dans_cet_ordre(self):
+        github = FakeGitHub(owner())
+        ballet_planning.prepare(run=github)
+        size = next(mutation for mutation in github.mutations if '"Size"' in mutation)
+        self.assertLess(size.index('"S"'), size.index('"M"'))
+        self.assertNotIn('"L"', size)
 
     def test_un_type_par_defaut_absent_est_cree(self):
         github = FakeGitHub(owner(types=("Bug",)))

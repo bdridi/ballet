@@ -1,8 +1,9 @@
 """Le seul point de passage vers GitHub : une liste fermée d'opérations sur les issues et les PR.
 
     python3 ballet_github.py read    <issue>                     # affiche le corps de l'issue
-    python3 ballet_github.py publish <brouillon.md> <type> <statut> [--mode <mode>] [--workshop assisted|autopilot]   # crée l'issue (Feature, Bug ou Task) à son statut, et à son mode de Rehearsal si demandé ; affiche son numéro, ses liens « blocked by », et le coût posté d'un Workshop assisted
+    python3 ballet_github.py publish <brouillon.md> <type> <statut> [--mode <mode>] [--size S|M] [--workshop assisted|autopilot]   # crée l'issue (Feature, Bug ou Task) à son statut, à son mode de Rehearsal et à sa taille si demandés ; affiche son numéro, ses liens « blocked by », et le coût posté d'un Workshop assisted
     python3 ballet_github.py mode    <issue> <mode>              # pose le champ `Rehearsal mode` d'une issue publiée (assisted, autopilot)
+    python3 ballet_github.py size    <issue> S|M                 # pose le champ `Size` d'une issue publiée (S : sans plan, M : planifiée ; vide, selon le type)
     python3 ballet_github.py accept  <issue>                     # le oui du Director : une issue `proposed` passe `ready` et entre dans la file
     python3 ballet_github.py block   <issue> --by <issue>        # pose un lien : la première issue est bloquée par la seconde (GitHub « Blocked by »)
     python3 ballet_github.py unblock <issue> --by <issue>        # retire ce lien
@@ -27,7 +28,8 @@ Le repo GitHub est celui du dossier courant (celui que `gh` déduit du remote).
 Le titre d'une issue est le premier titre `# …` de son brouillon ; le corps, tout le reste.
 `publish` pose le type natif de l'issue (`Feature`, `Bug` ou `Task`) et son champ `Ballet status` (`proposed`, `ready`,
 `in-rehearsal`, `plan-review`, `escalated`, `done`) : c'est ce qui la met dans la file ; avec `--mode`, aussi son champ
-`Rehearsal mode` (`assisted`, `autopilot` ; vide, la Rehearsal joue `assisted`). Il ajoute une section `## Plan`
+`Rehearsal mode` (`assisted`, `autopilot` ; vide, la Rehearsal joue `assisted`) ; avec `--size`, son champ `Size` (`S`, `M` ;
+vide, la taille du type : `S` pour un bug ou une tâche, `M` pour une feature). Il ajoute une section `## Plan`
 vide si le brouillon n'en a pas, pour que le Choreographer l'écrive. `slice` crée une issue de type `Slice`, sans statut :
 elle suit sa feature. Type et champ viennent de `init-project` ; absents, l'opération le dit.
 Les dépendances entre éléments sont les liens natifs de GitHub. Un brouillon qui porte une ligne `Depends on: FEAT-002, BUG-004`
@@ -85,9 +87,11 @@ PUBLISHED_TYPES = ("Feature", "Bug", "Task")
 SLICE_TYPE = "Slice"
 STATUS_FIELD = "Ballet status"
 MODE_FIELD = "Rehearsal mode"
+SIZE_FIELD = "Size"
 PLAN_APPROVAL_FIELD = "Plan approval"
 REHEARSAL_MODES = ("assisted", "autopilot")
 WORKSHOP_MODES = ("assisted", "autopilot")   # qui publie : le Dramaturg avec le Director, ou le script d'un Conductor
+TICKET_SIZES = ("S", "M")
 BALLET_STATUSES = ("proposed", "ready", "in-rehearsal", "plan-review", "escalated", "done")
 NEXT_GLOBAL_ID = "X-Github-Next-Global-ID: 1"  # les ID d'issue et de champ au format actuel
 ISSUE_AND_STATUS_FIELD = """query($owner: String!, $name: String!, $number: Int!) {
@@ -164,13 +168,13 @@ def read_issue(number, run=None):
     return _issue_body(number, run or _run_gh)
 
 
-def publish_issue(draft_path, issue_type, status, run=None, specs=None, mode=None):
+def publish_issue(draft_path, issue_type, status, run=None, specs=None, mode=None, size=None):
     """Crée l'issue de son type et de son statut : c'est ce qui la met dans la file. Renvoie son numéro."""
-    return publish_issue_with_links(draft_path, issue_type, status, run, specs, mode)[0]
+    return publish_issue_with_links(draft_path, issue_type, status, run, specs, mode, size)[0]
 
 
-def publish_issue_with_links(draft_path, issue_type, status, run=None, specs=None, mode=None):
-    """Crée l'issue, pose son mode de Rehearsal s'il est demandé, puis ses liens « blocked by » (ligne `Depends on:` du
+def publish_issue_with_links(draft_path, issue_type, status, run=None, specs=None, mode=None, size=None):
+    """Crée l'issue, pose son mode de Rehearsal et sa taille s'ils sont demandés, puis ses liens « blocked by » (ligne `Depends on:` du
     brouillon) : renvoie son numéro et les notes sur ses liens. Une dépendance inconnue refuse la publication avant de rien
     créer ; `specs` est l'espace specs où chercher une dépendance pas encore publiée (par défaut celui du projet courant)."""
     run = run or _run_gh
@@ -178,12 +182,16 @@ def publish_issue_with_links(draft_path, issue_type, status, run=None, specs=Non
     _require_among(status, BALLET_STATUSES, STATUS_FIELD)
     if mode is not None:
         _require_among(mode, REHEARSAL_MODES, MODE_FIELD)
+    if size is not None:
+        _require_among(size, TICKET_SIZES, SIZE_FIELD)
     title, body = _title_and_body(_read_draft(draft_path))
     links = _plan_links(title, body, run, specs)
     number = _create_issue(title, _with_plan_section(body), run, issue_type)
     _set_after_creation(number, STATUS_FIELD, status, run)
     if mode is not None:
         _set_after_creation(number, MODE_FIELD, mode, run)
+    if size is not None:
+        _set_after_creation(number, SIZE_FIELD, size, run)
     return number, _set_links(number, links, run)
 
 
@@ -264,8 +272,14 @@ def set_mode(number, mode, run=None):
     _set_field(number, MODE_FIELD, mode, run or _run_gh)
 
 
+def set_size(number, size, run=None):
+    """Le champ `Size` de l'issue : `S` (sans plan, le Dancer part de l'issue) ou `M` (planifiée par le Choreographer)."""
+    _require_among(size, TICKET_SIZES, SIZE_FIELD)
+    _set_field(number, SIZE_FIELD, size, run or _run_gh)
+
+
 def queue_fields(number, run=None):
-    """Ce que la file lit sur une issue : son type natif, son `Rehearsal mode`, son `Plan approval` et son `Ballet status`
+    """Ce que la file lit sur une issue : son type natif, son `Rehearsal mode`, sa `Size`, son `Plan approval` et son `Ballet status`
     (vides s'ils ne sont pas posés)."""
     answer = _graphql(["-f", f"query={QUEUE_FIELDS}", "-F", "owner={owner}", "-F", "name={repo}",
                        "-F", f"number={_issue_number(number)}"], run or _run_gh)["data"]
@@ -273,7 +287,7 @@ def queue_fields(number, run=None):
     values = {(value.get("field") or {}).get("name"): value["name"]
               for value in (issue.get("issueFieldValues") or {}).get("nodes", []) if value}
     return {"type": (issue.get("issueType") or {}).get("name", ""), "mode": values.get(MODE_FIELD, ""),
-            "plan_approval": values.get(PLAN_APPROVAL_FIELD, ""), "status": values.get(STATUS_FIELD, "")}
+            "size": values.get(SIZE_FIELD, ""), "plan_approval": values.get(PLAN_APPROVAL_FIELD, ""), "status": values.get(STATUS_FIELD, "")}
 
 
 def write_plan(number, plan_path, run=None):
@@ -473,9 +487,10 @@ def main(argv):
 def _dispatch(operation, arguments):
     operations = {
         "read": (read_issue, 1),
-        "publish": (_publish_and_say, (3, 5)),
+        "publish": (_publish_and_say, (3, 5, 7, 9)),
         "mode": (_set_mode_and_say, 2),
         "accept": (_accept_and_say, 1),
+        "size": (_set_size_and_say, 2),
         "block": (_block_by, 3),
         "unblock": (_unblock_by, 3),
         "decided-alone": (mark_decided_alone, 1),
@@ -505,9 +520,9 @@ def _dispatch(operation, arguments):
 
 
 def _publish_and_say(draft_path, issue_type, status, *options):
-    mode, workshop = _publish_options(list(options))
-    number, notes = publish_issue_with_links(draft_path, issue_type, status, mode=mode)
-    if workshop == "assisted":
+    chosen = _publish_options(list(options))
+    number, notes = publish_issue_with_links(draft_path, issue_type, status, mode=chosen.get("--mode"), size=chosen.get("--size"))
+    if chosen["--workshop"] == "assisted":
         notes = notes + [comment_session_cost(number)]
     return "\n".join([number, *(f"note: {note}" for note in notes)])
 
@@ -526,17 +541,17 @@ def comment_session_cost(number, run=None, measure=None):
 
 
 def _publish_options(options):
-    """Les options de `publish` : `--mode <mode>` (aucun par défaut) et `--workshop assisted|autopilot` (`assisted` par
-    défaut : c'est le Dramaturg du Workshop assisted qui publie en ligne de commande)."""
-    usage = "usage: publish <draft.md> <type> <status> [--mode assisted|autopilot] [--workshop assisted|autopilot]"
+    """Les options de `publish` : `--mode <mode>` et `--size <S|M>` (aucun par défaut), et `--workshop assisted|autopilot`
+    (`assisted` par défaut : c'est le Dramaturg du Workshop assisted qui publie en ligne de commande) ; renvoie {option: valeur}."""
+    usage = "usage: publish <draft.md> <type> <status> [--mode assisted|autopilot] [--size S|M] [--workshop assisted|autopilot]"
     if len(options) % 2:
         raise GitHubError(usage)
-    pairs = dict(zip(options[::2], options[1::2]))
-    if set(pairs) - {"--mode", "--workshop"} or len(pairs) * 2 != len(options):
+    chosen = dict(zip(options[::2], options[1::2]))
+    if len(chosen) != len(options) // 2 or not set(chosen) <= {"--mode", "--size", "--workshop"}:
         raise GitHubError(usage)
-    workshop = pairs.get("--workshop", "assisted")
-    _require_among(workshop, WORKSHOP_MODES, "Workshop mode")
-    return pairs.get("--mode"), workshop
+    chosen.setdefault("--workshop", "assisted")
+    _require_among(chosen["--workshop"], WORKSHOP_MODES, "Workshop mode")
+    return chosen
 
 
 def _accept_and_say(number):
@@ -547,6 +562,11 @@ def _accept_and_say(number):
 def _set_mode_and_say(number, mode):
     set_mode(number, mode)
     return f"#{_issue_number(number)} {MODE_FIELD}: {mode}"
+
+
+def _set_size_and_say(number, size):
+    set_size(number, size)
+    return f"#{_issue_number(number)} {SIZE_FIELD}: {size}"
 
 
 def _block_by(issue, flag, blocker):

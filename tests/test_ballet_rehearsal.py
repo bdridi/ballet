@@ -75,7 +75,7 @@ class FakeWorld:
         self.new_commits = []
         self.commit_authors = {}    # chemin → les commits de la branche qui le touchent (`git log -- <chemin>`) ; sinon `new_commits`
         self.issues = {}            # numéro → {title, body, state, labels} ; les autres issues sont #3
-        self.fields = {}            # numéro → {type, mode, status} ; par défaut une Feature sans mode ni statut
+        self.fields = {}            # numéro → {type, mode, size, status} ; par défaut une Feature sans mode ni statut
         self.statuses = []          # (issue, Ballet status) de chaque écriture du champ, dans l'ordre
         self.proof = ballet_rehearsal.Proof(True, "all green\n")
         self.proofs = []            # (commande, dossier, délai) de chaque preuve lancée
@@ -192,8 +192,8 @@ class FakeWorld:
         return next(argument for argument in arguments if argument.startswith("number="))[len("number="):]
 
     def queue_fields(self, number):
-        fields = {"type": "Feature", "mode": "", "plan_approval": "", "status": "ready", **self.fields.get(number, {})}
-        names = (("mode", "Rehearsal mode"), ("plan_approval", "Plan approval"), ("status", "Ballet status"))
+        fields = {"type": "Feature", "mode": "", "size": "", "plan_approval": "", "status": "ready", **self.fields.get(number, {})}
+        names = (("mode", "Rehearsal mode"), ("size", "Size"), ("plan_approval", "Plan approval"), ("status", "Ballet status"))
         values = [{"name": fields[key], "field": {"name": name}} for key, name in names if fields[key]]
         issue = {"issueType": {"name": fields["type"]} if fields["type"] else None, "issueFieldValues": {"nodes": values}}
         return json.dumps({"data": {"repository": {"issue": issue}}})
@@ -323,6 +323,107 @@ class BalletRehearsalTest(unittest.TestCase):
         with self.assertRaisesRegex(ballet_rehearsal.RehearsalError, "init-project"):
             self.begin()
 
+    # --- la taille S : pas de plan ---
+
+    def small(self, **fields):
+        """L'issue #3, sans plan, à la taille `S`."""
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.world.fields = {"3": {"size": "S", **fields}}
+
+    def test_en_taille_s_le_dancer_est_lance_le_premier_sur_l_issue_sans_plan(self):
+        self.small()
+        step = self.begin()
+        self.assertEqual((step.next, self.world.started_roles()), ("wait", ["Dancer · FEAT-001.2"]))
+        assignment = self.journal("handoff")[0]["text"]
+        self.assertIn("Size S", assignment)
+        self.assertIn("has no plan", assignment)
+        self.assertIn("Analogue: FEAT-NNN", assignment)
+        self.assertIn("the scenarios in red first, then one task per criterion", assignment)
+        self.assertIn("`Red:` line", assignment)
+        self.assertNotIn("Execute your repo's section of the plan", assignment)
+
+    def test_la_taille_apparait_au_debut_de_session_et_au_journal(self):
+        self.small()
+        lines = self.begin().done
+        self.assertIn("session of #3: mode assisted, size S, plan approval skipped (size S: no plan)", lines)
+        self.assertEqual(self.journal("begin")[0]["size"], "S")
+
+    def test_en_taille_s_aucune_approbation_de_plan_meme_en_assisted(self):
+        self.small(plan_approval="required")
+        self.begin()
+        session = ballet_store.load(self.home, "session", "#3")
+        self.assertEqual((session["mode"], session["size"], session["plan_approval"]), ("assisted", "S", False))
+        self.assertEqual(self.state()["plan"], "auto")
+        self.assertEqual(self.world.statuses, [("3", "in-rehearsal")])
+
+    def test_en_taille_s_la_question_du_dancer_demarre_le_choreographer_qui_repond_sans_plan(self):
+        self.small()
+        self.begin()
+        self.receive(message("dancer", "choreographer", "question", "1. Which name?"), question_id="msg_42")
+        self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2", "Choreographer · FEAT-001.2"])
+        assignment = self.journal("handoff")[-1]["text"]
+        self.assertIn("Size S", assignment)
+        self.assertIn("Answer from the issue and its analogue", assignment)
+        self.assertIn("write no plan", assignment)
+        step = self.receive(message("choreographer", "dancer", "answer", "1. `Stock`."))
+        self.assertEqual((step.next, self.state()["pending"]), ("wait", []))
+        self.assertEqual(self.world.ran("orca", "orchestration", "reply")[0][4], "msg_42")
+
+    def test_en_taille_s_la_consigne_du_critic_dit_qu_il_n_y_a_pas_de_plan(self):
+        self.small()
+        self.to_the_critic()
+        assignment = self.journal("handoff")[-1]["text"]
+        self.assertIn("Size S: the issue has no plan", assignment)
+        self.assertIn("its criteria, its analogue", assignment)
+        self.assertIn("rules and its ADR", assignment)
+        self.assertIn("does not apply", assignment)
+        self.assertNotIn("against the plan", assignment)
+        self.assertIn("Ballet already ran the proof (`pnpm proof`)", assignment)
+
+    def test_en_taille_s_la_preuve_et_la_taille_du_diff_restent_celles_de_toujours(self):
+        self.small()
+        self.to_the_critic()
+        self.assertEqual(len(self.world.proofs), 1)
+        self.assertEqual((self.state()["size"]["counted"], self.state()["size"]["over"]), (12, False))
+
+    def test_en_taille_m_rien_ne_change_et_le_critic_juge_contre_le_plan(self):
+        self.world.fields = {"3": {"size": "M"}}
+        self.to_the_critic()
+        self.assertEqual(self.state()["ticket_size"], "M")
+        assignment = self.journal("handoff")[0]["text"]
+        self.assertIn("Execute your repo's section of the plan", assignment)
+        critic = self.journal("handoff")[-1]["text"]
+        self.assertIn("the branch `rehearsal/FEAT-001.2` against the plan", critic)
+        self.assertNotIn("Size S", critic)
+
+    def test_sans_taille_l_issue_non_planifiee_va_toujours_au_choreographer(self):
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.begin()
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-001.2"])
+        self.assertEqual(ballet_store.load(self.home, "session", "#3")["size"], "M")
+
+    def test_sans_taille_un_bug_ou_une_tache_est_s_et_part_au_dancer(self):
+        for issue_type in ("Bug", "Task"):
+            with self.subTest(issue_type=issue_type):
+                self.setUp()
+                self.world.issue_body = UNPLANNED_ISSUE
+                self.world.fields = {"3": {"type": issue_type}}
+                self.begin()
+                self.assertEqual(self.world.started_roles(), ["Dancer · FEAT-001.2"])
+                self.assertEqual(ballet_store.load(self.home, "session", "#3")["size"], "S")
+
+    def test_un_bug_marque_m_garde_son_plan(self):
+        self.world.issue_body = UNPLANNED_ISSUE
+        self.world.fields = {"3": {"type": "Bug", "size": "M"}}
+        self.begin()
+        self.assertEqual(self.world.started_roles(), ["Choreographer · FEAT-001.2"])
+
+    def test_une_taille_inconnue_est_refusee_avant_toute_ouverture(self):
+        self.world.fields = {"3": {"size": "L"}}
+        with self.assertRaisesRegex(ballet_rehearsal.RehearsalError, "unknown Size 'L'; known: S, M"):
+            self.begin()
+        self.assertEqual(self.world.started_roles(), [])
+
     # --- le journal de ce que le Conductor remet aux workers ---
 
     def handoffs(self):
@@ -332,7 +433,7 @@ class BalletRehearsalTest(unittest.TestCase):
         self.begin()
         events = [entry["event"] for entry in ballet_store.journal(self.home, "rehearsal")]
         self.assertEqual(events[:2], ["begin", "handoff"])
-        self.assertEqual(self.journal("begin"), [{"item": "#3", "plan": "review", "mode": "assisted", "session": "#3"}])
+        self.assertEqual(self.journal("begin"), [{"item": "#3", "plan": "review", "mode": "assisted", "size": "M", "session": "#3"}])
         start = self.journal("handoff")[0]
         self.assertEqual((start["role"], start["how"], start["dispatch"], start["agent"], start["model"]),
                          ("dancer", "start", "ctx_1", "claude", "sonnet"))
@@ -2389,12 +2490,12 @@ class SessionTest(unittest.TestCase):
     def test_sans_id_les_commandes_visent_la_seule_session_ouverte(self):
         self.run_main("begin", "#3")
         lines = self.run_main("status")[1]
-        self.assertIn("- session of #3 (mode assisted): playing FEAT-001.2; next: nothing", lines)
+        self.assertIn("- session of #3 (mode assisted, size M): playing FEAT-001.2; next: nothing", lines)
         self.assertIn("- played: FEAT-001.2 (#3)", lines)
         self.run_main("begin", "#4")
         self.assertEqual(self.run_main("status")[0], 2)
         self.assertEqual(self.run_main("resume")[0], 2)
-        self.assertIn("- session of #4 (mode assisted): playing FEAT-001.3; next: nothing", self.run_main("status", "#4")[1])
+        self.assertIn("- session of #4 (mode assisted, size M): playing FEAT-001.3; next: nothing", self.run_main("status", "#4")[1])
 
     def test_sans_session_ouverte_status_le_dit(self):
         self.assertEqual(self.run_main("status")[1][-1], "NEXT: done no session is open")
@@ -2551,7 +2652,7 @@ class PlanningTest(unittest.TestCase):
     def test_le_debut_de_session_dit_d_ou_vient_l_approbation_du_plan(self):
         self.in_review()
         lines = self.run_main("begin", "#13")[1]
-        self.assertIn("- session of #13: mode assisted, plan approval required (issue)", lines)
+        self.assertIn("- session of #13: mode assisted, size M, plan approval required (issue)", lines)
 
     def test_le_champ_de_l_issue_l_emporte_sur_le_profil(self):
         self.profile(PROFILE)

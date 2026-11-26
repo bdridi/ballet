@@ -21,7 +21,7 @@ You are the **Dancer**: the developer of one repo. You execute the plan of an is
 ## 1. Read
 
 - `.ballet/config.toml`: your repo (`[repos.<name>]`, its `path` and `proof`) and the common rules (`[project] rules`). Load each rule (skills `ballet:<rule>`); `ballet:tdd` always.
-- The issue (`read <issue>`): its context, its out of scope, its *Decisions*, and **your repo's section**. No issue or no section for your repo: stop and say so.
+- The issue (`read <issue>`): its context, its out of scope, its *Decisions*, and **your repo's section**. No issue or no section for your repo: stop and say so. Your assignment says `Size S`: there is no plan on purpose, read *Without a plan (Size S)* instead.
 - The feature it cites (`features/FEAT-NNN-*.md`): the scenarios of the criteria your tasks cover. `glossary.md`.
 - The project's `AGENTS.md` (its rules win over a common rule), the ADRs the *Decisions* cite, and the code around the tasks.
 
@@ -91,3 +91,13 @@ A point you did not fix is not listed. A note you decline (out of the plan's sco
 ## When the Critic approves with notes
 
 Nothing comes back to you: the script merges, and the notes go to the project's technical debt issue, played later in a Rehearsal of its own. Only a red mutation brings an approved branch back to you, with its survivors.
+
+## Without a plan (Size S)
+
+Your assignment says **Size S**: the issue has no plan, and nobody plans it. The Choreographer was not asked to: the decisions are already written (ADRs, rules of `AGENTS.md`) and a shipped feature, the **analogue**, shows the path. You write your own tasks, then play them as in section 2.
+
+1. **Read** (section 1), but from the issue: its context, its criteria, its out of scope, and the line `Analogue: FEAT-NNN` if it has one. Read the analogue (its issue, its feature, its code and tests, the commits that shipped it): it is your model for layers, names and tests. No `Analogue:` line: find the closest shipped feature yourself and say which one in your report; if there is none, that is a question (step 4).
+2. **Write your tasks** before any code, in the same form as a plan's (`- [ ] [Cn] <task>`), in a scratch list of your own: they are not published on the issue, they appear in your report. First the scenarios of every criterion, in red (`.feature` files tagged `@FEAT-NNN-Cn`); then **one task per criterion**, in the order and the shape of the analogue's tasks. A chore with no behaviour is a task too (`Red: none — <why>`).
+3. **The rest is unchanged**: same TDD (red, green, refactor, one commit per task), same `Red:` line under each done task (the script refuses the report without it), same proof, same report, the forbidden zones as ever. The Critic reads your tasks in the report and judges the diff against the issue's criteria, the analogue, the rules and the ADRs.
+4. **A question** goes to the Choreographer, as in section 3: it answers from the issue and the analogue, and writes no plan. A decision no ADR or rule settles, a new aggregate, port, table, migration or glossary word is not `S`: ask, never improvise; the Director decides through the Conductor. You never change the size yourself.
+5. **A bug or a task** is `S` by default, with no analogue to follow: a bug's model is the criterion the product breaks (its issue names it); your first task is the red test that reproduces the bug at the lowest level that sees it, then the fix. A task (debt, tooling) follows the rules and the code around it; its first task is the red test of its one behaviour, or `none — <why>` for a chore.

@@ -34,6 +34,12 @@ par défaut) ; une feature sans issue suit le profil, l'`autopilot` n'attend jam
 points fixes, seulement quand il change : `in-rehearsal` tant que la session joue, `plan-review` tant que le plan est en
 review, `escalated` à une escalade, `done` à la dernière Premiere.
 
+La taille est le champ `Size` de l'issue (`S` ou `M` ; vide : `S` pour un bug ou une tâche, `M` pour une feature). En `M`, rien ne change. En `S`, il n'y a pas de plan :
+le premier rôle lancé est le Dancer, sur l'issue elle-même (contexte, critères, ligne `Analogue: FEAT-NNN`), qui écrit ses
+tâches lui-même ; ses questions vont au Choreographer comme d'habitude (lancé à la demande, il répond sans plan) ; le
+Critic juge le diff contre les critères, l'analogue, les règles du projet et ses ADR ; aucune approbation de plan n'est
+attendue, même en `assisted`. Politique, preuve, mutation, taille du diff, Critic et Premiere sont les mêmes.
+
 Une feature ouvre une Rehearsal de planification : le Choreographer seul, en mode auto, crée l'issue et ses slices. À
 son rapport, le script lit l'issue et ses slices sur GitHub (`Part of #N` en première ligne) et les met en tête de la
 session ; la première se joue dans le worktree de la planification (sa branche est renommée), avec les ADR du
@@ -153,6 +159,9 @@ QUEUED_TYPES = ("Feature", "Bug", "Task")   # ce qu'une session joue ; une `Slic
 SLICE_TYPE = "Slice"
 DEFAULT_MODE = "assisted"
 AUTOPILOT = "autopilot"
+SIZE_S, SIZE_M = "S", "M"
+TICKET_SIZES = (SIZE_S, SIZE_M)                      # le champ Size de l'issue ; vide, la taille de son type
+SIZE_BY_TYPE = {"Bug": SIZE_S, "Task": SIZE_S}       # sans champ Size : un bug ou une tâche est `S`, le reste `M`
 REHEARSAL_MODES = (DEFAULT_MODE, AUTOPILOT)          # le champ Rehearsal mode de l'issue ; vide, `assisted`
 PLAN_APPROVALS = {"required": True, "skipped": False}    # le champ Plan approval de l'issue ; vide, le profil
 PLAN_REVIEW_MESSAGES = ("question", "revise", "approve")  # ce que le Director écrit au Choreographer sur un plan en review
@@ -234,6 +243,7 @@ class Rehearsal:
     queued: list = field(default_factory=list)       # les slices du plan mises en tête de la session
     planned_by: str = ""                             # la Rehearsal de planification dont elle a pris le worktree
     session: str = ""                                # l'élément de sa session : `#12` ou `FEAT-002`
+    ticket_size: str = SIZE_M                        # le champ Size de l'issue : en `S`, pas de plan (`size` est la mesure du diff)
     base: str = ""                                   # le `HEAD` du worktree à son ouverture : le point de départ de la branche
     dancer_start: str = ""                           # le `HEAD` que le Dancer a reçu à sa première mission : ce qu'il a fait en part
     proven: str = ""                                 # le `HEAD` de la dernière preuve verte
@@ -253,6 +263,7 @@ class Session:
     à la fois, jusqu'à sa dernière Premiere."""
     item: str                                       # `#12`, ou `FEAT-002` tant que la feature n'a pas d'issue
     mode: str = DEFAULT_MODE                        # le champ Rehearsal mode de l'issue
+    size: str = SIZE_M                              # le champ Size de l'issue
     issue: str = ""                                 # l'issue de l'élément ; celle d'une feature se connaît à son plan
     current: str = ""                               # la Rehearsal en cours
     items: list = field(default_factory=list)       # à jouer : l'élément, puis ses slices dans l'ordre du plan
@@ -330,13 +341,13 @@ def _begin(item, session, home, tools):
     """Ouvre la Rehearsal d'un élément de la session : une issue (le Dancer si son plan a ses tâches, le Choreographer
     sinon), ou une feature prête (la planification : le Choreographer seul)."""
     config = _checked_config(home)
-    rehearsal, first_role = _rehearsal_of(item, config, home, tools)
-    rehearsal.plan, rehearsal.session = session.plan, session.item
+    rehearsal, first_role = _rehearsal_of(item, session, config, home, tools)
+    rehearsal.plan, rehearsal.session, rehearsal.ticket_size = session.plan, session.item, session.size
     _refuse_if_already_open(rehearsal, home)
     step = Step("wait")
     rehearsal.worktree = _open_worktree(rehearsal, tools)
     step.done.append(f"worktree {rehearsal.worktree} on {rehearsal.branch}, from origin/main")
-    _log(home, rehearsal, "begin", {"item": _item_of(rehearsal), "plan": rehearsal.plan, "mode": session.mode, "session": session.item})
+    _log(home, rehearsal, "begin", {"item": _item_of(rehearsal), "plan": rehearsal.plan, "mode": session.mode, "size": session.size, "session": session.item})
     git = tools.git(rehearsal.worktree)
     rehearsal.checkpoint, rehearsal.refs = ballet_policy.head(git), ballet_policy.refs(git)
     rehearsal.base = rehearsal.checkpoint
@@ -538,15 +549,15 @@ def _escalate_current(session, reason, home):
 
 
 def _new_session(item, config, tools):
-    """La session d'un élément : son mode, l'approbation de son plan et son statut, lus sur son issue ; une feature
-    sans issue part en `assisted`, et suit le profil pour son plan."""
+    """La session d'un élément : son mode, sa taille, l'approbation de son plan et son statut, lus sur son issue ; une
+    feature sans issue part en `assisted` et en `M`, et suit le profil pour son plan."""
     if FEATURE_ITEM.match(item):
         return _with_plan_approval(Session(item=item, items=[item]), "", config)
     fields = ballet_github.queue_fields(item, run=tools.gh)
     if fields["type"] not in QUEUED_TYPES:
         raise RehearsalError(_not_a_session_item(item, fields["type"]))
     mode, approval = _mode_and_approval(item, fields)
-    session = Session(item=item, mode=mode, issue=item[1:], items=[item], ballet_status=fields["status"])
+    session = Session(item=item, mode=mode, size=_size_of(item, fields), issue=item[1:], items=[item], ballet_status=fields["status"])
     return _with_plan_approval(session, approval, config)
 
 
@@ -560,10 +571,21 @@ def _mode_and_approval(item, fields):
     return mode, approval
 
 
+def _size_of(item, fields):
+    """Le champ `Size` de l'issue parmi ses valeurs connues ; vide, la taille de son type (`S` pour un bug ou une tâche,
+    `M` pour une feature ou une slice)."""
+    size = fields["size"] or SIZE_BY_TYPE.get(fields["type"], SIZE_M)
+    if size not in TICKET_SIZES:
+        raise RehearsalError(f"{item}: unknown Size '{size}'; known: {', '.join(TICKET_SIZES)}")
+    return size
+
+
 def _with_plan_approval(session, approval, config):
-    """L'issue d'abord, puis le profil ; en autopilot, personne n'approuve."""
+    """L'issue d'abord, puis le profil ; en autopilot, personne n'approuve ; en `S`, il n'y a pas de plan à approuver."""
     if session.mode == AUTOPILOT:
         session.plan_approval, session.plan_approval_from = False, AUTOPILOT
+    elif session.size == SIZE_S:
+        session.plan_approval, session.plan_approval_from = False, "size S: no plan"
     elif approval:
         session.plan_approval, session.plan_approval_from = PLAN_APPROVALS[approval], "issue"
     else:
@@ -573,7 +595,7 @@ def _with_plan_approval(session, approval, config):
 
 def _plan_approval_line(session):
     choice = "required" if session.plan_approval else "skipped"
-    return f"session of {session.item}: mode {session.mode}, plan approval {choice} ({session.plan_approval_from})"
+    return f"session of {session.item}: mode {session.mode}, size {session.size}, plan approval {choice} ({session.plan_approval_from})"
 
 
 def _not_a_session_item(item, issue_type):
@@ -698,7 +720,7 @@ def _session_lines(session, current):
     if not session:
         return []
     playing = f"playing {current}; " if current else ""
-    lines = [f"session of {session.item} (mode {session.mode}): {playing}next: {', '.join(session.items) or 'nothing'}"]
+    lines = [f"session of {session.item} (mode {session.mode}, size {session.size}): {playing}next: {', '.join(session.items) or 'nothing'}"]
     if session.played:
         lines.append("played: " + ", ".join(f"{entry['rehearsal']} ({entry['item']})" for entry in session.played))
     return lines
@@ -802,11 +824,20 @@ def _relay_question(rehearsal, header, text, question_id, config, home, tools):
     rehearsal.pending.append({"id": question_id, "from": header["from"], "to": to})
     if to == "director":
         return Step("escalate", _for_the_director(header), step.done)
-    _ask_role(rehearsal, header["to"], f"Rehearsal {rehearsal.id}, {_target(rehearsal)}, branch `{rehearsal.branch}`. "
-              f"Answer this question from the {header['from']}, then return your answer "
-              f"as a Ballet message (`type: answer`, to the {header['from']}):\n\n{text}", config, home, tools)
+    _ask_role(rehearsal, header["to"], _question_assignment(rehearsal, header, text), config, home, tools)
     step.done.append(f"question carried to the {header['to']}")
     return step
+
+
+def _question_assignment(rehearsal, header, text):
+    """La question remise au rôle qui doit répondre ; en `S`, le Choreographer répond sans plan, et n'en écrit pas."""
+    without_plan = ""
+    if rehearsal.ticket_size == SIZE_S and header["to"] == "choreographer":
+        without_plan = (f" Size S: issue #{rehearsal.issue} has no plan. Answer from the issue and its analogue "
+                        "(`Analogue: FEAT-NNN`), and write no plan.")
+    return (f"Rehearsal {rehearsal.id}, {_target(rehearsal)}, branch `{rehearsal.branch}`.{without_plan} "
+            f"Answer this question from the {header['from']}, then return your answer "
+            f"as a Ballet message (`type: answer`, to the {header['from']}):\n\n{text}")
 
 
 def _for_the_director(header):
@@ -1777,6 +1808,8 @@ Under the Conductor:
 
 
 def _first_assignment(role, rehearsal, config):
+    if role == "dancer" and rehearsal.ticket_size == SIZE_S:
+        return _dancer_without_plan(rehearsal)
     if role == "dancer":
         return f"Execute your repo's section of the plan of issue #{rehearsal.issue}, task by task."
     if rehearsal.feature:
@@ -1786,6 +1819,15 @@ def _first_assignment(role, rehearsal, config):
         publish = (f"Issue #{rehearsal.issue} has no plan yet: write it (`plan {rehearsal.issue}`), or cut it into slices "
                    f"(`slice {rehearsal.issue}`).")
     return f"{publish}\n\n{_auto_mode(rehearsal, config)}"
+
+
+def _dancer_without_plan(rehearsal):
+    """La consigne du Dancer en `S` : l'issue tient lieu de plan, il écrit ses tâches et les joue en TDD."""
+    return (f"Size S: issue #{rehearsal.issue} has no plan and the Choreographer plans nothing. Read the issue (`read "
+            f"{rehearsal.issue}`): its context, its criteria and its `Analogue: FEAT-NNN` line, if it has one. Write your own "
+            "tasks first (section *Without a plan (Size S)* of your skill): the scenarios in red first, then one task per "
+            "criterion, shaped like the analogue's. Same TDD as ever: each done task has its `Red:` line, and your report is "
+            "the usual one. A question goes to the Choreographer, who answers from the issue and the analogue.")
 
 
 def _auto_mode(rehearsal, config):
@@ -1811,7 +1853,7 @@ def _review_round(rehearsal):
 
 def _critic_assignment(rehearsal, config, tools):
     return (f"Review pull request #{rehearsal.pull_request} of issue #{rehearsal.issue}, round {_review_round(rehearsal)}: "
-            f"the branch `{rehearsal.branch}` against the plan. Ballet already ran the proof (`{_proof_command(config)}`) "
+            f"the branch `{rehearsal.branch}` {_review_against(rehearsal)}. Ballet already ran the proof (`{_proof_command(config)}`) "
             f"on {rehearsal.proven[:7] or 'HEAD'}, green; the mutation test, when the profile has one, runs alongside your "
             "review and Ballet weighs it with your verdict: run neither."
             f"{_changed_tests_part(rehearsal, config, tools)}")
@@ -1825,6 +1867,13 @@ def _changed_tests_part(rehearsal, config, tools):
     listed = "\n".join(f"- {test}" for test in removed)
     return ("\n\nTests the diff removes or renames (the Dancer may change a test; judge each one: legitimate when a refactoring "
             f"or the plan made its rule obsolete, blocking when the behaviour it pinned is lost):\n\n{listed}")
+
+
+def _review_against(rehearsal):
+    if rehearsal.ticket_size == SIZE_S:
+        return ("against the issue. Size S: the issue has no plan; judge the diff against its criteria, its analogue (`Analogue: "
+                "FEAT-NNN`), the project's rules and its ADR. The task-by-task check of the plan does not apply")
+    return "against the plan"
 
 
 def _red_fix_assignment(without_red):
@@ -2092,14 +2141,15 @@ def _single_repo(config, home):
     return (Path(home) / next(iter(repos.values()))["path"]).resolve()
 
 
-def _rehearsal_of(item, config, home, tools):
-    """La Rehearsal d'un élément et son premier rôle."""
+def _rehearsal_of(item, session, config, home, tools):
+    """La Rehearsal d'un élément et son premier rôle : le Dancer si le plan a ses tâches, ou si la taille est `S` (pas de
+    plan) ; le Choreographer sinon."""
     repo = str(_single_repo(config, home))
     if FEATURE_ITEM.match(item):
         return Rehearsal(id=item, issue="", repo=repo, feature=item), "choreographer"
     title, body = _issue(item, tools)
     rehearsal = Rehearsal(id=_rehearsal_id(title), issue=ballet_github._issue_number(item), repo=repo)
-    return rehearsal, "dancer" if _has_tasks(body) else "choreographer"
+    return rehearsal, "dancer" if session.size == SIZE_S or _has_tasks(body) else "choreographer"
 
 
 def _item_of(rehearsal):

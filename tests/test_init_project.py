@@ -1,8 +1,10 @@
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -99,6 +101,24 @@ class InitProjectGitHubTest(unittest.TestCase):
     def test_prepare_les_types_et_les_champs_du_repo(self):
         self.assertEqual(self.main(), 0)
         self.assertEqual(self.calls, [str(self.project)])
+
+    def test_cree_le_champ_size_avec_ses_options_s_et_m(self):
+        """Le vrai `prepare` de la planification, devant un propriétaire vierge : le champ `Size` est créé."""
+        mutations = []
+
+        def github(arguments):
+            query = next(argument for argument in arguments if argument.startswith("query="))
+            if query.startswith("query=query"):
+                return json.dumps({"data": {"repositoryOwner": {"__typename": "User", "id": "U", "login": "bdridi",
+                                                                "issueTypes": {"nodes": []}, "issueFields": {"nodes": []}}}})
+            mutations.append(query)
+            return '{"data": {}}'
+
+        with mock.patch.object(ballet_planning, "_gh_in", lambda project_dir: github):
+            self.assertEqual(self.main(prepare=ballet_planning.prepare), 0)
+        size = next(mutation for mutation in mutations if '"Size"' in mutation)
+        self.assertIn('"S"', size)
+        self.assertIn('"M"', size)
 
     def test_sans_github_rien_n_est_demande_a_github(self):
         self.assertEqual(self.main("--no-github"), 0)
