@@ -29,10 +29,43 @@ A ticket played from plan to merge is a **Rehearsal**. Its merge on `main` is th
 
 ## A ticket's life
 
-```
- Workshop ───► ready issue ───► Rehearsal ──────────────────────────────► Premiere
- you + Dramaturg                plan ──► code ──► review                  merge on main
-                                Choreographer  Dancer ◄─► Critic
+Two loops, joined by the GitHub queue. The **Workshop** decides *what* to build; the **Rehearsal** decides *how*, and ships it.
+
+```mermaid
+flowchart TB
+    need(["A need, a bug, or: what's next?"])
+
+    subgraph W["① Workshop · what and why"]
+        direction LR
+        Dr["Dramaturg<br/>frames it with you"]
+        Ch1["Choreographer<br/>technical opinion, size"]
+        Dr <-->|asks| Ch1
+    end
+
+    subgraph Q["Junction · GitHub queue"]
+        direction LR
+        prop[/"issue proposed<br/>autopilot Workshop"/]
+        ready[/"issue ready"/]
+        prop -->|your yes| ready
+    end
+
+    subgraph R["② Rehearsal · how"]
+        direction LR
+        Ch2["Choreographer<br/>plans on the real main"]
+        Da["Dancer<br/>codes, test first"]
+        sc{{"scripts<br/>lane check, tests"}}
+        Cr["Critic<br/>reviews"]
+        Ch2 --> Da --> sc --> Cr
+        Cr -->|rejected| Da
+    end
+
+    pr(["Premiere: merged on main"])
+
+    need --> W
+    W -->|publishes| Q
+    Q -->|"Monitor sees it, Maestro starts a Conductor"| R
+    Cr -->|"approved, CI green"| pr
+    pr -.->|next slice| Ch2
 ```
 
 1. **Frame.** You talk with the Dramaturg about a need, a bug or "what's next?". It asks the Choreographer for a technical opinion early, because a technical constraint can change the product choice. Out comes a GitHub issue, ready to be played. No plan yet.
@@ -56,6 +89,22 @@ Every question, plan, answer and verdict is published on the issue or the pull r
 ## Watching over it
 
 You do not babysit terminals. Three pieces run across all your projects:
+
+```mermaid
+flowchart LR
+    you(("You,<br/>the Director"))
+    mae["Maestro<br/>your one conversation"]
+    c1["Conductor<br/>ticket 12"]
+    c2["Conductor<br/>ticket 15"]
+    mon["Monitor<br/>script, no AI"]
+    gh[("GitHub<br/>queue")]
+
+    you <-->|"what needs you,<br/>your answer"| mae
+    mae <-->|"starts, relays /<br/>escalates, finishes"| c1
+    mae <--> c2
+    gh -->|watched| mon
+    mon -->|"facts: ready, gone,<br/>idle, limits"| mae
+```
 
 - **Maestro**, a session you can reach from your phone, wakes when something needs you, tells you why and what to decide, and carries your answer back.
 - **The Monitor**, a script with no AI, watches GitHub, the Conductors and Claude's usage limits, and only reports facts.
