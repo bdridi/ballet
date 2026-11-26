@@ -4,6 +4,8 @@
 
 Ballet is a plugin for Claude Code, Grok and Mistral Vibe. Install it once, and every project gets the same method.
 
+<p align="center"><img src="docs/images/ballet-flow.svg" alt="Ballet: a need is framed in the Workshop, published as a GitHub issue, then played in a Rehearsal (plan, code, scripts, review) up to the Premiere, the merge on main" width="720"></p>
+
 > **Status:** under construction, used on real projects. Current version in [`plugin.json`](.claude-plugin/plugin.json); what is shipped in [`release.md`](release.md), what comes next in [`opportunities.md`](opportunities.md).
 
 ## Why
